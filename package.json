@@ -1,0 +1,15 @@
+{
+  "name": "daily-news-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare-data": "node scripts/prepare-data.js",
+    "build": "node scripts/prepare-data.js && node scripts/build.js",
+    "start": "node scripts/prepare-data.js && node scripts/serve.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

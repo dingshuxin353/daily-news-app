@@ -1,0 +1,51 @@
+{
+  "date": "2026-08-19",
+  "generatedAt": "2026-08-19T08:00:00+08:00",
+  "items": [
+    {
+      "id": "scheduled-agent-workflow",
+      "title": "定时 Agent 正在把日常信息收集变成可复用流程",
+      "summary": "一批面向个人创作者的 Agent 工具开始支持按固定时间读取指定来源、整理关键信息并写入结构化文件。演示数据假设，这种工作方式正在把零散的信息浏览变成稳定的内容生产入口。",
+      "category": "Agent Workflow",
+      "image": "/mock-images/agent-workflow.svg",
+      "source": {
+        "name": "Demo Source · AI Lab",
+        "url": "https://example.com/#scheduled-agent-workflow",
+        "publishedAt": "2026-08-19T07:20:00+08:00"
+      }
+    },
+    {
+      "id": "programmable-visual-daily",
+      "title": "HTML 日报正在变成个人创作者的可编程视觉画布",
+      "summary": "与传统的信息列表相比，固定数据结构加上可定制的视觉层，可以同时生成网页、截图和录屏素材。内容只写一次，呈现方式则由同一套前端持续复用。",
+      "category": "Creative Tech",
+      "image": "/mock-images/visual-daily.svg",
+      "source": {
+        "name": "Demo Source · Creator Weekly",
+        "url": "https://example.com/#programmable-visual-daily",
+        "publishedAt": "2026-08-19T06:45:00+08:00"
+      }
+    },
+    {
+      "id": "local-audio-model",
+      "title": "本地语音模型把一小时录音的初步转写压缩到几分钟",
+      "summary": "这是一条专门用于测试无图片布局的虚构新闻。页面需要在没有配图时继续保持视觉重心，并使用站点强调色生成抽象占位，而不是留下空白或破坏双栏结构。",
+      "source": {
+        "name": "Demo Source · Local AI Notes",
+        "url": "https://example.com/#local-audio-model",
+        "publishedAt": "2026-08-19T05:30:00+08:00"
+      }
+    },
+    {
+      "id": "source-first-knowledge",
+      "title": "Source-first 知识库：每一条结论都应该能够返回原始出处",
+      "summary": "个人知识系统正在从只保存摘要转向同时保存来源、时间和原始链接。对于日报工具而言，这意味着页面上的每一条内容都必须保留可追溯入口，而不是只展示经过 AI 改写的结论。",
+      "category": "Knowledge",
+      "image": "/mock-images/knowledge-map.svg",
+      "source": {
+        "name": "Demo Source · Knowledge Review",
+        "url": "https://example.com/#source-first-knowledge"
+      }
+    }
+  ]
+}

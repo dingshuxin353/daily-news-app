@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>DailyNews</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <nav class="floating-nav" aria-label="日报日期导航">
+      <a class="brand" href="/" aria-label="返回最新一期">
+        <img class="brand__logo" alt="" hidden>
+        <span class="brand__name">DailyNews</span>
+      </a>
+      <div class="date-nav">
+        <button class="date-nav__button" data-direction="previous" type="button" aria-label="查看上一天">
+          <span aria-hidden="true">←</span>
+          <span class="date-nav__label">上一天</span>
+        </button>
+        <time class="date-nav__current" aria-live="polite">—</time>
+        <button class="date-nav__button" data-direction="next" type="button" aria-label="查看下一天">
+          <span class="date-nav__label">下一天</span>
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </nav>
+
+    <main id="content" tabindex="-1">
+      <p class="status" role="status">正在加载日报…</p>
+    </main>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

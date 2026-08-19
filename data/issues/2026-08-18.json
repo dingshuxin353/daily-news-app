@@ -1,0 +1,51 @@
+{
+  "date": "2026-08-18",
+  "generatedAt": "2026-08-18T08:00:00+08:00",
+  "items": [
+    {
+      "id": "static-data-dynamic-view",
+      "title": "静态数据加动态呈现，正在成为独立开发者的新型内容栈",
+      "summary": "演示内容假设，越来越多个人项目不再从数据库和后台开始，而是由 Agent 写入结构化文件，再由固定前端完成读取、动画和发布。这种方式降低了维护成本，也保留了清晰的数据边界。",
+      "category": "Web",
+      "image": "/mock-images/data-flow.svg",
+      "source": {
+        "name": "Demo Source · Indie Stack",
+        "url": "https://example.com/#static-data-dynamic-view",
+        "publishedAt": "2026-08-18T07:10:00+08:00"
+      }
+    },
+    {
+      "id": "video-template-consumes-data",
+      "title": "视频模板开始直接消费网页数据，而不是让创作者重复复制脚本",
+      "summary": "同一份标题、摘要、图片和来源信息，可以先用于网页展示，再被录屏或视频模板读取。演示条目用于验证页面能否天然形成一段一段的镜头结构。",
+      "category": "Video",
+      "image": "/mock-images/video-template.svg",
+      "source": {
+        "name": "Demo Source · Motion Brief",
+        "url": "https://example.com/#video-template-consumes-data",
+        "publishedAt": "2026-08-18T06:20:00+08:00"
+      }
+    },
+    {
+      "id": "native-browser-motion",
+      "title": "浏览器原生动画已经足以支撑大多数 MVP 叙事页面",
+      "summary": "这是第二条无图片测试数据。IntersectionObserver、CSS transition 和 transform 可以完成进入、淡入和轻微缩放，不必在 Demo 阶段引入复杂时间线或 3D 渲染。",
+      "category": "Frontend",
+      "source": {
+        "name": "Demo Source · Browser Notes",
+        "url": "https://example.com/#native-browser-motion"
+      }
+    },
+    {
+      "id": "personalized-daily-without-algorithm",
+      "title": "Personalized Daily 不一定从推荐算法开始，可以先从信息源和一个强调色开始",
+      "summary": "个性化的第一步不是建立复杂画像，而是让用户决定 Agent 阅读哪些内容，以及最终页面使用什么站点名称和强调色。该演示条目包含中英文混排和较长标题，用于检查移动端换行。",
+      "image": "/mock-images/agent-workflow.svg",
+      "source": {
+        "name": "Demo Source · Product Memo",
+        "url": "https://example.com/#personalized-daily-without-algorithm",
+        "publishedAt": "2026-08-18T04:40:00+08:00"
+      }
+    }
+  ]
+}
