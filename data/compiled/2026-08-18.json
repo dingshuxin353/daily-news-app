@@ -6,36 +6,36 @@
       "id": "static-data-dynamic-view",
       "title": "静态数据加动态呈现，正在成为独立开发者的新型内容栈",
       "summary": "越来越多个人项目不再从数据库和后台开始，而是由 Agent 写入结构化文件，再由固定前端完成读取、动画和发布。",
-      "category": "Web",
       "priority": "normal",
       "source": {
         "name": "Demo Source · Indie Stack",
         "url": "https://example.com/#static-data-dynamic-view",
         "publishedAt": "2026-08-18T07:10:00+08:00"
-      }
+      },
+      "category": "Web"
     },
     {
       "id": "video-template-consumes-data",
       "title": "视频模板开始直接消费网页数据",
       "summary": "同一份标题、摘要和来源信息可以先用于网页，再被录屏或视频模板读取。",
-      "category": "Video",
       "priority": "normal",
       "source": {
         "name": "Demo Source · Motion Brief",
         "url": "https://example.com/#video-template-consumes-data",
         "publishedAt": "2026-08-18T06:20:00+08:00"
-      }
+      },
+      "category": "Video"
     },
     {
       "id": "native-browser-motion",
       "title": "原生动画足以支撑多数 MVP 页面",
       "summary": "IntersectionObserver 和 CSS transition 可以完成克制的进入动效。",
-      "category": "Frontend",
       "priority": "normal",
       "source": {
         "name": "Demo Source · Browser Notes",
         "url": "https://example.com/#native-browser-motion"
-      }
+      },
+      "category": "Frontend"
     },
     {
       "id": "personalized-daily-without-algorithm",
@@ -52,13 +52,52 @@
       "id": "source-shaped-products",
       "title": "信息源正在塑造新一代个人产品",
       "summary": "稳定的来源清单往往比复杂算法更早形成产品差异。",
-      "category": "Product",
       "priority": "normal",
       "source": {
         "name": "Demo Source · Field Notes",
         "url": "https://example.com/#source-shaped-products",
         "publishedAt": "2026-08-18T03:50:00+08:00"
-      }
+      },
+      "category": "Product"
     }
-  ]
+  ],
+  "layout": {
+    "rows": [
+      {
+        "usedCapacity": 4,
+        "modules": [
+          {
+            "itemId": "static-data-dynamic-view",
+            "size": "small",
+            "span": 1
+          },
+          {
+            "itemId": "video-template-consumes-data",
+            "size": "small",
+            "span": 1
+          },
+          {
+            "itemId": "native-browser-motion",
+            "size": "small",
+            "span": 1
+          },
+          {
+            "itemId": "personalized-daily-without-algorithm",
+            "size": "small",
+            "span": 1
+          }
+        ]
+      },
+      {
+        "usedCapacity": 1,
+        "modules": [
+          {
+            "itemId": "source-shaped-products",
+            "size": "small",
+            "span": 1
+          }
+        ]
+      }
+    ]
+  }
 }

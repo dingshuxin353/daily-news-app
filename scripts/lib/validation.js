@@ -4,6 +4,7 @@ import path from "node:path";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const ISO_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const PRIORITIES = new Set(["lead", "important", "normal"]);
 
 export class ValidationError extends Error {
   constructor(filePath, field, message) {
@@ -67,20 +68,6 @@ function requireAssetPath(value, filePath, field) {
   }
 }
 
-async function readJson(filePath) {
-  let source;
-  try {
-    source = await readFile(filePath, "utf8");
-  } catch (error) {
-    fail(filePath, "$", `无法读取（${error.code ?? error.message}）`);
-  }
-  try {
-    return JSON.parse(source);
-  } catch {
-    fail(filePath, "$", "不是合法 JSON");
-  }
-}
-
 async function requireLocalAsset(rootDir, value, filePath, field) {
   if (!value || value.startsWith("https://")) return;
   const publicRoot = path.resolve(rootDir, "public");
@@ -92,6 +79,20 @@ async function requireLocalAsset(rootDir, value, filePath, field) {
     if (!(await stat(assetPath)).isFile()) throw new Error();
   } catch {
     fail(filePath, field, `对应的本地文件不存在（${value}）`);
+  }
+}
+
+async function readJson(filePath) {
+  let source;
+  try {
+    source = await readFile(filePath, "utf8");
+  } catch (error) {
+    fail(filePath, "$", `无法读取（${error.code ?? error.message}）`);
+  }
+  try {
+    return JSON.parse(source);
+  } catch {
+    fail(filePath, "$", "不是合法 JSON");
   }
 }
 
@@ -110,7 +111,7 @@ export async function validateSite(rootDir) {
   return site;
 }
 
-export async function validateIssue(rootDir, filePath) {
+export async function validateIssue(filePath) {
   const fileName = path.basename(filePath);
   const expectedDate = fileName.replace(/\.json$/, "");
   if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(fileName) || !isValidDate(expectedDate)) {
@@ -130,15 +131,15 @@ export async function validateIssue(rootDir, filePath) {
     const field = `items[${index}]`;
     requireObject(item, filePath, field);
     requireString(item.id, filePath, `${field}.id`);
-    if (ids.has(item.id)) fail(filePath, `${field}.id`, "在同一期日报内不能重复");
+    if (ids.has(item.id)) fail(filePath, `${field}.id`, `内容 ${item.id} 在同一期日报内不能重复`);
     ids.add(item.id);
     requireString(item.title, filePath, `${field}.title`);
     requireString(item.summary, filePath, `${field}.summary`);
-    if (item.category !== undefined) requireString(item.category, filePath, `${field}.category`);
-    if (item.image !== undefined) {
-      requireAssetPath(item.image, filePath, `${field}.image`);
-      await requireLocalAsset(rootDir, item.image, filePath, `${field}.image`);
+    requireString(item.priority, filePath, `${field}.priority（内容 ${item.id}）`);
+    if (!PRIORITIES.has(item.priority)) {
+      fail(filePath, `${field}.priority（内容 ${item.id}）`, "只能是 lead、important 或 normal");
     }
+    if (item.category !== undefined) requireString(item.category, filePath, `${field}.category`);
     requireObject(item.source, filePath, `${field}.source`);
     requireString(item.source.name, filePath, `${field}.source.name`);
     requireHttpUrl(item.source.url, filePath, `${field}.source.url`);
@@ -149,7 +150,7 @@ export async function validateIssue(rootDir, filePath) {
   return issue;
 }
 
-export async function validateAll(rootDir) {
+export async function validateSources(rootDir) {
   await validateSite(rootDir);
   const issuesDir = path.join(rootDir, "data", "issues");
   let fileNames;
@@ -160,11 +161,19 @@ export async function validateAll(rootDir) {
   }
   if (fileNames.length === 0) fail(issuesDir, "$", "至少需要一份日报 JSON");
 
-  const dates = [];
+  const issues = [];
   for (const fileName of fileNames) {
-    const issue = await validateIssue(rootDir, path.join(issuesDir, fileName));
-    dates.push(issue.date);
+    const filePath = path.join(issuesDir, fileName);
+    issues.push({ issue: await validateIssue(filePath), filePath });
   }
-  dates.sort((a, b) => b.localeCompare(a));
-  return { latest: dates[0], dates };
+  issues.sort((a, b) => b.issue.date.localeCompare(a.issue.date));
+  const dates = issues.map(({ issue }) => issue.date);
+  return {
+    index: { latest: dates[0], dates },
+    issues,
+  };
+}
+
+export async function validateAll(rootDir) {
+  return (await validateSources(rootDir)).index;
 }

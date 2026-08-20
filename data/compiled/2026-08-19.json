@@ -6,60 +6,60 @@
       "id": "scheduled-agent-workflow",
       "title": "定时 Agent 正在把日常信息收集变成可复用流程",
       "summary": "一批面向个人创作者的 Agent 工具开始支持按固定时间读取指定来源、整理关键信息并写入结构化文件。这种工作方式正在把零散的信息浏览变成稳定的内容生产入口。",
-      "category": "Agent Workflow",
       "priority": "lead",
       "source": {
         "name": "Demo Source · AI Lab",
         "url": "https://example.com/#scheduled-agent-workflow",
         "publishedAt": "2026-08-19T07:20:00+08:00"
-      }
+      },
+      "category": "Agent Workflow"
     },
     {
       "id": "programmable-visual-daily",
       "title": "HTML 日报正在变成个人创作者的可编程视觉画布",
       "summary": "固定数据结构加上可复用的视觉层，可以让同一份内容同时服务网页、截图和录屏。",
-      "category": "Creative Tech",
       "priority": "important",
       "source": {
         "name": "Demo Source · Creator Weekly",
         "url": "https://example.com/#programmable-visual-daily",
         "publishedAt": "2026-08-19T06:45:00+08:00"
-      }
+      },
+      "category": "Creative Tech"
     },
     {
       "id": "local-audio-model",
       "title": "本地语音模型把一小时录音的初步转写压缩到几分钟",
       "summary": "本地模型正在缩短录音整理的第一阶段，让创作者更快进入校对、提炼和二次表达。",
-      "category": "Local AI",
       "priority": "important",
       "source": {
         "name": "Demo Source · Local AI Notes",
         "url": "https://example.com/#local-audio-model",
         "publishedAt": "2026-08-19T05:30:00+08:00"
-      }
+      },
+      "category": "Local AI"
     },
     {
       "id": "source-first-knowledge",
       "title": "Source-first 知识库让每一条结论返回原始出处",
       "summary": "个人知识系统正在从只保存摘要转向同时保存来源、时间和原始链接，让结论可以被复核。",
-      "category": "Knowledge",
       "priority": "important",
       "source": {
         "name": "Demo Source · Knowledge Review",
         "url": "https://example.com/#source-first-knowledge"
-      }
+      },
+      "category": "Knowledge"
     },
     {
       "id": "prompt-content-contract",
       "title": "提示词正在成为内容契约",
       "summary": "固定字段和语气要求让 Agent 输出更容易复用。",
-      "category": "Agent",
       "priority": "normal",
       "source": {
         "name": "Demo Source · Prompt Journal",
         "url": "https://example.com/#prompt-content-contract",
         "publishedAt": "2026-08-19T04:10:00+08:00"
-      }
+      },
+      "category": "Agent"
     },
     {
       "id": "static-publishing-loop",
@@ -71,5 +71,54 @@
         "url": "https://example.com/#static-publishing-loop"
       }
     }
-  ]
+  ],
+  "layout": {
+    "rows": [
+      {
+        "usedCapacity": 4,
+        "modules": [
+          {
+            "itemId": "scheduled-agent-workflow",
+            "size": "large",
+            "span": 4
+          }
+        ]
+      },
+      {
+        "usedCapacity": 4,
+        "modules": [
+          {
+            "itemId": "programmable-visual-daily",
+            "size": "medium",
+            "span": 2
+          },
+          {
+            "itemId": "local-audio-model",
+            "size": "medium",
+            "span": 2
+          }
+        ]
+      },
+      {
+        "usedCapacity": 4,
+        "modules": [
+          {
+            "itemId": "source-first-knowledge",
+            "size": "medium",
+            "span": 2
+          },
+          {
+            "itemId": "prompt-content-contract",
+            "size": "small",
+            "span": 1
+          },
+          {
+            "itemId": "static-publishing-loop",
+            "size": "small",
+            "span": 1
+          }
+        ]
+      }
+    ]
+  }
 }

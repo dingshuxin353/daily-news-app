@@ -1,7 +1,7 @@
 const paths = {
   site: "/config/site.json",
   index: "/data/index.json",
-  issue: (date) => `/data/issues/${date}.json`,
+  issue: (date) => `/data/compiled/${date}.json`,
 };
 
 export function selectDate(search, index) {
@@ -17,19 +17,9 @@ export function getAdjacentDates(date, dates) {
   };
 }
 
-export function partitionItems(items) {
-  return {
-    lead: items[0],
-    secondary: items.slice(1, 3),
-    remaining: items.slice(3),
-  };
-}
-
 async function fetchJson(path) {
   const response = await fetch(path, { cache: "no-cache" });
-  if (!response.ok) {
-    throw new Error(`Failed to load ${path}: ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
   return response.json();
 }
 
@@ -49,55 +39,20 @@ function formatPublishedAt(value) {
   }).format(new Date(value));
 }
 
-function createVisual(item, role) {
-  const visual = element("div", `story__visual story__visual--${role}`);
-  const placeholder = element("div", "story__placeholder");
-  placeholder.setAttribute("aria-hidden", "true");
-
-  if (!item.image) {
-    if (role !== "lead") return null;
-    visual.append(placeholder);
-    return visual;
-  }
-
-  const image = element("img", "story__image");
-  image.src = item.image;
-  image.alt = item.title;
-  image.loading = role === "lead" ? "eager" : "lazy";
-  image.decoding = "async";
-
-  if (role === "lead") {
-    placeholder.hidden = true;
-    visual.append(image, placeholder);
-  } else {
-    visual.append(image);
-  }
-
-  image.addEventListener("error", () => {
-    if (role === "lead") {
-      image.remove();
-      placeholder.hidden = false;
-    } else {
-      visual.remove();
-    }
-  }, { once: true });
-
-  return visual;
-}
-
-function createArticle(item, role) {
-  const article = element("article", `story story--${role}${role === "standard" ? " reveal" : ""}`);
+function createArticle(item, module, isFirst) {
+  const article = element("article", `story story--${module.size}`);
   article.id = item.id;
+  article.dataset.size = module.size;
+  article.dataset.span = String(module.span);
+  article.style.gridColumn = `span ${module.span}`;
 
   const heading = element("header", "story__header");
-  if (item.category) {
+  if (item.category && module.size !== "small") {
     heading.append(element("p", "story__category", item.category));
   }
-  heading.append(element(role === "lead" ? "h1" : "h2", "story__title", item.title));
+  heading.append(element(isFirst ? "h1" : "h2", "story__title", item.title));
 
-  const visual = createVisual(item, role);
   const summary = element("p", "story__summary", item.summary);
-
   const source = element("div", "story__source");
   const sourceDetails = element("div", "story__source-details");
   sourceDetails.append(element("span", "story__source-name", item.source.name));
@@ -112,39 +67,31 @@ function createArticle(item, role) {
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   source.append(sourceDetails, link);
-
-  article.append(heading);
-  if (visual) article.append(visual);
-  article.append(summary, source);
+  article.append(heading, summary, source);
   return article;
 }
 
 function renderIssue(issue) {
-  const { lead, secondary, remaining } = partitionItems(issue.items);
   const content = document.querySelector("#content");
+  const itemsById = new Map(issue.items.map((item) => [item.id, item]));
+  let articleIndex = 0;
+
+  const rows = issue.layout.rows.map((row, rowIndex) => {
+    const rowElement = element("section", `layout-row${rowIndex === 0 ? " layout-row--first" : " reveal"}`);
+    rowElement.dataset.usedCapacity = String(row.usedCapacity);
+    rowElement.setAttribute("aria-label", `版面第 ${rowIndex + 1} 行`);
+
+    for (const module of row.modules) {
+      const item = itemsById.get(module.itemId);
+      if (!item) throw new Error(`Compiled layout references missing item: ${module.itemId}`);
+      rowElement.append(createArticle(item, module, articleIndex === 0));
+      articleIndex += 1;
+    }
+    return rowElement;
+  });
+
   content.className = "news-page";
-
-  const leadLayout = element("section", "lead-layout");
-  leadLayout.setAttribute("aria-label", "主要新闻");
-  leadLayout.append(createArticle(lead, "lead"));
-
-  if (secondary.length > 0) {
-    const secondaryColumn = element("div", "secondary-column");
-    secondaryColumn.append(...secondary.map((item) => createArticle(item, "secondary")));
-    leadLayout.append(secondaryColumn);
-  } else {
-    leadLayout.classList.add("lead-layout--solo");
-  }
-
-  const sections = [leadLayout];
-  if (remaining.length > 0) {
-    const grid = element("section", "news-grid");
-    grid.setAttribute("aria-label", "更多新闻");
-    grid.append(...remaining.map((item) => createArticle(item, "standard")));
-    sections.push(grid);
-  }
-
-  content.replaceChildren(...sections);
+  content.replaceChildren(...rows);
   setupMotion();
 }
 
@@ -161,12 +108,12 @@ function setupSite(site) {
   document.title = site.name;
 
   const name = document.querySelector(".brand__name");
-  const logo = document.querySelector(".brand__logo");
   name.textContent = site.name;
   if (site.logo) {
+    const logo = element("img", "brand__logo");
     logo.src = site.logo;
     logo.alt = site.name;
-    logo.hidden = false;
+    name.before(logo);
     name.hidden = true;
   }
 }
@@ -206,9 +153,7 @@ function updateNavigation(date, dates) {
 
 async function loadIssue(date, dates, updateUrl = false) {
   updateNavigation(date, dates);
-  if (updateUrl) {
-    history.pushState({ date }, "", `/?date=${date}`);
-  }
+  if (updateUrl) history.pushState({ date }, "", `/?date=${date}`);
   window.scrollTo({ top: 0, behavior: "auto" });
   renderStatus("正在加载日报…");
 
@@ -234,9 +179,7 @@ async function start() {
   setupSite(site);
   const date = selectDate(location.search, index);
   const requested = new URLSearchParams(location.search).get("date");
-  if (requested && requested !== date) {
-    history.replaceState({ date }, "", "/");
-  }
+  if (requested && requested !== date) history.replaceState({ date }, "", "/");
 
   document.querySelector(".date-nav").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-direction]");
@@ -251,6 +194,4 @@ async function start() {
   await loadIssue(date, index.dates);
 }
 
-if (typeof document !== "undefined") {
-  start();
-}
+if (typeof document !== "undefined") start();

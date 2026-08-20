@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { getAdjacentDates, partitionItems, selectDate } from "../src/app.js";
+import { getAdjacentDates, selectDate } from "../src/app.js";
 import { ValidationError, validateAll } from "../scripts/lib/validation.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,7 +24,7 @@ async function editIssue(target, date, mutate) {
   await writeFile(filePath, JSON.stringify(issue), "utf8");
 }
 
-test("现有站点配置和两期日报通过校验并生成倒序索引", async () => {
+test("现有站点配置和两期源日报通过校验并生成倒序索引", async () => {
   assert.deepEqual(await validateAll(rootDir), {
     latest: "2026-08-19",
     dates: ["2026-08-19", "2026-08-18"],
@@ -37,11 +37,7 @@ test("新增第三份合法日报会自动进入索引", async () => {
   const issue = JSON.parse(await readFile(sourcePath, "utf8"));
   issue.date = "2026-08-20";
   issue.generatedAt = "2026-08-20T08:00:00+08:00";
-  await writeFile(
-    path.join(target, "data", "issues", "2026-08-20.json"),
-    JSON.stringify(issue),
-    "utf8",
-  );
+  await writeFile(path.join(target, "data", "issues", "2026-08-20.json"), JSON.stringify(issue), "utf8");
 
   assert.deepEqual(await validateAll(target), {
     latest: "2026-08-20",
@@ -49,16 +45,30 @@ test("新增第三份合法日报会自动进入索引", async () => {
   });
 });
 
+test("priority 缺失时指出文件、字段和内容 ID", async () => {
+  const target = await fixture();
+  await editIssue(target, "2026-08-19", (issue) => delete issue.items[0].priority);
+  await assert.rejects(() => validateAll(target), (error) => {
+    assert.ok(error instanceof ValidationError);
+    assert.match(error.message, /2026-08-19\.json.*items\[0\]\.priority.*scheduled-agent-workflow/);
+    return true;
+  });
+});
+
+test("priority 只能是 lead、important 或 normal", async () => {
+  const target = await fixture();
+  await editIssue(target, "2026-08-19", (issue) => {
+    issue.items[0].priority = "urgent";
+  });
+  await assert.rejects(() => validateAll(target), /priority.*只能是 lead、important 或 normal/);
+});
+
 test("同一期日报的内容 ID 不能重复", async () => {
   const target = await fixture();
   await editIssue(target, "2026-08-19", (issue) => {
     issue.items[1].id = issue.items[0].id;
   });
-  await assert.rejects(() => validateAll(target), (error) => {
-    assert.ok(error instanceof ValidationError);
-    assert.match(error.message, /items\[1\]\.id.*不能重复/);
-    return true;
-  });
+  await assert.rejects(() => validateAll(target), /items\[1\]\.id.*不能重复/);
 });
 
 test("日报日期必须与文件名一致", async () => {
@@ -67,14 +77,6 @@ test("日报日期必须与文件名一致", async () => {
     issue.date = "2026-08-17";
   });
   await assert.rejects(() => validateAll(target), /date 必须与文件名一致/);
-});
-
-test("本地图片路径必须存在", async () => {
-  const target = await fixture();
-  await editIssue(target, "2026-08-18", (issue) => {
-    issue.items[0].image = "/mock-images/missing.svg";
-  });
-  await assert.rejects(() => validateAll(target), /items\[0\]\.image.*本地文件不存在/);
 });
 
 test("来源地址只接受 HTTP 或 HTTPS", async () => {
@@ -102,29 +104,5 @@ test("日期导航按索引相邻项启用和禁用", () => {
   assert.deepEqual(getAdjacentDates("2026-08-18", dates), {
     previous: null,
     next: "2026-08-19",
-  });
-});
-
-test("内容按数组顺序分配头条、次要新闻和其余新闻", () => {
-  const items = ["a", "b", "c", "d", "e"];
-  assert.deepEqual(partitionItems(items.slice(0, 1)), {
-    lead: "a",
-    secondary: [],
-    remaining: [],
-  });
-  assert.deepEqual(partitionItems(items.slice(0, 2)), {
-    lead: "a",
-    secondary: ["b"],
-    remaining: [],
-  });
-  assert.deepEqual(partitionItems(items.slice(0, 3)), {
-    lead: "a",
-    secondary: ["b", "c"],
-    remaining: [],
-  });
-  assert.deepEqual(partitionItems(items), {
-    lead: "a",
-    secondary: ["b", "c"],
-    remaining: ["d", "e"],
   });
 });
