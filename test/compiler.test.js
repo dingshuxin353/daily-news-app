@@ -39,11 +39,11 @@ function rowSignature(rows) {
   return rows.map((row) => row.modules.map((module) => module.size[0].toUpperCase()).join(""));
 }
 
-test("多个 lead 与超过四个 important 按源顺序确定性降级", () => {
+test("多个 lead 与超过两个 important 按配置顺序确定性降级", () => {
   const source = issue(["lead", "important", "lead", "important", "lead", "important", "important"]);
   const result = normalizePriorities(source);
   assert.deepEqual(result.resolvedPriorities.map(({ resolvedPriority }) => resolvedPriority), [
-    "lead", "important", "important", "important", "important", "normal", "normal",
+    "lead", "important", "important", "normal", "normal", "normal", "normal",
   ]);
   assert.deepEqual(result.warnings.filter(({ type }) => type === "priority").map((warning) => [
     warning.itemId,
@@ -51,10 +51,34 @@ test("多个 lead 与超过四个 important 按源顺序确定性降级", () => 
     warning.compiledPriority,
   ]), [
     ["item-3", "lead", "important"],
-    ["item-5", "lead", "important"],
+    ["item-4", "important", "normal"],
+    ["item-5", "lead", "normal"],
     ["item-6", "important", "normal"],
     ["item-7", "important", "normal"],
   ]);
+});
+
+test("lead、important 和 normal 的上限都可由配置控制", () => {
+  const source = issue(["lead", "lead", "important", "important"]);
+  const limits = { lead: 2, important: 1, normal: null };
+  const result = normalizePriorities(source, limits);
+  assert.deepEqual(result.resolvedPriorities.map(({ resolvedPriority }) => resolvedPriority), [
+    "lead", "lead", "important", "normal",
+  ]);
+  const { compiled } = compileIssue(source, "fixture.json", limits);
+  assert.deepEqual(rowSignature(compiled.layout.rows), ["L", "L", "MS"]);
+  assert.throws(
+    () => validateCompiled(source, compiled, "fixture.json", { ...limits, important: 0 }),
+    /size 与 span 映射无效/,
+  );
+});
+
+test("normal 配置为有限数量时，超限会失败而不是丢弃内容", () => {
+  const source = issue(["normal", "normal"]);
+  assert.throws(
+    () => normalizePriorities(source, { lead: 1, important: 2, normal: 1 }),
+    /priorityLimits 配置上限/,
+  );
 });
 
 test("没有 lead 或 important 的日报可以正常编译", () => {
@@ -155,10 +179,10 @@ test("降级警告包含日期、内容 ID、源优先级、编译优先级和�
   assert.match(output, /2026-08-20/);
   assert.match(output, /item-2/);
   assert.match(output, /lead → important/);
-  assert.match(output, /大模块上限为 1/);
+  assert.match(output, /priorityLimits 配置上限/);
 });
 
-test("Demo 数据覆盖 L、MM、MSS、SSSS 和未满末行", async () => {
+test("Demo 数据遵守默认两个 important 上限并保留未满末行", async () => {
   const { readFile } = await import("node:fs/promises");
   const path = await import("node:path");
   const { fileURLToPath } = await import("node:url");
@@ -171,6 +195,6 @@ test("Demo 数据覆盖 L、MM、MSS、SSSS 和未满末行", async () => {
     signatures.push(...rowSignature(compiled.layout.rows));
     capacities.push(...compiled.layout.rows.map(({ usedCapacity }) => usedCapacity));
   }
-  assert.deepEqual(signatures, ["L", "MM", "MSS", "SSSS", "S"]);
-  assert.deepEqual(capacities, [4, 4, 4, 4, 1]);
+  assert.deepEqual(signatures, ["L", "MM", "SSS", "SSSS", "S"]);
+  assert.deepEqual(capacities, [4, 4, 3, 4, 1]);
 });

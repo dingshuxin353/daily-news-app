@@ -7,8 +7,10 @@ import { validateSources } from "./lib/validation.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 try {
-  const { index, issues } = await validateSources(rootDir);
-  const results = issues.map(({ issue, filePath }) => compileIssue(issue, filePath));
+  const { site, index, issues } = await validateSources(rootDir);
+  const results = issues.map(({ issue, filePath }) => (
+    compileIssue(issue, filePath, site.priorityLimits)
+  ));
   const compiledDir = path.join(rootDir, "data", "compiled");
   await rm(compiledDir, { recursive: true, force: true });
   await mkdir(compiledDir, { recursive: true });

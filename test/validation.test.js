@@ -5,7 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { getAdjacentDates, selectDate } from "../src/app.js";
-import { ValidationError, validateAll, validateCandidate } from "../scripts/lib/validation.js";
+import {
+  ValidationError,
+  validateAll,
+  validateCandidate,
+  validateSite,
+} from "../scripts/lib/validation.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,6 +34,26 @@ test("现有站点配置和两期源日报通过校验并生成倒序索引", as
     latest: "2026-08-19",
     dates: ["2026-08-19", "2026-08-18"],
   });
+});
+
+test("三档优先级数量限制必须是非负整数或 null", async () => {
+  const target = await fixture();
+  const configPath = path.join(target, "config", "site.json");
+  const site = JSON.parse(await readFile(configPath, "utf8"));
+  assert.deepEqual((await validateSite(target)).priorityLimits, {
+    lead: 1,
+    important: 2,
+    normal: null,
+  });
+
+  site.priorityLimits.important = -1;
+  await writeFile(configPath, JSON.stringify(site), "utf8");
+  await assert.rejects(() => validateSite(target), /priorityLimits\.important.*大于等于 0/);
+
+  site.priorityLimits.important = 2;
+  delete site.priorityLimits.normal;
+  await writeFile(configPath, JSON.stringify(site), "utf8");
+  await assert.rejects(() => validateSite(target), /priorityLimits\.normal.*整数或 null/);
 });
 
 test("新增第三份合法日报会自动进入索引", async () => {

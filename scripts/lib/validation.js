@@ -11,6 +11,7 @@ const ITEM_FIELDS = new Set(["id", "title", "brief", "summary", "category", "edi
 const EDITORIAL_FIELDS = new Set(["priority", "selectionReason"]);
 const SOURCE_FIELDS = new Set(["originalTitle", "name", "url", "publishedAt", "discoveredAt", "via"]);
 const VIA_FIELDS = new Set(["name", "url"]);
+const PRIORITY_LIMIT_FIELDS = new Set(["lead", "important", "normal"]);
 
 export class ValidationError extends Error {
   constructor(filePath, field, message) {
@@ -193,6 +194,18 @@ export async function validateSite(rootDir) {
     requireAssetPath(site.logo, filePath, "logo");
     await requireLocalAsset(rootDir, site.logo, filePath, "logo");
   }
+  requireObject(site.priorityLimits, filePath, "priorityLimits");
+  for (const key of Object.keys(site.priorityLimits)) {
+    if (!PRIORITY_LIMIT_FIELDS.has(key)) {
+      fail(filePath, `priorityLimits.${key}`, "不是支持的优先级");
+    }
+  }
+  for (const priority of PRIORITIES) {
+    const limit = site.priorityLimits[priority];
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+      fail(filePath, `priorityLimits.${priority}`, "必须是大于等于 0 的整数或 null（不限）");
+    }
+  }
   return site;
 }
 
@@ -238,7 +251,7 @@ export async function validateCandidate(filePath) {
 }
 
 export async function validateSources(rootDir) {
-  await validateSite(rootDir);
+  const site = await validateSite(rootDir);
   const issuesDir = path.join(rootDir, "data", "issues");
   let fileNames;
   try {
@@ -256,6 +269,7 @@ export async function validateSources(rootDir) {
   issues.sort((a, b) => b.issue.date.localeCompare(a.issue.date));
   const dates = issues.map(({ issue }) => issue.date);
   return {
+    site,
     index: { latest: dates[0], dates },
     issues,
   };

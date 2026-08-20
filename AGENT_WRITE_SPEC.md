@@ -1,15 +1,15 @@
 # DailyNews Agent 写入入口
 
-规范版本：0.2
-目标系统版本：MVP 0.5
+规范版本：0.3
+目标系统版本：MVP 0.6
 更新日期：2026-08-20
-实现状态：MVP 0.5 统一入口已实现
+实现状态：统一入口与优先级数量配置已实现
 
 这份文件是外部 Agent 进入 DailyNews 源码仓库后应首先读取的写入规范。它随源码一起迭代。
 
 ## 1. 当前能力
 
-仓库提供 MVP 0.5 统一处理命令：
+仓库提供统一处理命令：
 
 ```bash
 npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode update
@@ -39,7 +39,7 @@ Agent 不得直接修改：
 
 ## 3. 候选 JSON
 
-MVP 0.5 目标结构：
+当前候选结构：
 
 ```json
 {
@@ -88,8 +88,8 @@ MVP 0.5 目标结构：
 | `schemaVersion` | 是 | 固定为整数 `1` |
 | `date` | 是 | `YYYY-MM-DD`，按 `Asia/Shanghai` 归属 |
 | `generatedAt` | 是 | 本轮内容生成时间，带时区的 ISO 8601 |
-| `coverage.start` | MVP 0.5 是 | 采集窗口开始时间，带时区的 ISO 8601 |
-| `coverage.end` | MVP 0.5 是 | 采集窗口结束时间，必须晚于 start |
+| `coverage.start` | 是 | 采集窗口开始时间，带时区的 ISO 8601 |
+| `coverage.end` | 是 | 采集窗口结束时间，必须晚于 start |
 | `items` | 是 | 非空数组 |
 
 同一日期首次创建后，后续运行必须复用相同 `coverage`。没有可靠内容时，不生成空 `items` 去覆盖已有日报。
@@ -127,12 +127,14 @@ MVP 0.5 目标结构：
 
 ## 7. 选择、去重和顺序
 
+- 分配优先级前读取 `config/site.json.priorityLimits`；非负整数表示上限，`null` 表示不限。
 - 如果正式日报已存在，可以只读获取已有 coverage、稳定 ID 和来源；不得直接修改该文件。
 - 每条内容必须可追溯到至少一个真实来源。
 - 在候选生成阶段完成语义去重；代码只做 ID 和来源 URL 的确定性匹配。
-- `lead` 最多一个，可以没有。
-- `important` 最多四个，可以没有。
-- `normal` 数量不限。
+- 当前默认 `lead` 最多一个，可以没有。
+- 当前默认 `important` 最多两个，可以没有。
+- 当前默认 `normal` 数量不限。
+- 以上默认值可由站点配置修改，Agent 应以实际配置为准。
 - `items` 顺序就是阅读顺序。
 - 不为填满页面虚构内容、提高优先级或改变事实顺序。
 - 候选中缺少旧条目不代表删除。
@@ -153,7 +155,7 @@ MVP 0.5 目标结构：
 
 `revision`、合并、删除和布局都由代码决定，不由 Agent 数据决定。
 
-## 9. MVP 0.5 处理逻辑
+## 9. 当前处理逻辑
 
 统一命令：
 

@@ -1,4 +1,9 @@
 {
   "name": "DailyNews Demo",
-  "accentColor": "#F2B84B"
+  "accentColor": "#F2B84B",
+  "priorityLimits": {
+    "lead": 1,
+    "important": 2,
+    "normal": null
+  }
 }

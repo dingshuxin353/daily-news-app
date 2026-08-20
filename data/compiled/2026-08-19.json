@@ -157,13 +157,13 @@
         ]
       },
       {
-        "usedCapacity": 4,
+        "usedCapacity": 3,
         "modules": [
           {
             "itemId": "source-first-knowledge",
-            "resolvedPriority": "important",
-            "size": "medium",
-            "span": 2
+            "resolvedPriority": "normal",
+            "size": "small",
+            "span": 1
           },
           {
             "itemId": "prompt-content-contract",

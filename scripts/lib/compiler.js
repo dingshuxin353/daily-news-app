@@ -4,6 +4,14 @@ const MODULES = {
   normal: { size: "small", span: 1 },
 };
 
+export const DEFAULT_PRIORITY_LIMITS = Object.freeze({
+  lead: 1,
+  important: 2,
+  normal: null,
+});
+
+const PRIORITY_ORDER = ["lead", "important", "normal"];
+
 const LENGTH_LIMITS = {
   lead: { title: 42 },
   important: { title: 36 },
@@ -37,53 +45,35 @@ function copyCompiledItem(item) {
   return compiled;
 }
 
-export function normalizePriorities(issue) {
-  let hasLead = false;
-  let importantCount = 0;
+export function normalizePriorities(issue, priorityLimits = DEFAULT_PRIORITY_LIMITS) {
+  const limits = { ...DEFAULT_PRIORITY_LIMITS, ...priorityLimits };
+  const counts = { lead: 0, important: 0, normal: 0 };
   const warnings = [];
   const resolvedPriorities = issue.items.map((item) => {
     const sourcePriority = item.editorial.priority;
-    let resolvedPriority = sourcePriority;
+    const sourceIndex = PRIORITY_ORDER.indexOf(sourcePriority);
+    const resolvedPriority = PRIORITY_ORDER.slice(sourceIndex).find((priority) => (
+      limits[priority] === null || counts[priority] < limits[priority]
+    ));
 
-    if (sourcePriority === "lead") {
-      if (!hasLead) {
-        hasLead = true;
-      } else if (importantCount < 4) {
-        resolvedPriority = "important";
-        importantCount += 1;
-        warnings.push({
-          type: "priority",
-          date: issue.date,
-          itemId: item.id,
-          sourcePriority,
-          compiledPriority: resolvedPriority,
-          reason: "大模块上限为 1，降为中模块",
-        });
-      } else {
-        resolvedPriority = "normal";
-        warnings.push({
-          type: "priority",
-          date: issue.date,
-          itemId: item.id,
-          sourcePriority,
-          compiledPriority: resolvedPriority,
-          reason: "大模块和中模块均已达到数量上限",
-        });
-      }
-    } else if (sourcePriority === "important") {
-      if (importantCount < 4) {
-        importantCount += 1;
-      } else {
-        resolvedPriority = "normal";
-        warnings.push({
-          type: "priority",
-          date: issue.date,
-          itemId: item.id,
-          sourcePriority,
-          compiledPriority: resolvedPriority,
-          reason: "中模块上限为 4，降为小模块",
-        });
-      }
+    if (!resolvedPriority) {
+      throw new CompilationError(
+        issue.date,
+        `items.${item.id}.editorial.priority`,
+        "所有可用优先级均已达到 priorityLimits 配置上限",
+      );
+    }
+    counts[resolvedPriority] += 1;
+
+    if (resolvedPriority !== sourcePriority) {
+      warnings.push({
+        type: "priority",
+        date: issue.date,
+        itemId: item.id,
+        sourcePriority,
+        compiledPriority: resolvedPriority,
+        reason: `更高层级已达到 priorityLimits 配置上限，降为 ${resolvedPriority}`,
+      });
     }
 
     const titleLength = textLength(item.title);
@@ -150,7 +140,12 @@ export function compileRows(resolvedPriorities, date = "unknown") {
   return { rows, warnings };
 }
 
-export function validateCompiled(sourceIssue, compiled, filePath = sourceIssue.date) {
+export function validateCompiled(
+  sourceIssue,
+  compiled,
+  filePath = sourceIssue.date,
+  priorityLimits = DEFAULT_PRIORITY_LIMITS,
+) {
   if (compiled.schemaVersion !== 1) {
     throw new CompilationError(filePath, "schemaVersion", "必须等于 1");
   }
@@ -173,6 +168,10 @@ export function validateCompiled(sourceIssue, compiled, filePath = sourceIssue.d
   }
 
   const compiledItems = new Map(compiled.items.map((item) => [item.id, item]));
+  const expectedPriorities = new Map(
+    normalizePriorities(sourceIssue, priorityLimits).resolvedPriorities
+      .map(({ itemId, resolvedPriority }) => [itemId, resolvedPriority]),
+  );
   const layoutIds = [];
 
   for (const [rowIndex, row] of compiled.layout.rows.entries()) {
@@ -183,7 +182,13 @@ export function validateCompiled(sourceIssue, compiled, filePath = sourceIssue.d
     for (const module of row.modules) {
       const item = compiledItems.get(module.itemId);
       const expected = MODULES[module.resolvedPriority];
-      if (!item || !expected || expected.size !== module.size || expected.span !== module.span) {
+      if (
+        !item
+        || !expected
+        || expectedPriorities.get(module.itemId) !== module.resolvedPriority
+        || expected.size !== module.size
+        || expected.span !== module.span
+      ) {
         throw new CompilationError(filePath, `layout.rows[${rowIndex}].modules.${module.itemId}`, "size 与 span 映射无效");
       }
       layoutIds.push(module.itemId);
@@ -205,8 +210,12 @@ export function validateCompiled(sourceIssue, compiled, filePath = sourceIssue.d
   }
 }
 
-export function compileIssue(issue, filePath = issue.date) {
-  const normalized = normalizePriorities(issue);
+export function compileIssue(
+  issue,
+  filePath = issue.date,
+  priorityLimits = DEFAULT_PRIORITY_LIMITS,
+) {
+  const normalized = normalizePriorities(issue, priorityLimits);
   const layout = compileRows(normalized.resolvedPriorities, issue.date);
   const compiled = {
     schemaVersion: issue.schemaVersion,
@@ -217,7 +226,7 @@ export function compileIssue(issue, filePath = issue.date) {
     items: issue.items.map(copyCompiledItem),
     layout: { rows: layout.rows },
   };
-  validateCompiled(issue, compiled, filePath);
+  validateCompiled(issue, compiled, filePath, priorityLimits);
   return { compiled, warnings: [...normalized.warnings, ...layout.warnings] };
 }
 

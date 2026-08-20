@@ -154,6 +154,25 @@ test("无业务变化保留 generatedAt 和 revision，仅修复过期 compiled 
   assert.equal(compiled.revision, existing.revision);
 });
 
+test("站点数量配置改变后，unchanged 会按新限制修复 compiled", async () => {
+  const target = await fixture();
+  const existing = await readIssue(target, "2026-08-19");
+  const candidatePath = await writeCandidate(target, candidateFromIssue(existing));
+  const configPath = path.join(target, "config", "site.json");
+  const site = await readJson(configPath);
+  site.priorityLimits.important = 0;
+  await writeFile(configPath, `${JSON.stringify(site, null, 2)}\n`, "utf8");
+
+  const result = await processCandidate(target, candidatePath, { today: "2026-08-19" });
+  const compiled = await readJson(path.join(target, "data", "compiled", "2026-08-19.json"));
+  const modules = compiled.layout.rows.flatMap(({ modules: rowModules }) => rowModules);
+
+  assert.equal(result.result, "unchanged");
+  assert.deepEqual(result.repaired, ["compiled"]);
+  assert.equal(modules.some(({ size }) => size === "medium"), false);
+  assert.equal(modules.filter(({ size }) => size === "small").length, 5);
+});
+
 test("coverage 改变或匹配歧义时拒绝并保持全部正式产物不变", async () => {
   const target = await fixture();
   const existing = await readIssue(target, "2026-08-19");

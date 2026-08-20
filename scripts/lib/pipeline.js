@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { compileIssue, validateCompiled } from "./compiler.js";
-import { validateCandidate, validateIssue } from "./validation.js";
+import { validateCandidate, validateIssue, validateSite } from "./validation.js";
 
 export class PipelineError extends Error {
   constructor(date, field, message) {
@@ -248,10 +248,10 @@ async function commitStages(stages) {
   }
 }
 
-function compiledIsCurrent(issue, compiled, filePath) {
+function compiledIsCurrent(issue, compiled, filePath, priorityLimits) {
   if (!compiled) return false;
   try {
-    validateCompiled(issue, compiled, filePath);
+    validateCompiled(issue, compiled, filePath, priorityLimits);
     return true;
   } catch {
     return false;
@@ -267,6 +267,8 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
   }
 
   const candidate = await validateCandidate(resolvedCandidate);
+  const site = await validateSite(resolvedRoot);
+  const { priorityLimits } = site;
   const today = options.today ?? shanghaiDate();
   if (candidate.date > today) {
     throw new PipelineError(candidate.date, "date", "不能处理未来日期");
@@ -297,8 +299,8 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
 
     if (plan.result === "unchanged") {
       const currentCompiled = await readJsonIfPresent(compiledPath, true);
-      if (!compiledIsCurrent(plan.issue, currentCompiled, compiledPath)) {
-        ({ compiled, warnings } = compileIssue(plan.issue, issuePath));
+      if (!compiledIsCurrent(plan.issue, currentCompiled, compiledPath, priorityLimits)) {
+        ({ compiled, warnings } = compileIssue(plan.issue, issuePath, priorityLimits));
         stages.push(await stageJson(compiledPath, compiled));
         repaired.push("compiled");
       }
@@ -320,7 +322,7 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
     stages.push(issueStage);
     try {
       await validateIssue(issueStage.temporaryPath, candidate.date);
-      ({ compiled, warnings } = compileIssue(plan.issue, issuePath));
+      ({ compiled, warnings } = compileIssue(plan.issue, issuePath, priorityLimits));
       stages.push(await stageJson(compiledPath, compiled));
       stages.push(await stageJson(indexPath, nextIndex));
       await commitStages(stages);
