@@ -31,6 +31,17 @@
       <p class="status" role="status">正在加载日报…</p>
     </main>
 
+    <dialog class="source-panel" id="source-panel" aria-labelledby="source-panel-title">
+      <header class="source-panel__header">
+        <div>
+          <p class="source-panel__eyebrow">来源清单</p>
+          <h2 class="source-panel__title" id="source-panel-title">全部来源</h2>
+        </div>
+        <button class="source-panel__close" type="button" aria-label="关闭来源面板">关闭 ×</button>
+      </header>
+      <ol class="source-panel__list"></ol>
+    </dialog>
+
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>

@@ -13,15 +13,17 @@ function item(id, priority, overrides = {}) {
   return {
     id,
     title: `标题 ${id}`,
-    summary: `摘要 ${id}`,
-    priority,
-    source: { name: "Demo", url: `https://example.com/${id}` },
+    brief: `短摘要 ${id}`,
+    summary: `完整摘要 ${id} ${"内容".repeat(60)}`,
+    editorial: { priority, selectionReason: `选择理由 ${id}` },
+    sources: [{ name: "Demo", url: `https://example.com/${id}` }],
     ...overrides,
   };
 }
 
 function issue(priorities) {
   return {
+    schemaVersion: 1,
     date: "2026-08-20",
     generatedAt: "2026-08-20T08:00:00+08:00",
     items: priorities.map((priority, index) => item(`item-${index + 1}`, priority)),
@@ -35,7 +37,7 @@ function rowSignature(rows) {
 test("多个 lead 与超过四个 important 按源顺序确定性降级", () => {
   const source = issue(["lead", "important", "lead", "important", "lead", "important", "important"]);
   const result = normalizePriorities(source);
-  assert.deepEqual(result.items.map(({ priority }) => priority), [
+  assert.deepEqual(result.resolvedPriorities.map(({ resolvedPriority }) => resolvedPriority), [
     "lead", "important", "important", "important", "important", "normal", "normal",
   ]);
   assert.deepEqual(result.warnings.filter(({ type }) => type === "priority").map((warning) => [
@@ -53,7 +55,8 @@ test("多个 lead 与超过四个 important 按源顺序确定性降级", () => 
 test("没有 lead 或 important 的日报可以正常编译", () => {
   const source = issue(["normal", "normal"]);
   const { compiled } = compileIssue(source);
-  assert.deepEqual(compiled.items.map(({ priority }) => priority), ["normal", "normal"]);
+  assert.deepEqual(compiled.items.map(({ editorial }) => editorial.priority), ["normal", "normal"]);
+  assert.deepEqual(compiled.layout.rows[0].modules.map(({ resolvedPriority }) => resolvedPriority), ["normal", "normal"]);
   assert.deepEqual(compiled.layout.rows.map(({ usedCapacity }) => usedCapacity), [2]);
 });
 
@@ -67,16 +70,16 @@ test("编译器覆盖 L、MM、MSS、SSSS 和未填满行", () => {
   ];
 
   for (const entry of cases) {
-    const items = issue(entry.priorities).items;
-    const { rows } = compileRows(items, "2026-08-20");
+    const resolved = normalizePriorities(issue(entry.priorities)).resolvedPriorities;
+    const { rows } = compileRows(resolved, "2026-08-20");
     assert.deepEqual(rowSignature(rows), entry.signature);
     assert.deepEqual(rows.map(({ usedCapacity }) => usedCapacity), entry.capacities);
   }
 });
 
 test("换行保持输入顺序并警告未填满的中间行", () => {
-  const items = issue(["normal", "lead", "normal"]).items;
-  const { rows, warnings } = compileRows(items, "2026-08-20");
+  const resolved = normalizePriorities(issue(["normal", "lead", "normal"])).resolvedPriorities;
+  const { rows, warnings } = compileRows(resolved, "2026-08-20");
   assert.deepEqual(rows.flatMap((row) => row.modules.map(({ itemId }) => itemId)), ["item-1", "item-2", "item-3"]);
   assert.deepEqual(rows.map(({ usedCapacity }) => usedCapacity), [1, 4, 1]);
   assert.equal(warnings.length, 1);
@@ -91,19 +94,31 @@ test("历史 image 字段产生警告且不进入编译产物", () => {
   assert.equal(warnings.some(({ type }) => type === "image"), true);
 });
 
-test("标题和摘要超过建议长度时只产生警告", () => {
+test("标题、brief 和 summary 超出建议长度时只产生警告", () => {
   const source = issue(["normal"]);
   source.items[0].title = "长".repeat(29);
-  source.items[0].summary = "长".repeat(61);
+  source.items[0].brief = "长".repeat(81);
+  source.items[0].summary = "长".repeat(401);
   const { compiled, warnings } = compileIssue(source);
   assert.equal(compiled.items.length, 1);
   assert.equal(warnings.filter(({ type }) => type === "length").length, 2);
+  assert.equal(warnings.filter(({ type }) => type === "length-range").length, 1);
+});
+
+test("编译产物保留 editorial 与多个来源，并只生成一个布局模块", () => {
+  const source = issue(["lead"]);
+  source.items[0].sources.push({ name: "Supplement", url: "https://example.com/supplement" });
+  const { compiled } = compileIssue(source);
+  assert.deepEqual(compiled.items[0].editorial, source.items[0].editorial);
+  assert.deepEqual(compiled.items[0].sources, source.items[0].sources);
+  assert.equal(compiled.layout.rows[0].modules.length, 1);
+  assert.equal(compiled.layout.rows[0].modules[0].resolvedPriority, "lead");
 });
 
 test("编译产物缺失、重复内容或超载时校验失败", () => {
   const source = issue(["normal", "normal"]);
   const { compiled } = compileIssue(source);
-  compiled.layout.rows[0].modules.push({ itemId: "item-1", size: "small", span: 1 });
+  compiled.layout.rows[0].modules.push({ itemId: "item-1", resolvedPriority: "normal", size: "small", span: 1 });
   compiled.layout.rows[0].usedCapacity = 3;
   assert.throws(() => validateCompiled(source, compiled, "fixture.json"), CompilationError);
 
@@ -120,6 +135,10 @@ test("编译产物缺失、重复内容或超载时校验失败", () => {
   wrongSize.layout.rows[0].modules[0].span = 2;
   wrongSize.layout.rows[0].usedCapacity = 3;
   assert.throws(() => validateCompiled(source, wrongSize, "fixture.json"), /size 与 span 映射无效/);
+
+  const changedEditorial = compileIssue(source).compiled;
+  changedEditorial.items[0].editorial.priority = "lead";
+  assert.throws(() => validateCompiled(source, changedEditorial, "fixture.json"), /editorial 或 sources/);
 });
 
 test("降级警告包含日期、内容 ID、源优先级、编译优先级和原因", () => {

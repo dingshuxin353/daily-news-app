@@ -4,6 +4,9 @@ const paths = {
   issue: (date) => `/data/compiled/${date}.json`,
 };
 
+let currentItemsById = new Map();
+let sourcePanelTrigger = null;
+
 export function selectDate(search, index) {
   const requested = new URLSearchParams(search).get("date");
   return index.dates.includes(requested) ? requested : index.latest;
@@ -52,28 +55,72 @@ function createArticle(item, module, isFirst) {
   }
   heading.append(element(isFirst ? "h1" : "h2", "story__title", item.title));
 
-  const summary = element("p", "story__summary", item.summary);
+  const summary = element("p", "story__summary", module.size === "large" ? item.summary : item.brief);
   const source = element("div", "story__source");
-  const sourceDetails = element("div", "story__source-details");
-  sourceDetails.append(element("span", "story__source-name", item.source.name));
-  if (item.source.publishedAt) {
-    const published = element("time", "story__published", formatPublishedAt(item.source.publishedAt));
-    published.dateTime = item.source.publishedAt;
-    sourceDetails.append(published);
-  }
-
-  const link = element("a", "story__link", "查看原文 ↗");
-  link.href = item.source.url;
+  const primarySource = item.sources[0];
+  const link = element("a", "story__primary-source", `${primarySource.name} ↗`);
+  link.href = primarySource.url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  source.append(sourceDetails, link);
+  source.append(link);
+  if (item.sources.length > 1) {
+    const sourceCount = element("button", "story__source-count", `查看全部 ${item.sources.length} 个来源`);
+    sourceCount.type = "button";
+    sourceCount.dataset.itemId = item.id;
+    source.append(sourceCount);
+  }
   article.append(heading, summary, source);
   return article;
 }
 
+function createSourceEntry(source, index) {
+  const entry = element("li", "source-panel__item");
+  entry.append(element("p", "source-panel__role", index === 0 ? "主要来源" : "补充来源"));
+  entry.append(element("h3", "source-panel__name", source.name));
+  if (source.originalTitle) {
+    entry.append(element("p", "source-panel__original-title", source.originalTitle));
+  }
+  if (source.publishedAt) {
+    const published = element("time", "source-panel__published", formatPublishedAt(source.publishedAt));
+    published.dateTime = source.publishedAt;
+    entry.append(published);
+  }
+  const originalLink = element("a", "source-panel__link", "打开原文 ↗");
+  originalLink.href = source.url;
+  originalLink.target = "_blank";
+  originalLink.rel = "noopener noreferrer";
+  entry.append(originalLink);
+  if (source.via) {
+    const via = element("p", "source-panel__via", "经由 ");
+    const viaLink = element("a", "", source.via.name);
+    viaLink.href = source.via.url;
+    viaLink.target = "_blank";
+    viaLink.rel = "noopener noreferrer";
+    via.append(viaLink);
+    entry.append(via);
+  }
+  return entry;
+}
+
+function openSourcePanel(item, trigger) {
+  const panel = document.querySelector("#source-panel");
+  sourcePanelTrigger = trigger;
+  panel.querySelector(".source-panel__title").textContent = item.title;
+  panel.querySelector(".source-panel__list").replaceChildren(
+    ...item.sources.map(createSourceEntry),
+  );
+  panel.showModal();
+  panel.querySelector(".source-panel__close").focus();
+}
+
+function closeSourcePanel() {
+  const panel = document.querySelector("#source-panel");
+  if (panel.open) panel.close();
+}
+
 function renderIssue(issue) {
   const content = document.querySelector("#content");
-  const itemsById = new Map(issue.items.map((item) => [item.id, item]));
+  currentItemsById = new Map(issue.items.map((item) => [item.id, item]));
   let articleIndex = 0;
 
   const rows = issue.layout.rows.map((row, rowIndex) => {
@@ -82,7 +129,7 @@ function renderIssue(issue) {
     rowElement.setAttribute("aria-label", `版面第 ${rowIndex + 1} 行`);
 
     for (const module of row.modules) {
-      const item = itemsById.get(module.itemId);
+      const item = currentItemsById.get(module.itemId);
       if (!item) throw new Error(`Compiled layout references missing item: ${module.itemId}`);
       rowElement.append(createArticle(item, module, articleIndex === 0));
       articleIndex += 1;
@@ -101,6 +148,7 @@ function renderStatus(message) {
   const status = element("p", "status", message);
   status.setAttribute("role", "status");
   content.replaceChildren(status);
+  currentItemsById = new Map();
 }
 
 function setupSite(site) {
@@ -152,6 +200,7 @@ function updateNavigation(date, dates) {
 }
 
 async function loadIssue(date, dates, updateUrl = false) {
+  closeSourcePanel();
   updateNavigation(date, dates);
   if (updateUrl) history.pushState({ date }, "", `/?date=${date}`);
   window.scrollTo({ top: 0, behavior: "auto" });
@@ -177,6 +226,18 @@ async function start() {
   }
 
   setupSite(site);
+  const sourcePanel = document.querySelector("#source-panel");
+  sourcePanel.querySelector(".source-panel__close").addEventListener("click", closeSourcePanel);
+  sourcePanel.addEventListener("close", () => {
+    sourcePanelTrigger?.focus();
+    sourcePanelTrigger = null;
+  });
+  document.querySelector("#content").addEventListener("click", (event) => {
+    const button = event.target.closest(".story__source-count");
+    if (!button) return;
+    const item = currentItemsById.get(button.dataset.itemId);
+    if (item) openSourcePanel(item, button);
+  });
   const date = selectDate(location.search, index);
   const requested = new URLSearchParams(location.search).get("date");
   if (requested && requested !== date) history.replaceState({ date }, "", "/");

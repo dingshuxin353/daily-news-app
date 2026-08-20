@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ITEM_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const ISO_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const PRIORITIES = new Set(["lead", "important", "normal"]);
@@ -111,15 +112,19 @@ export async function validateSite(rootDir) {
   return site;
 }
 
-export async function validateIssue(filePath) {
+export async function validateIssue(filePath, expectedDateOverride) {
   const fileName = path.basename(filePath);
-  const expectedDate = fileName.replace(/\.json$/, "");
-  if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(fileName) || !isValidDate(expectedDate)) {
+  const expectedDate = expectedDateOverride ?? fileName.replace(/\.json$/, "");
+  if (expectedDateOverride !== undefined && !isValidDate(expectedDateOverride)) {
+    fail(filePath, "目标日期", "必须是合法的 YYYY-MM-DD");
+  }
+  if (expectedDateOverride === undefined && (!/^\d{4}-\d{2}-\d{2}\.json$/.test(fileName) || !isValidDate(expectedDate))) {
     fail(filePath, "文件名", "必须是合法的 YYYY-MM-DD.json");
   }
 
   const issue = await readJson(filePath);
   requireObject(issue, filePath, "$");
+  if (issue.schemaVersion !== 1) fail(filePath, "schemaVersion", "必须等于 1");
   if (issue.date !== expectedDate) fail(filePath, "date", "必须与文件名一致");
   requireIsoTime(issue.generatedAt, filePath, "generatedAt");
   if (!Array.isArray(issue.items) || issue.items.length === 0) {
@@ -131,20 +136,51 @@ export async function validateIssue(filePath) {
     const field = `items[${index}]`;
     requireObject(item, filePath, field);
     requireString(item.id, filePath, `${field}.id`);
+    if (!ITEM_ID_PATTERN.test(item.id)) {
+      fail(filePath, `${field}.id`, "只能包含小写字母、数字和连字符，且不能以连字符开头或结尾");
+    }
     if (ids.has(item.id)) fail(filePath, `${field}.id`, `内容 ${item.id} 在同一期日报内不能重复`);
     ids.add(item.id);
     requireString(item.title, filePath, `${field}.title`);
+    requireString(item.brief, filePath, `${field}.brief（内容 ${item.id}）`);
     requireString(item.summary, filePath, `${field}.summary`);
-    requireString(item.priority, filePath, `${field}.priority（内容 ${item.id}）`);
-    if (!PRIORITIES.has(item.priority)) {
-      fail(filePath, `${field}.priority（内容 ${item.id}）`, "只能是 lead、important 或 normal");
+    requireObject(item.editorial, filePath, `${field}.editorial（内容 ${item.id}）`);
+    requireString(item.editorial.priority, filePath, `${field}.editorial.priority（内容 ${item.id}）`);
+    if (!PRIORITIES.has(item.editorial.priority)) {
+      fail(filePath, `${field}.editorial.priority（内容 ${item.id}）`, "只能是 lead、important 或 normal");
     }
+    requireString(item.editorial.selectionReason, filePath, `${field}.editorial.selectionReason（内容 ${item.id}）`);
     if (item.category !== undefined) requireString(item.category, filePath, `${field}.category`);
-    requireObject(item.source, filePath, `${field}.source`);
-    requireString(item.source.name, filePath, `${field}.source.name`);
-    requireHttpUrl(item.source.url, filePath, `${field}.source.url`);
-    if (item.source.publishedAt !== undefined) {
-      requireIsoTime(item.source.publishedAt, filePath, `${field}.source.publishedAt`);
+    if (item.score !== undefined || item.selected !== undefined) {
+      fail(filePath, `${field}（内容 ${item.id}）`, "不能包含 AIHot 的 score 或 selected 字段");
+    }
+    if (!Array.isArray(item.sources) || item.sources.length === 0) {
+      fail(filePath, `${field}.sources（内容 ${item.id}）`, "必须是非空数组");
+    }
+
+    const sourceUrls = new Set();
+    for (const [sourceIndex, source] of item.sources.entries()) {
+      const sourceField = `${field}.sources[${sourceIndex}]`;
+      requireObject(source, filePath, `${sourceField}（内容 ${item.id}）`);
+      requireString(source.name, filePath, `${sourceField}.name（内容 ${item.id}）`);
+      requireHttpUrl(source.url, filePath, `${sourceField}.url（内容 ${item.id}）`);
+      if (sourceUrls.has(source.url)) {
+        fail(filePath, `${sourceField}.url（内容 ${item.id}）`, "同一条内容内不能重复");
+      }
+      sourceUrls.add(source.url);
+      if (source.originalTitle !== undefined) {
+        requireString(source.originalTitle, filePath, `${sourceField}.originalTitle（内容 ${item.id}）`);
+      }
+      for (const timeField of ["publishedAt", "discoveredAt"]) {
+        if (source[timeField] !== undefined) {
+          requireIsoTime(source[timeField], filePath, `${sourceField}.${timeField}（内容 ${item.id}）`);
+        }
+      }
+      if (source.via !== undefined) {
+        requireObject(source.via, filePath, `${sourceField}.via（内容 ${item.id}）`);
+        requireString(source.via.name, filePath, `${sourceField}.via.name（内容 ${item.id}）`);
+        requireHttpUrl(source.via.url, filePath, `${sourceField}.via.url（内容 ${item.id}）`);
+      }
     }
   }
   return issue;
