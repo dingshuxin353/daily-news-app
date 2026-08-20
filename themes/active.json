@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "themeId": "newspaper-default",
+  "revision": 1,
+  "compilerVersion": "1",
+  "candidateHash": null,
+  "cssPath": "/themes/compiled/newspaper-default/1.css",
+  "attributes": {
+    "theme": "newspaper-default",
+    "density": "balanced",
+    "surface": "paper",
+    "motion": "subtle",
+    "masthead": "classic",
+    "lead": "split",
+    "important": "ruled",
+    "normal": "minimal"
+  },
+  "colors": {
+    "background": "#F4F1EC",
+    "text": "#121718"
+  },
+  "previous": null
+}

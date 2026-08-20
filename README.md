@@ -1,6 +1,6 @@
 # DailyNews App
 
-文件驱动的 DailyNews MVP 0.6。外部 Agent 只提交完整候选，统一流水线负责安全更新正式日报、维护 revision 与固定 coverage，并根据站点配置生成确定的四格行结构。
+文件驱动的 DailyNews（MVP 完成版后的 0.7.0）。外部 Agent 只提交声明式日报或主题候选；两条独立流水线分别维护正式日报与主题 revision，前端保持确定的四格内容骨架。
 
 ## 本地运行
 
@@ -42,4 +42,25 @@ npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode 
 
 `config/site.json.priorityLimits` 控制 `lead`、`important`、`normal` 的最大数量；非负整数表示上限，`null` 表示不限。当前默认值分别为 `1`、`2`、不限。
 
-产品边界、内容契约和视觉规范分别记录在工作区的 `docs/spec-v0.6.md`、`docs/content.md` 与 `docs/design.md` 中。
+## 主题入口
+
+外部 Agent 生成主题前必须阅读 [`AGENT_THEME_SPEC.md`](./AGENT_THEME_SPEC.md)，且只能写 `themes/candidates/`。三个官方 Preset 是 `newspaper-default`、`swiss-editorial` 和 `midnight-tech`。
+
+生成安全预览：
+
+```bash
+npm run process-theme -- --candidate themes/candidates/<theme-id>.json
+```
+
+运行 `npm start` 后，可打开 `/?themePreview=<theme-id>` 查看当前真实日报，追加 `&themeStress=1` 查看固定压力测试日报。预览不会修改当前 Active Theme。
+
+用户确认审美后才可激活；命令要求用同一主题 ID 二次确认：
+
+```bash
+npm run activate-theme -- --theme <theme-id> --confirm <theme-id>
+npm run rollback-theme -- --confirm
+```
+
+Theme Writer 维护 `themes/definitions/`、`themes/compiled/` 和 `themes/active.json`。不要手工覆盖这些文件。没有 Active Theme 时，页面继续使用 `config/site.json.accentColor`。
+
+产品边界、内容契约和视觉规范分别记录在工作区的 `docs/spec-v0.7.0.md`、`docs/content.md` 与 `docs/design.md` 中。

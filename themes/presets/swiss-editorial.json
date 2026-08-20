@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "swiss-editorial",
+  "name": "瑞士编辑",
+  "description": "白底、黑色强网格和无衬线标题构成的高密度编辑设计。",
+  "extends": "newspaper-default",
+  "tokens": {
+    "colors": {
+      "background": "#FFFFFF",
+      "text": "#101010",
+      "muted": "#595959",
+      "accent": "#D83A24",
+      "rule": "#171717"
+    },
+    "typography": {
+      "headlinePreset": "sans-cn",
+      "uiPreset": "sans-cn",
+      "headlineScale": "poster"
+    },
+    "density": "compact",
+    "ruleStyle": "strong",
+    "surfaceStyle": "flat",
+    "motion": "none"
+  },
+  "recipes": {
+    "masthead": "banner",
+    "lead": "editorial",
+    "important": "contrast",
+    "normal": "accent"
+  }
+}

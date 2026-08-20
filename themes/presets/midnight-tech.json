@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "midnight-tech",
+  "name": "午夜技术",
+  "description": "深色底、冷青强调与等宽标题构成的克制技术阅读主题。",
+  "extends": "newspaper-default",
+  "tokens": {
+    "colors": {
+      "background": "#0D1117",
+      "text": "#F0F3F6",
+      "muted": "#A9B3BD",
+      "accent": "#6FE7D2",
+      "rule": "#3A4652"
+    },
+    "typography": {
+      "headlinePreset": "mono",
+      "uiPreset": "sans-cn",
+      "headlineScale": "restrained"
+    },
+    "density": "spacious",
+    "ruleStyle": "hairline",
+    "surfaceStyle": "soft-gradient",
+    "motion": "subtle"
+  },
+  "recipes": {
+    "masthead": "compact",
+    "lead": "stacked",
+    "important": "minimal",
+    "normal": "compact"
+  }
+}

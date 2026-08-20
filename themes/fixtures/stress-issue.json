@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "date": "2099-12-31",
+  "generatedAt": "2099-12-31T08:00:00+08:00",
+  "coverage": {
+    "start": "2099-12-30T08:00:00+08:00",
+    "end": "2099-12-31T08:00:00+08:00"
+  },
+  "revision": 1,
+  "items": [
+    {
+      "id": "stress-long-chinese-lead",
+      "title": "当一条足够长的中文大标题穿过四栏版面时主题仍应保持清晰稳定的阅读节奏",
+      "brief": "长标题、长摘要与多来源共同检验大模块。",
+      "summary": "这是一段接近建议上限的压力测试摘要，用来观察中文标点、长句和连续文本在不同字体、字号与密度组合中的换行表现。主题只能改变视觉表达，不能截断事实、隐藏来源、调换内容顺序，也不能改变这个大模块占据四栏的既定结构。为了让测试更接近真实日报，这段文字继续补充足够的字符数量，覆盖桌面宽屏、普通桌面和移动端单列视口。",
+      "category": "视觉压力测试",
+      "editorial": { "priority": "lead", "selectionReason": "覆盖一行大模块" },
+      "sources": [
+        { "name": "Primary Source", "url": "https://example.com/stress/lead", "originalTitle": "A deliberately long source title for visual regression", "publishedAt": "2099-12-30T22:00:00Z" },
+        { "name": "补充来源", "url": "https://example.org/stress/lead-followup", "originalTitle": "用于打开多来源面板的补充材料" }
+      ]
+    },
+    {
+      "id": "stress-mixed-title",
+      "title": "AI Agent 2030：中文、English 与 42 个信号",
+      "brief": "中英文、数字和标点混排，检验无衬线与等宽标题。",
+      "summary": "混排标题压力测试。",
+      "category": "技术",
+      "editorial": { "priority": "important", "selectionReason": "覆盖两个中模块" },
+      "sources": [{ "name": "Example", "url": "https://example.com/stress/mixed" }]
+    },
+    {
+      "id": "stress-medium-summary",
+      "title": "规则、留白与信息密度共同决定阅读速度",
+      "brief": "这是一段接近建议长度上限的 brief，用于检查中模块在紧凑与宽松主题里都不会溢出、重叠或意外隐藏正文内容。",
+      "summary": "中模块摘要压力测试。",
+      "editorial": { "priority": "important", "selectionReason": "覆盖无分类内容" },
+      "sources": [{ "name": "Design Notes", "url": "https://example.com/stress/density" }]
+    },
+    {
+      "id": "stress-mss-medium",
+      "title": "一个中模块与两个小模块共享同一行",
+      "brief": "该行用于确认局部 Recipe 不会改变 2+1+1 的固定栏宽。",
+      "summary": "组合行压力测试。",
+      "category": "版面",
+      "editorial": { "priority": "important", "selectionReason": "覆盖 MSS 行" },
+      "sources": [{ "name": "Layout Lab", "url": "https://example.com/stress/mss" }]
+    },
+    {
+      "id": "stress-mss-small-one",
+      "title": "小模块 A 保持顺序",
+      "brief": "移动端仍排在中模块之后。",
+      "summary": "小模块测试。",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖 MSS 行" },
+      "sources": [{ "name": "Source A", "url": "https://example.com/stress/mss-a" }]
+    },
+    {
+      "id": "stress-mss-small-two",
+      "title": "小模块 B 不被隐藏",
+      "brief": "高密度主题仍需保留摘要和来源。",
+      "summary": "小模块测试。",
+      "category": "可访问性",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖 MSS 行" },
+      "sources": [{ "name": "Source B", "url": "https://example.com/stress/mss-b" }]
+    },
+    {
+      "id": "stress-four-one",
+      "title": "四小栏之一",
+      "brief": "检查最窄桌面栏。",
+      "summary": "四小栏测试。",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖 SSSS 行" },
+      "sources": [{ "name": "One", "url": "https://example.com/stress/four-1" }]
+    },
+    {
+      "id": "stress-four-two",
+      "title": "四小栏之二带有更长标题",
+      "brief": "测试小模块标题自然换行。",
+      "summary": "四小栏测试。",
+      "category": "观察",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖 SSSS 行" },
+      "sources": [{ "name": "Two", "url": "https://example.com/stress/four-2" }]
+    },
+    {
+      "id": "stress-four-three",
+      "title": "Four / 三 / 03",
+      "brief": "再次覆盖混排字符。",
+      "summary": "四小栏测试。",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖 SSSS 行" },
+      "sources": [{ "name": "Three", "url": "https://example.com/stress/four-3" }]
+    },
+    {
+      "id": "stress-four-four",
+      "title": "来源按钮仍可聚焦",
+      "brief": "两个来源触发可访问面板。",
+      "summary": "四小栏测试。",
+      "category": "交互",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖 SSSS 行" },
+      "sources": [
+        { "name": "Four", "url": "https://example.com/stress/four-4" },
+        { "name": "Four Extra", "url": "https://example.org/stress/four-4-extra" }
+      ]
+    },
+    {
+      "id": "stress-last-one",
+      "title": "末行没有填满",
+      "brief": "空余容量不能被主题自动拉伸成新布局。",
+      "summary": "末行测试。",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖未填满末行" },
+      "sources": [{ "name": "Last One", "url": "https://example.com/stress/last-1" }]
+    },
+    {
+      "id": "stress-last-two",
+      "title": "最后一个模块",
+      "brief": "阅读顺序到此结束。",
+      "summary": "末行测试。",
+      "category": "结束",
+      "editorial": { "priority": "normal", "selectionReason": "覆盖未填满末行" },
+      "sources": [{ "name": "Last Two", "url": "https://example.com/stress/last-2" }]
+    }
+  ],
+  "layout": {
+    "rows": [
+      { "usedCapacity": 4, "modules": [{ "itemId": "stress-long-chinese-lead", "resolvedPriority": "lead", "size": "large", "span": 4 }] },
+      { "usedCapacity": 4, "modules": [{ "itemId": "stress-mixed-title", "resolvedPriority": "important", "size": "medium", "span": 2 }, { "itemId": "stress-medium-summary", "resolvedPriority": "important", "size": "medium", "span": 2 }] },
+      { "usedCapacity": 4, "modules": [{ "itemId": "stress-mss-medium", "resolvedPriority": "important", "size": "medium", "span": 2 }, { "itemId": "stress-mss-small-one", "resolvedPriority": "normal", "size": "small", "span": 1 }, { "itemId": "stress-mss-small-two", "resolvedPriority": "normal", "size": "small", "span": 1 }] },
+      { "usedCapacity": 4, "modules": [{ "itemId": "stress-four-one", "resolvedPriority": "normal", "size": "small", "span": 1 }, { "itemId": "stress-four-two", "resolvedPriority": "normal", "size": "small", "span": 1 }, { "itemId": "stress-four-three", "resolvedPriority": "normal", "size": "small", "span": 1 }, { "itemId": "stress-four-four", "resolvedPriority": "normal", "size": "small", "span": 1 }] },
+      { "usedCapacity": 2, "modules": [{ "itemId": "stress-last-one", "resolvedPriority": "normal", "size": "small", "span": 1 }, { "itemId": "stress-last-two", "resolvedPriority": "normal", "size": "small", "span": 1 }] }
+    ]
+  }
+}

@@ -2,6 +2,9 @@ const paths = {
   site: "/config/site.json",
   index: "/data/index.json",
   issue: (date) => `/data/compiled/${date}.json`,
+  activeTheme: "/themes/active.json",
+  themePreview: (id) => `/themes/previews/${id}.json`,
+  stressIssue: "/themes/fixtures/stress-issue.json",
 };
 
 let currentItemsById = new Map();
@@ -24,6 +27,49 @@ async function fetchJson(path) {
   const response = await fetch(path, { cache: "no-cache" });
   if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
   return response.json();
+}
+
+async function fetchOptionalJson(path) {
+  const response = await fetch(path, { cache: "no-cache" });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
+  return response.json();
+}
+
+export function selectThemeRequest(search) {
+  const id = new URLSearchParams(search).get("themePreview");
+  return id && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) ? id : null;
+}
+
+async function loadThemeManifest(search) {
+  const previewId = selectThemeRequest(search);
+  return fetchOptionalJson(previewId ? paths.themePreview(previewId) : paths.activeTheme);
+}
+
+async function applyTheme(manifest) {
+  if (!manifest) return false;
+  const root = document.documentElement;
+  for (const [name, value] of Object.entries(manifest.attributes)) {
+    root.dataset[name] = value;
+  }
+  const colorScheme = manifest.colors?.background && manifest.colors?.text
+    && Number.parseInt(manifest.colors.background.slice(1, 3), 16)
+      < Number.parseInt(manifest.colors.text.slice(1, 3), 16)
+    ? "dark"
+    : "light";
+  root.style.colorScheme = colorScheme;
+
+  const stylesheet = document.createElement("link");
+  stylesheet.id = "active-theme";
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = manifest.cssPath;
+  const loaded = new Promise((resolve, reject) => {
+    stylesheet.addEventListener("load", resolve, { once: true });
+    stylesheet.addEventListener("error", () => reject(new Error(`Failed to load ${manifest.cssPath}`)), { once: true });
+  });
+  document.head.append(stylesheet);
+  await loaded;
+  return true;
 }
 
 function element(tag, className, text) {
@@ -151,8 +197,9 @@ function renderStatus(message) {
   currentItemsById = new Map();
 }
 
-function setupSite(site) {
-  document.documentElement.style.setProperty("--color-accent", site.accentColor);
+function setupSite(site, hasTheme) {
+  document.documentElement.style.setProperty("--site-accent", site.accentColor);
+  if (!hasTheme) document.documentElement.style.setProperty("--color-accent", site.accentColor);
   document.title = site.name;
 
   const name = document.querySelector(".brand__name");
@@ -169,7 +216,11 @@ function setupSite(site) {
 function setupMotion() {
   document.documentElement.classList.remove("motion-ready");
   const targets = [...document.querySelectorAll(".reveal")];
-  if (!("IntersectionObserver" in window) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  if (
+    document.documentElement.dataset.motion === "none"
+    || !("IntersectionObserver" in window)
+    || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
     targets.forEach((target) => target.classList.add("is-visible"));
     return;
   }
@@ -217,15 +268,21 @@ async function loadIssue(date, dates, updateUrl = false) {
 async function start() {
   let site;
   let index;
+  let theme;
   try {
-    [site, index] = await Promise.all([fetchJson(paths.site), fetchJson(paths.index)]);
+    [site, index, theme] = await Promise.all([
+      fetchJson(paths.site),
+      fetchJson(paths.index),
+      loadThemeManifest(location.search),
+    ]);
+    await applyTheme(theme);
   } catch (error) {
     console.error(error);
     renderStatus("页面暂时无法加载");
     return;
   }
 
-  setupSite(site);
+  setupSite(site, Boolean(theme));
   const sourcePanel = document.querySelector("#source-panel");
   sourcePanel.querySelector(".source-panel__close").addEventListener("click", closeSourcePanel);
   sourcePanel.addEventListener("close", () => {
@@ -238,6 +295,7 @@ async function start() {
     const item = currentItemsById.get(button.dataset.itemId);
     if (item) openSourcePanel(item, button);
   });
+  const stressMode = new URLSearchParams(location.search).get("themeStress") === "1";
   const date = selectDate(location.search, index);
   const requested = new URLSearchParams(location.search).get("date");
   if (requested && requested !== date) history.replaceState({ date }, "", "/");
@@ -252,7 +310,13 @@ async function start() {
     loadIssue(selectDate(location.search, index), index.dates);
   });
 
-  await loadIssue(date, index.dates);
+  if (stressMode) {
+    const issue = await fetchJson(paths.stressIssue);
+    updateNavigation(issue.date, [issue.date]);
+    renderIssue(issue);
+  } else {
+    await loadIssue(date, index.dates);
+  }
 }
 
 if (typeof document !== "undefined") start();

@@ -1,11 +1,14 @@
 {
   "name": "daily-news-app",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
     "prepare-data": "node scripts/prepare-data.js",
     "process-candidate": "node scripts/process-candidate.js",
+    "process-theme": "node scripts/process-theme.js",
+    "activate-theme": "node scripts/activate-theme.js",
+    "rollback-theme": "node scripts/rollback-theme.js",
     "build": "node scripts/prepare-data.js && node scripts/build.js",
     "start": "node scripts/prepare-data.js && node scripts/serve.js",
     "test": "node --test"

@@ -1,0 +1,21 @@
+/* DailyNews Theme | schemaVersion=1 | id=newspaper-default | revision=1 | compiler=1 */
+:root {
+  --color-background: #F4F1EC;
+  --color-text: #121718;
+  --color-muted: #6D6E6A;
+  --color-accent: var(--site-accent);
+  --color-accent-text: #826832;
+  --color-rule: #C4C2BC;
+  --font-headline: ui-serif, "Songti SC", "Noto Serif CJK SC", STSong, serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --page-gutter: 48px;
+  --row-space: 30px;
+  --story-gap: 24px;
+  --source-gap: 22px;
+  --rule-width: 1px;
+  --rule-style: solid;
+  --headline-large: clamp(56px, 6vw, 82px);
+  --headline-medium: clamp(34px, 3.25vw, 46px);
+  --headline-small: clamp(25px, 2.25vw, 32px);
+  --surface-background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent 30%), var(--color-background);
+}

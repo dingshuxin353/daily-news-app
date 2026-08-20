@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { getAdjacentDates, selectDate } from "../src/app.js";
+import { getAdjacentDates, selectDate, selectThemeRequest } from "../src/app.js";
 import {
   ValidationError,
   validateAll,
@@ -196,4 +196,10 @@ test("日期导航按索引相邻项启用和禁用", () => {
     previous: null,
     next: "2026-08-19",
   });
+});
+
+test("主题预览参数只接受安全的主题 ID", () => {
+  assert.equal(selectThemeRequest("?themePreview=blue-finance"), "blue-finance");
+  assert.equal(selectThemeRequest("?themePreview=../../active"), null);
+  assert.equal(selectThemeRequest("?themePreview=https://example.com/theme"), null);
 });

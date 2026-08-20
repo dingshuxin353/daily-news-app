@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "newspaper-default",
+  "name": "现代报纸",
+  "description": "保留 DailyNews MVP 0.6 的暖灰、克制、现代报纸风格。",
+  "tokens": {
+    "colors": {
+      "background": "#F4F1EC",
+      "text": "#121718",
+      "muted": "#6D6E6A",
+      "accent": "#F2B84B",
+      "rule": "#C4C2BC"
+    },
+    "typography": {
+      "headlinePreset": "serif-cn",
+      "uiPreset": "sans-cn",
+      "headlineScale": "editorial"
+    },
+    "density": "balanced",
+    "ruleStyle": "hairline",
+    "surfaceStyle": "paper",
+    "motion": "subtle"
+  },
+  "recipes": {
+    "masthead": "classic",
+    "lead": "split",
+    "important": "ruled",
+    "normal": "minimal"
+  }
+}
