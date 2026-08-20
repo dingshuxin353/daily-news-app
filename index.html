@@ -8,23 +8,25 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <nav class="floating-nav" aria-label="日报日期导航">
-      <a class="brand" href="/" aria-label="返回最新一期">
-        <img class="brand__logo" alt="" hidden>
-        <span class="brand__name">DailyNews</span>
-      </a>
-      <div class="date-nav">
-        <button class="date-nav__button" data-direction="previous" type="button" aria-label="查看上一天">
-          <span aria-hidden="true">←</span>
-          <span class="date-nav__label">上一天</span>
-        </button>
-        <time class="date-nav__current" aria-live="polite">—</time>
-        <button class="date-nav__button" data-direction="next" type="button" aria-label="查看下一天">
-          <span class="date-nav__label">下一天</span>
-          <span aria-hidden="true">→</span>
-        </button>
-      </div>
-    </nav>
+    <header class="masthead">
+      <nav class="masthead__inner" aria-label="日报日期导航">
+        <a class="brand" href="/" aria-label="返回最新一期">
+          <img class="brand__logo" alt="" hidden>
+          <span class="brand__name">DailyNews</span>
+        </a>
+        <div class="date-nav">
+          <button class="date-nav__button" data-direction="previous" type="button" aria-label="查看上一期">
+            <span aria-hidden="true">←</span>
+            <span class="date-nav__label">上一期</span>
+          </button>
+          <time class="date-nav__current" aria-live="polite">—</time>
+          <button class="date-nav__button" data-direction="next" type="button" aria-label="查看下一期">
+            <span class="date-nav__label">下一期</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </nav>
+    </header>
 
     <main id="content" tabindex="-1">
       <p class="status" role="status">正在加载日报…</p>

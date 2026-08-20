@@ -1,6 +1,6 @@
 # DailyNews App
 
-文件驱动的 DailyNews MVP。外部 Agent 只需向 `data/issues/` 写入符合约定的日报 JSON，前端无需修改即可展示新一期。
+文件驱动的 DailyNews MVP 0.2。外部 Agent 只需向 `data/issues/` 写入符合约定的日报 JSON，前端就会按数组顺序自动形成头条、次要新闻和其余新闻，无需修改源码。
 
 ## 本地运行
 
@@ -28,4 +28,4 @@ npm run build
 - `data/index.json`：由 `npm run prepare-data` 自动生成，请勿手动维护
 - `public/`：以 `/` 开头的本地公开资源路径对应目录
 
-产品边界和视觉规范分别记录在工作区的 `docs/spec.md` 与 `docs/design.md` 中。
+产品边界和视觉规范分别记录在工作区的 `docs/spec-v0.2.md` 与 `docs/design.md` 中。

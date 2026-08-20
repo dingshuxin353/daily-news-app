@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { getAdjacentDates, selectDate } from "../src/app.js";
+import { getAdjacentDates, partitionItems, selectDate } from "../src/app.js";
 import { ValidationError, validateAll } from "../scripts/lib/validation.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -102,5 +102,29 @@ test("日期导航按索引相邻项启用和禁用", () => {
   assert.deepEqual(getAdjacentDates("2026-08-18", dates), {
     previous: null,
     next: "2026-08-19",
+  });
+});
+
+test("内容按数组顺序分配头条、次要新闻和其余新闻", () => {
+  const items = ["a", "b", "c", "d", "e"];
+  assert.deepEqual(partitionItems(items.slice(0, 1)), {
+    lead: "a",
+    secondary: [],
+    remaining: [],
+  });
+  assert.deepEqual(partitionItems(items.slice(0, 2)), {
+    lead: "a",
+    secondary: ["b"],
+    remaining: [],
+  });
+  assert.deepEqual(partitionItems(items.slice(0, 3)), {
+    lead: "a",
+    secondary: ["b", "c"],
+    remaining: [],
+  });
+  assert.deepEqual(partitionItems(items), {
+    lead: "a",
+    secondary: ["b", "c"],
+    remaining: ["d", "e"],
   });
 });

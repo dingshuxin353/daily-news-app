@@ -17,6 +17,14 @@ export function getAdjacentDates(date, dates) {
   };
 }
 
+export function partitionItems(items) {
+  return {
+    lead: items[0],
+    secondary: items.slice(1, 3),
+    remaining: items.slice(3),
+  };
+}
+
 async function fetchJson(path) {
   const response = await fetch(path, { cache: "no-cache" });
   if (!response.ok) {
@@ -41,70 +49,108 @@ function formatPublishedAt(value) {
   }).format(new Date(value));
 }
 
-function createVisual(item) {
-  const visual = element("div", "issue__visual reveal");
-  const placeholder = element("div", "issue__placeholder");
+function createVisual(item, role) {
+  const visual = element("div", `story__visual story__visual--${role}`);
+  const placeholder = element("div", "story__placeholder");
   placeholder.setAttribute("aria-hidden", "true");
 
   if (!item.image) {
+    if (role !== "lead") return null;
     visual.append(placeholder);
     return visual;
   }
 
-  const image = element("img", "issue__image");
+  const image = element("img", "story__image");
   image.src = item.image;
   image.alt = item.title;
-  image.loading = "lazy";
+  image.loading = role === "lead" ? "eager" : "lazy";
   image.decoding = "async";
-  placeholder.hidden = true;
+
+  if (role === "lead") {
+    placeholder.hidden = true;
+    visual.append(image, placeholder);
+  } else {
+    visual.append(image);
+  }
+
   image.addEventListener("error", () => {
-    image.remove();
-    placeholder.hidden = false;
+    if (role === "lead") {
+      image.remove();
+      placeholder.hidden = false;
+    } else {
+      visual.remove();
+    }
   }, { once: true });
-  visual.append(image, placeholder);
+
   return visual;
 }
 
-function createArticle(item) {
-  const article = element("article", "issue");
+function createArticle(item, role) {
+  const article = element("article", `story story--${role}${role === "standard" ? " reveal" : ""}`);
   article.id = item.id;
 
-  const heading = element("header", "issue__heading reveal");
+  const heading = element("header", "story__header");
   if (item.category) {
-    heading.append(element("p", "issue__category", item.category));
+    heading.append(element("p", "story__category", item.category));
   }
-  heading.append(element("h1", "issue__title", item.title));
+  heading.append(element(role === "lead" ? "h1" : "h2", "story__title", item.title));
 
-  const details = element("div", "issue__details reveal");
-  details.append(element("p", "issue__summary", item.summary));
+  const visual = createVisual(item, role);
+  const summary = element("p", "story__summary", item.summary);
 
-  const source = element("div", "issue__source");
-  source.append(element("span", "issue__source-name", item.source.name));
+  const source = element("div", "story__source");
+  const sourceDetails = element("div", "story__source-details");
+  sourceDetails.append(element("span", "story__source-name", item.source.name));
   if (item.source.publishedAt) {
-    const published = element("time", "issue__published", formatPublishedAt(item.source.publishedAt));
+    const published = element("time", "story__published", formatPublishedAt(item.source.publishedAt));
     published.dateTime = item.source.publishedAt;
-    source.append(published);
+    sourceDetails.append(published);
   }
 
-  const link = element("a", "issue__link");
+  const link = element("a", "story__link", "查看原文 ↗");
   link.href = item.source.url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  link.append(document.createTextNode("查看原文"), element("span", "", "→"));
-  details.append(source, link);
+  source.append(sourceDetails, link);
 
-  article.append(heading, createVisual(item), details);
+  article.append(heading);
+  if (visual) article.append(visual);
+  article.append(summary, source);
   return article;
 }
 
 function renderIssue(issue) {
+  const { lead, secondary, remaining } = partitionItems(issue.items);
   const content = document.querySelector("#content");
-  content.replaceChildren(...issue.items.map(createArticle));
+  content.className = "news-page";
+
+  const leadLayout = element("section", "lead-layout");
+  leadLayout.setAttribute("aria-label", "主要新闻");
+  leadLayout.append(createArticle(lead, "lead"));
+
+  if (secondary.length > 0) {
+    const secondaryColumn = element("div", "secondary-column");
+    secondaryColumn.append(...secondary.map((item) => createArticle(item, "secondary")));
+    leadLayout.append(secondaryColumn);
+  } else {
+    leadLayout.classList.add("lead-layout--solo");
+  }
+
+  const sections = [leadLayout];
+  if (remaining.length > 0) {
+    const grid = element("section", "news-grid");
+    grid.setAttribute("aria-label", "更多新闻");
+    grid.append(...remaining.map((item) => createArticle(item, "standard")));
+    sections.push(grid);
+  }
+
+  content.replaceChildren(...sections);
   setupMotion();
 }
 
 function renderStatus(message) {
   const content = document.querySelector("#content");
+  content.className = "";
   const status = element("p", "status", message);
   status.setAttribute("role", "status");
   content.replaceChildren(status);
@@ -127,16 +173,11 @@ function setupSite(site) {
 
 function setupMotion() {
   document.documentElement.classList.remove("motion-ready");
+  const targets = [...document.querySelectorAll(".reveal")];
   if (!("IntersectionObserver" in window) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    targets.forEach((target) => target.classList.add("is-visible"));
     return;
   }
-
-  const targets = [...document.querySelectorAll(".reveal")];
-  const visibleTargets = targets.filter((target) => {
-    const bounds = target.getBoundingClientRect();
-    return bounds.top < window.innerHeight && bounds.bottom > 0;
-  });
-  visibleTargets.forEach((target) => target.classList.add("is-visible"));
 
   const observer = new IntersectionObserver((entries) => {
     for (const entry of entries) {
@@ -144,12 +185,10 @@ function setupMotion() {
       entry.target.classList.add("is-visible");
       observer.unobserve(entry.target);
     }
-  }, { threshold: 0.12 });
+  }, { threshold: 0.08 });
 
   document.documentElement.classList.add("motion-ready");
-  targets
-    .filter((target) => !target.classList.contains("is-visible"))
-    .forEach((target) => observer.observe(target));
+  targets.forEach((target) => observer.observe(target));
 }
 
 function updateNavigation(date, dates) {
