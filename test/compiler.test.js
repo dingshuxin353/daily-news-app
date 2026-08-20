@@ -26,6 +26,11 @@ function issue(priorities) {
     schemaVersion: 1,
     date: "2026-08-20",
     generatedAt: "2026-08-20T08:00:00+08:00",
+    coverage: {
+      start: "2026-08-19T08:00:00+08:00",
+      end: "2026-08-20T08:00:00+08:00",
+    },
+    revision: 1,
     items: priorities.map((priority, index) => item(`item-${index + 1}`, priority)),
   };
 }
@@ -56,6 +61,8 @@ test("没有 lead 或 important 的日报可以正常编译", () => {
   const source = issue(["normal", "normal"]);
   const { compiled } = compileIssue(source);
   assert.deepEqual(compiled.items.map(({ editorial }) => editorial.priority), ["normal", "normal"]);
+  assert.equal(compiled.revision, 1);
+  assert.deepEqual(compiled.coverage, source.coverage);
   assert.deepEqual(compiled.layout.rows[0].modules.map(({ resolvedPriority }) => resolvedPriority), ["normal", "normal"]);
   assert.deepEqual(compiled.layout.rows.map(({ usedCapacity }) => usedCapacity), [2]);
 });
@@ -138,7 +145,7 @@ test("编译产物缺失、重复内容或超载时校验失败", () => {
 
   const changedEditorial = compileIssue(source).compiled;
   changedEditorial.items[0].editorial.priority = "lead";
-  assert.throws(() => validateCompiled(source, changedEditorial, "fixture.json"), /editorial 或 sources/);
+  assert.throws(() => validateCompiled(source, changedEditorial, "fixture.json"), /内容与正式日报不一致/);
 });
 
 test("降级警告包含日期、内容 ID、源优先级、编译优先级和原因", () => {

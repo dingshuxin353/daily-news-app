@@ -1,11 +1,11 @@
 {
   "name": "daily-news-app",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "prepare-data": "node scripts/prepare-data.js",
-    "write-issue": "node scripts/write-issue.js",
+    "process-candidate": "node scripts/process-candidate.js",
     "build": "node scripts/prepare-data.js && node scripts/build.js",
     "start": "node scripts/prepare-data.js && node scripts/serve.js",
     "test": "node --test"

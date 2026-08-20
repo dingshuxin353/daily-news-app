@@ -154,6 +154,14 @@ export function validateCompiled(sourceIssue, compiled, filePath = sourceIssue.d
   if (compiled.schemaVersion !== 1) {
     throw new CompilationError(filePath, "schemaVersion", "必须等于 1");
   }
+  if (
+    compiled.date !== sourceIssue.date
+    || compiled.generatedAt !== sourceIssue.generatedAt
+    || compiled.revision !== sourceIssue.revision
+    || JSON.stringify(compiled.coverage) !== JSON.stringify(sourceIssue.coverage)
+  ) {
+    throw new CompilationError(filePath, "date/generatedAt/revision/coverage", "必须与正式日报一致");
+  }
   const expectedIds = sourceIssue.items.map((item) => item.id);
   const compiledIds = compiled.items.map((item) => item.id);
   if (
@@ -191,11 +199,8 @@ export function validateCompiled(sourceIssue, compiled, filePath = sourceIssue.d
 
   for (const sourceItem of sourceIssue.items) {
     const item = compiledItems.get(sourceItem.id);
-    if (
-      JSON.stringify(item.editorial) !== JSON.stringify(sourceItem.editorial)
-      || JSON.stringify(item.sources) !== JSON.stringify(sourceItem.sources)
-    ) {
-      throw new CompilationError(filePath, `items.${sourceItem.id}`, "editorial 或 sources 与源数据不一致");
+    if (JSON.stringify(item) !== JSON.stringify(copyCompiledItem(sourceItem))) {
+      throw new CompilationError(filePath, `items.${sourceItem.id}`, "内容与正式日报不一致");
     }
   }
 }
@@ -207,6 +212,8 @@ export function compileIssue(issue, filePath = issue.date) {
     schemaVersion: issue.schemaVersion,
     date: issue.date,
     generatedAt: issue.generatedAt,
+    coverage: { ...issue.coverage },
+    revision: issue.revision,
     items: issue.items.map(copyCompiledItem),
     layout: { rows: layout.rows },
   };

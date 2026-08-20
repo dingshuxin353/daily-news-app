@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { getAdjacentDates, selectDate } from "../src/app.js";
-import { ValidationError, validateAll } from "../scripts/lib/validation.js";
-import { writeIssue } from "../scripts/lib/writer.js";
+import { ValidationError, validateAll, validateCandidate } from "../scripts/lib/validation.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -134,25 +133,24 @@ test("AIHot 的 score 与 selected 不进入正式日报", async () => {
   await assert.rejects(() => validateAll(target), /不能包含 AIHot 的 score 或 selected/);
 });
 
-test("Agent 只在完整候选通过校验后原子替换日报", async () => {
+test("候选要求固定 coverage 且禁止 revision 和布局字段", async () => {
   const target = await fixture();
-  const existingPath = path.join(target, "data", "issues", "2026-08-19.json");
-  const before = await readFile(existingPath, "utf8");
-  const candidatePath = path.join(target, "candidate.json");
-  await assert.rejects(() => writeIssue(target, "../invalid", candidatePath), /目标日期/);
-  const invalid = JSON.parse(before);
-  delete invalid.items[0].brief;
-  await writeFile(candidatePath, JSON.stringify(invalid), "utf8");
+  const source = JSON.parse(await readFile(path.join(target, "data", "issues", "2026-08-19.json"), "utf8"));
+  delete source.revision;
+  const candidateDir = path.join(target, "data", "candidates");
+  await mkdir(candidateDir, { recursive: true });
+  const candidatePath = path.join(candidateDir, "2026-08-19.json");
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  assert.equal((await validateCandidate(candidatePath)).date, "2026-08-19");
 
-  await assert.rejects(() => writeIssue(target, "2026-08-19", candidatePath), /brief/);
-  assert.equal(await readFile(existingPath, "utf8"), before);
+  source.revision = 1;
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  await assert.rejects(() => validateCandidate(candidatePath), /revision.*不允许出现在候选中/);
 
-  const valid = JSON.parse(before);
-  valid.date = "2026-08-20";
-  valid.generatedAt = "2026-08-20T08:00:00+08:00";
-  await writeFile(candidatePath, JSON.stringify(valid, null, 2), "utf8");
-  const writtenPath = await writeIssue(target, "2026-08-20", candidatePath);
-  assert.deepEqual(JSON.parse(await readFile(writtenPath, "utf8")), valid);
+  delete source.revision;
+  source.coverage.end = source.coverage.start;
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  await assert.rejects(() => validateCandidate(candidatePath), /coverage.*start 必须早于 end/);
 });
 
 test("无效或不存在的日期回退到最新一期", () => {
