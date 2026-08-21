@@ -1,13 +1,15 @@
 # DailyNews AI Agent 主题使用指南
 
 指南版本：1.1
-适用产品版本：0.8.0
+适用产品版本：0.9.0
 Theme Schema：1
 更新日期：2026-08-21
 
 这份指南告诉外部 AI Agent 如何查看、切换、新增和修改 DailyNews 主题。它只规定 Agent 需要读取的信息、需要生成的文件和主题边界，不要求 Agent 运行主题处理命令或操作浏览器。
 
 如果任务是生成或更新日报内容，请改读 [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md)。主题操作不能修改日报内容和布局。
+
+站点与当前主题配置的说明见 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md)。
 
 ## 1. 先判断任务类型
 

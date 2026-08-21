@@ -1,7 +1,7 @@
 # DailyNews AI Agent 内容使用指南
 
 指南版本：1.1
-适用产品版本：0.8.0
+适用产品版本：0.9.0
 更新日期：2026-08-21
 
 这份指南告诉外部 AI Agent 如何为 DailyNews 搜集、整理和生成一期日报候选。它只规定 Agent 需要读取的信息、需要生成的文件和内容边界，不要求 Agent 运行项目命令或操作浏览器。
@@ -17,6 +17,8 @@
 - `config/site.json`：当前站点设置与三档优先级数量上限。
 - `data/issues/YYYY-MM-DD.json`：目标日期已存在时，只读获取 coverage、稳定 ID 和已有来源。
 - 用户指定的内容源、时间窗口和写入模式。
+
+站点配置字段见 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md)。
 
 ## 1. 完成一次日报候选
 
