@@ -259,8 +259,6 @@ export async function validateSources(rootDir) {
   } catch (error) {
     fail(issuesDir, "$", `无法读取日报目录（${error.code ?? error.message}）`);
   }
-  if (fileNames.length === 0) fail(issuesDir, "$", "至少需要一份日报 JSON");
-
   const issues = [];
   for (const fileName of fileNames) {
     const filePath = path.join(issuesDir, fileName);
@@ -270,7 +268,7 @@ export async function validateSources(rootDir) {
   const dates = issues.map(({ issue }) => issue.date);
   return {
     site,
-    index: { latest: dates[0], dates },
+    index: { latest: dates[0] ?? null, dates },
     issues,
   };
 }

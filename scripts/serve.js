@@ -17,7 +17,6 @@ const contentTypes = new Map([
 function resolveRequestPath(urlPath) {
   const decoded = decodeURIComponent(urlPath);
   if (decoded === "/") return path.join(rootDir, "index.html");
-  if (decoded.startsWith("/mock-images/")) return path.join(rootDir, "public", decoded);
   return path.join(rootDir, decoded);
 }
 

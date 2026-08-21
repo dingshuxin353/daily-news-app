@@ -181,20 +181,3 @@ test("降级警告包含日期、内容 ID、源优先级、编译优先级和�
   assert.match(output, /lead → important/);
   assert.match(output, /priorityLimits 配置上限/);
 });
-
-test("Demo 数据遵守默认两个 important 上限并保留未满末行", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const path = await import("node:path");
-  const { fileURLToPath } = await import("node:url");
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const signatures = [];
-  const capacities = [];
-  for (const date of ["2026-08-19", "2026-08-18"]) {
-    const source = JSON.parse(await readFile(path.join(root, "data", "issues", `${date}.json`), "utf8"));
-    const { compiled } = compileIssue(source);
-    signatures.push(...rowSignature(compiled.layout.rows));
-    capacities.push(...compiled.layout.rows.map(({ usedCapacity }) => usedCapacity));
-  }
-  assert.deepEqual(signatures, ["L", "MM", "SSS", "SSSS", "S"]);
-  assert.deepEqual(capacities, [4, 4, 3, 4, 1]);
-});

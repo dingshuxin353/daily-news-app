@@ -4,21 +4,28 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { getAdjacentDates, selectDate, selectThemeRequest } from "../src/app.js";
+import {
+  classifyTitleLength,
+  getAdjacentDates,
+  selectDate,
+  selectThemeRequest,
+} from "../src/app.js";
 import {
   ValidationError,
   validateAll,
   validateCandidate,
   validateSite,
 } from "../scripts/lib/validation.js";
+import { seedTestData } from "../test-support/helpers.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-test-"));
-  for (const entry of ["config", "data", "public"]) {
+  for (const entry of ["config", "public"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
+  await seedTestData(target);
   return target;
 }
 
@@ -29,8 +36,16 @@ async function editIssue(target, date, mutate) {
   await writeFile(filePath, JSON.stringify(issue), "utf8");
 }
 
-test("现有站点配置和两期源日报通过校验并生成倒序索引", async () => {
+test("无业务数据的主仓通过校验并生成空索引", async () => {
   assert.deepEqual(await validateAll(rootDir), {
+    latest: null,
+    dates: [],
+  });
+});
+
+test("运行时测试数据通过校验并生成倒序索引", async () => {
+  const target = await fixture();
+  assert.deepEqual(await validateAll(target), {
     latest: "2026-08-19",
     dates: ["2026-08-19", "2026-08-18"],
   });
@@ -75,7 +90,7 @@ test("editorial.priority 缺失时指出文件、字段和内容 ID", async () =
   await editIssue(target, "2026-08-19", (issue) => delete issue.items[0].editorial.priority);
   await assert.rejects(() => validateAll(target), (error) => {
     assert.ok(error instanceof ValidationError);
-    assert.match(error.message, /2026-08-19\.json.*items\[0\]\.editorial\.priority.*scheduled-agent-workflow/);
+    assert.match(error.message, /2026-08-19\.json.*items\[0\]\.editorial\.priority.*test-item-1/);
     return true;
   });
 });
@@ -202,4 +217,11 @@ test("主题预览参数只接受安全的主题 ID", () => {
   assert.equal(selectThemeRequest("?themePreview=blue-finance"), "blue-finance");
   assert.equal(selectThemeRequest("?themePreview=../../active"), null);
   assert.equal(selectThemeRequest("?themePreview=https://example.com/theme"), null);
+});
+
+test("头条长度按 Unicode code point 在 28 和 40 字边界分档", () => {
+  assert.equal(classifyTitleLength(`  ${"新".repeat(28)}  `), "standard");
+  assert.equal(classifyTitleLength("新".repeat(29)), "long");
+  assert.equal(classifyTitleLength("A".repeat(39) + "🚀"), "long");
+  assert.equal(classifyTitleLength("新".repeat(41)), "extra-long");
 });

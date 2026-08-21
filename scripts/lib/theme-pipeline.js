@@ -19,6 +19,7 @@ import {
   stableJson,
 } from "./theme-compiler.js";
 import {
+  SUPPORTED_THEME_COMPILER_VERSIONS,
   THEME_COMPILER_VERSION,
   resolveThemeCandidate,
 } from "./theme-validation.js";
@@ -154,33 +155,6 @@ function inputHashes(candidate, resolved, usesSiteAccent) {
   };
 }
 
-export async function validateThemeStressFixture(rootDir) {
-  const filePath = path.join(rootDir, "themes", "fixtures", "stress-issue.json");
-  const issue = await readJson(filePath);
-  if (!issue || !Array.isArray(issue.items) || !Array.isArray(issue.layout?.rows)) {
-    throw new ThemePipelineError("stressFixture", "必须包含 items 和 layout.rows");
-  }
-  const ids = issue.items.map(({ id }) => id);
-  const layoutIds = issue.layout.rows.flatMap(({ modules }) => modules.map(({ itemId }) => itemId));
-  if (new Set(ids).size !== ids.length || JSON.stringify(ids) !== JSON.stringify(layoutIds)) {
-    throw new ThemePipelineError("stressFixture", "内容 ID 必须唯一且与版面阅读顺序一致");
-  }
-  const signatures = issue.layout.rows.map(({ modules }) => modules.map(({ size }) => size[0].toUpperCase()).join(""));
-  for (const required of ["L", "MM", "MSS", "SSSS"]) {
-    if (!signatures.includes(required)) throw new ThemePipelineError("stressFixture", `缺少 ${required} 行型`);
-  }
-  if (!issue.layout.rows.some(({ usedCapacity }) => usedCapacity < 4)) {
-    throw new ThemePipelineError("stressFixture", "缺少未填满的最后一行");
-  }
-  if (!issue.items.some(({ category }) => category === undefined)) {
-    throw new ThemePipelineError("stressFixture", "缺少无分类内容");
-  }
-  if (!issue.items.some(({ sources }) => sources.length > 1)) {
-    throw new ThemePipelineError("stressFixture", "缺少多来源内容");
-  }
-  return { filePath, signatures };
-}
-
 export async function processTheme(rootDir, candidatePath) {
   const { candidate, resolved, usesSiteAccent } = await resolveThemeCandidate(rootDir, candidatePath);
   const { candidateHash, inputHash } = inputHashes(candidate, resolved, usesSiteAccent);
@@ -192,7 +166,6 @@ export async function processTheme(rootDir, candidatePath) {
     status: "preview-ready",
     inputHash,
     definition,
-    checks: (await validateThemeStressFixture(rootDir)).signatures,
   };
   const previewDir = path.join(rootDir, "themes", "previews");
   const manifestPath = path.join(previewDir, `${candidate.id}.json`);
@@ -248,7 +221,7 @@ async function loadStoredTheme(rootDir, themeId, revision) {
     definition.schemaVersion !== 1
     || definition.id !== themeId
     || definition.revision !== revision
-    || definition.compilerVersion !== THEME_COMPILER_VERSION
+    || !SUPPORTED_THEME_COMPILER_VERSIONS.has(definition.compilerVersion)
   ) {
     throw new ThemePipelineError("theme", `Theme Revision 元数据无效：${themeId}@${revision}`);
   }
@@ -461,7 +434,7 @@ export async function validateActiveTheme(rootDir) {
     || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(active.themeId ?? "")
     || !Number.isInteger(active.revision)
     || active.revision < 1
-    || active.compilerVersion !== THEME_COMPILER_VERSION
+    || !SUPPORTED_THEME_COMPILER_VERSIONS.has(active.compilerVersion)
   ) {
     throw new ThemePipelineError("active", "Schema、主题 ID、Revision 或编译器版本无效");
   }

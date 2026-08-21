@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import { contrastRatio, THEME_COMPILER_VERSION } from "./theme-validation.js";
+import {
+  contrastRatio,
+  relativeLuminance,
+  THEME_COMPILER_VERSION,
+} from "./theme-validation.js";
 
 const FONT_STACKS = Object.freeze({
   "serif-cn": 'ui-serif, "Songti SC", "Noto Serif CJK SC", STSong, serif',
@@ -21,9 +25,21 @@ const RULES = Object.freeze({
 });
 
 const SCALES = Object.freeze({
-  restrained: { large: "clamp(48px, 5vw, 68px)", medium: "clamp(30px, 3vw, 40px)", small: "clamp(23px, 2vw, 29px)" },
-  editorial: { large: "clamp(56px, 6vw, 82px)", medium: "clamp(34px, 3.25vw, 46px)", small: "clamp(25px, 2.25vw, 32px)" },
-  poster: { large: "clamp(64px, 7.2vw, 98px)", medium: "clamp(38px, 4vw, 54px)", small: "clamp(27px, 2.6vw, 36px)" },
+  restrained: {
+    large: "clamp(48px, 5vw, 68px)", largeLong: "clamp(42px, 4.4vw, 58px)", largeExtraLong: "clamp(36px, 3.8vw, 48px)",
+    largeMobile: "clamp(40px, 11vw, 50px)", largeLongMobile: "clamp(35px, 9.6vw, 44px)", largeExtraLongMobile: "clamp(31px, 8.4vw, 38px)",
+    medium: "clamp(30px, 3vw, 40px)", small: "clamp(23px, 2vw, 29px)",
+  },
+  editorial: {
+    large: "clamp(56px, 6vw, 82px)", largeLong: "clamp(48px, 5.2vw, 68px)", largeExtraLong: "clamp(40px, 4.4vw, 56px)",
+    largeMobile: "clamp(42px, 12vw, 54px)", largeLongMobile: "clamp(37px, 10.4vw, 47px)", largeExtraLongMobile: "clamp(32px, 9vw, 40px)",
+    medium: "clamp(34px, 3.25vw, 46px)", small: "clamp(25px, 2.25vw, 32px)",
+  },
+  poster: {
+    large: "clamp(64px, 7.2vw, 98px)", largeLong: "clamp(54px, 6.1vw, 78px)", largeExtraLong: "clamp(44px, 5vw, 64px)",
+    largeMobile: "clamp(46px, 13vw, 58px)", largeLongMobile: "clamp(40px, 11.2vw, 50px)", largeExtraLongMobile: "clamp(34px, 9.6vw, 42px)",
+    medium: "clamp(38px, 4vw, 54px)", small: "clamp(27px, 2.6vw, 36px)",
+  },
 });
 
 const SURFACES = Object.freeze({
@@ -80,6 +96,32 @@ function accentTextColor(colors) {
   return colors.text.toUpperCase();
 }
 
+function focusColor(colors) {
+  const panelTint = mixHex(colors.accent, colors.background, 0.1);
+  const backgrounds = [colors.background, colors.text, panelTint];
+  const candidates = [];
+  for (let value = 0; value <= 255; value += 1) {
+    const channel = value.toString(16).padStart(2, "0");
+    const color = `#${channel}${channel}${channel}`.toUpperCase();
+    if (backgrounds.every((background) => contrastRatio(color, background) >= 3)) {
+      candidates.push(color);
+    }
+  }
+  if (backgrounds.every((background) => contrastRatio(colors.accent, background) >= 3)) {
+    return colors.accent.toUpperCase();
+  }
+  if (candidates.length === 0) return accentTextColor(colors);
+  const accentLuminance = relativeLuminance(colors.accent);
+  return candidates.sort((first, second) => (
+    Math.abs(relativeLuminance(first) - accentLuminance)
+    - Math.abs(relativeLuminance(second) - accentLuminance)
+  ))[0];
+}
+
+export function colorSchemeForTheme(theme) {
+  return relativeLuminance(theme.tokens.colors.background) < 0.36 ? "dark" : "light";
+}
+
 export function compileThemeCss(theme, revision, options = {}) {
   const { colors, typography } = theme.tokens;
   const density = DENSITIES[theme.tokens.density];
@@ -95,6 +137,9 @@ export function compileThemeCss(theme, revision, options = {}) {
   --color-accent: ${accent};
   --color-accent-text: ${accentTextColor(colors)};
   --color-rule: ${colors.rule.toUpperCase()};
+  --color-focus: ${focusColor(colors)};
+  --color-backdrop: color-mix(in srgb, ${colors.text.toUpperCase()} 32%, transparent);
+  --shadow-panel: 0 18px 48px color-mix(in srgb, ${colors.text.toUpperCase()} 16%, transparent);
   --font-headline: ${FONT_STACKS[typography.headlinePreset]};
   --font-ui: ${FONT_STACKS[typography.uiPreset]};
   --page-gutter: ${density.pageGutter};
@@ -104,6 +149,11 @@ export function compileThemeCss(theme, revision, options = {}) {
   --rule-width: ${rule.width};
   --rule-style: ${rule.style};
   --headline-large: ${scale.large};
+  --headline-large-long: ${scale.largeLong};
+  --headline-large-extra-long: ${scale.largeExtraLong};
+  --headline-large-mobile: ${scale.largeMobile};
+  --headline-large-long-mobile: ${scale.largeLongMobile};
+  --headline-large-extra-long-mobile: ${scale.largeExtraLongMobile};
   --headline-medium: ${scale.medium};
   --headline-small: ${scale.small};
   --surface-background: ${SURFACES[theme.tokens.surfaceStyle]};
@@ -138,5 +188,6 @@ export function createThemeManifest(definition, cssPath, candidateHash) {
       background: definition.tokens.colors.background,
       text: definition.tokens.colors.text,
     },
+    colorScheme: colorSchemeForTheme(definition),
   };
 }

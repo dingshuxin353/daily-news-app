@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  colorSchemeForTheme,
   compileThemeCss,
   createThemeDefinition,
 } from "../scripts/lib/theme-compiler.js";
@@ -17,10 +18,10 @@ import {
   switchTheme,
   validateActiveTheme,
   validateConfiguredTheme,
-  validateThemeStressFixture,
 } from "../scripts/lib/theme-pipeline.js";
 import {
   ThemeValidationError,
+  contrastRatio,
   loadPreset,
   resolveThemeCandidate,
   validateThemeCandidate,
@@ -31,7 +32,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-theme-"));
-  for (const entry of ["config", "data", "themes"]) {
+  for (const entry of ["config", "themes"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
   return target;
@@ -50,6 +51,15 @@ function candidate(id = "custom-editorial") {
     },
     recipes: { lead: "stacked" },
   };
+}
+
+function mixHex(first, second, amount) {
+  const channels = (color) => [1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16));
+  const left = channels(first);
+  const right = channels(second);
+  return `#${left.map((value, index) => (
+    Math.round(value * amount + right[index] * (1 - amount)).toString(16).padStart(2, "0")
+  )).join("")}`;
 }
 
 async function writeCandidate(target, value) {
@@ -119,9 +129,35 @@ test("Theme Compiler 对相同输入生成稳定 CSS 并记录版本元数据", 
   const first = compileThemeCss(preset, 3);
   const second = compileThemeCss(structuredClone(preset), 3);
   assert.equal(first, second);
-  assert.match(first, /schemaVersion=1.*id=midnight-tech.*revision=3.*compiler=1/);
+  assert.match(first, /schemaVersion=1.*id=midnight-tech.*revision=3.*compiler=2/);
   assert.doesNotMatch(first, /@import|url\(|https?:\/\//);
+  assert.match(first, /--color-focus: #[0-9A-F]{6}/);
+  assert.match(first, /--color-backdrop: color-mix/);
+  assert.match(first, /--shadow-panel:/);
   assert.equal(createThemeDefinition(preset, 3).revision, 3);
+});
+
+test("三个官方主题派生可见焦点色并使用相对亮度判断明暗", async () => {
+  const schemes = {};
+  for (const id of ["newspaper-default", "swiss-editorial", "midnight-tech"]) {
+    const preset = await loadPreset(rootDir, id);
+    const css = compileThemeCss(preset, 2);
+    const focus = /--color-focus: (#[0-9A-F]{6});/.exec(css)?.[1];
+    assert.ok(focus);
+    assert.ok(contrastRatio(focus, preset.tokens.colors.background) >= 3);
+    assert.ok(contrastRatio(focus, preset.tokens.colors.text) >= 3);
+    assert.ok(contrastRatio(focus, mixHex(
+      preset.tokens.colors.accent,
+      preset.tokens.colors.background,
+      0.1,
+    )) >= 3);
+    schemes[id] = colorSchemeForTheme(preset);
+  }
+  assert.deepEqual(schemes, {
+    "newspaper-default": "light",
+    "swiss-editorial": "light",
+    "midnight-tech": "dark",
+  });
 });
 
 test("预览不修改 Active；激活必须明确确认且过期预览不能使用", async () => {
@@ -261,11 +297,6 @@ test("主题配置与 Active 不一致时拒绝启动和构建使用", async () 
   config.activeTheme.id = "swiss-editorial";
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   await assert.rejects(() => validateConfiguredTheme(target), /与 Active Theme 不一致/);
-});
-
-test("固定压力测试覆盖所有行型、多来源、无分类和未填满末行", async () => {
-  const result = await validateThemeStressFixture(rootDir);
-  assert.deepEqual(result.signatures, ["L", "MM", "MSS", "SSSS", "SS"]);
 });
 
 test("Active Pointer 不能指向远程或非对应 Revision 的 CSS", async () => {

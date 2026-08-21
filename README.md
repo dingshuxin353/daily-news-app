@@ -1,6 +1,6 @@
 # DailyNews App
 
-文件驱动的 DailyNews（MVP 完成版后的 0.8.0）。外部 Agent 只提交声明式日报或主题候选；两条独立流水线分别维护正式日报与持久主题库，前端保持确定的四格内容骨架。
+文件驱动的 DailyNews（MVP 完成版后的 0.9.0）。外部 Agent 只提交声明式日报或主题候选；两条独立流水线分别维护正式日报与持久主题库，前端保持确定的四格内容骨架。
 
 ## 本地运行
 
@@ -11,6 +11,8 @@ npm start
 ```
 
 打开 <http://127.0.0.1:4173>。启动前会校验站点配置、当前主题和全部日报，并重新生成 `data/index.json`。
+
+源码仓库默认不附带日报或开发验证数据；空仓运行时会显示“暂无日报”。
 
 ## 验证与构建
 
@@ -32,7 +34,9 @@ npm run build
 - `data/index.json`：由 `npm run prepare-data` 自动生成，请勿手动维护
 - `public/`：以 `/` 开头的本地公开资源路径对应目录
 
-Agent 完整写入候选后，同步调用统一处理入口：
+Candidate、日报 Compiled、主题预览和构建目录都是运行时产物，已由 `.gitignore` 排除，不作为源码提交。
+
+Agent 完整写入候选后即可结束；宿主环境可以按自己的执行方式调用统一处理入口：
 
 ```bash
 npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode update
@@ -59,13 +63,15 @@ npm run switch-theme -- --theme <theme-id> --confirm <theme-id>
 npm run switch-theme -- --theme <theme-id> --revision <revision> --confirm <theme-id>
 ```
 
-新增或修改主题时，Agent 只能写 `themes/candidates/`。生成安全预览：
+新增或修改主题时，Agent 只需写入 `themes/candidates/`。
+
+在支持本地命令和浏览器的宿主环境中，维护者可以继续生成安全预览：
 
 ```bash
 npm run process-theme -- --candidate themes/candidates/<theme-id>.json
 ```
 
-运行 `npm start` 后，可打开 `/?themePreview=<theme-id>` 查看当前真实日报，追加 `&themeStress=1` 查看固定压力测试日报。预览不会修改当前 Active Theme。
+运行 `npm start` 后，可打开 `/?themePreview=<theme-id>` 查看当前正式日报。预览不会修改当前 Active Theme。
 
 用户确认审美后才可激活；命令要求用同一主题 ID 二次确认：
 
@@ -76,4 +82,4 @@ npm run rollback-theme -- --confirm
 
 Theme Writer 维护 `config/theme.json`、`themes/definitions/`、`themes/compiled/` 和 `themes/active.json`。不要手工覆盖这些文件；配置与 Active Theme 不一致时，启动和构建会拒绝继续。
 
-产品边界、内容契约和视觉规范分别记录在工作区的 `docs/spec-v0.8.0.md`、`docs/content.md` 与 `docs/design.md` 中。
+产品边界、内容契约和视觉规范分别记录在工作区的 `docs/specs/spec-v0.8.0.md`、`docs/content.md` 与 `docs/design.md` 中。

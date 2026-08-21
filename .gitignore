@@ -2,3 +2,14 @@ dist/
 node_modules/
 .DS_Store
 data/.locks/
+data/candidates/*.json
+data/compiled/*.json
+data/index.json
+output/
+coverage/
+playwright-report/
+test-results/
+themes/candidates/*.json
+themes/.theme.lock
+themes/previews/*.css
+themes/previews/*.json

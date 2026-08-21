@@ -2,7 +2,8 @@ import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export const THEME_SCHEMA_VERSION = 1;
-export const THEME_COMPILER_VERSION = "1";
+export const THEME_COMPILER_VERSION = "2";
+export const SUPPORTED_THEME_COMPILER_VERSIONS = new Set(["1", THEME_COMPILER_VERSION]);
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -224,14 +225,15 @@ function channel(value) {
     : ((normalized + 0.055) / 1.055) ** 2.4;
 }
 
-export function contrastRatio(foreground, background) {
+export function relativeLuminance(color) {
   const rgb = (color) => [1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16));
-  const luminance = (color) => {
-    const [red, green, blue] = rgb(color).map(channel);
-    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-  };
-  const first = luminance(foreground);
-  const second = luminance(background);
+  const [red, green, blue] = rgb(color).map(channel);
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+export function contrastRatio(foreground, background) {
+  const first = relativeLuminance(foreground);
+  const second = relativeLuminance(background);
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 

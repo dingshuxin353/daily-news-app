@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light">
+    <link rel="icon" href="data:,">
     <title>DailyNews</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
@@ -27,9 +28,20 @@
       </nav>
     </header>
 
+    <noscript>
+      <style>
+        .date-nav__button,
+        #content,
+        #source-panel,
+        #edition-status { display: none; }
+      </style>
+      <!-- build:noscript -->
+    </noscript>
+
     <main id="content" tabindex="-1">
       <p class="status" role="status">正在加载日报…</p>
     </main>
+    <p class="visually-hidden" id="edition-status" role="status" aria-live="polite"></p>
 
     <dialog class="source-panel" id="source-panel" aria-labelledby="source-panel-title">
       <header class="source-panel__header">

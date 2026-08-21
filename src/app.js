@@ -4,11 +4,11 @@ const paths = {
   issue: (date) => `/data/compiled/${date}.json`,
   activeTheme: "/themes/active.json",
   themePreview: (id) => `/themes/previews/${id}.json`,
-  stressIssue: "/themes/fixtures/stress-issue.json",
 };
 
 let currentItemsById = new Map();
 let sourcePanelTrigger = null;
+let currentSiteName = "DailyNews";
 
 export function selectDate(search, index) {
   const requested = new URLSearchParams(search).get("date");
@@ -43,24 +43,28 @@ export function selectThemeRequest(search) {
 
 async function loadThemeManifest(search) {
   const previewId = selectThemeRequest(search);
-  return fetchOptionalJson(previewId ? paths.themePreview(previewId) : paths.activeTheme);
+  if (previewId) return { manifest: await fetchJson(paths.themePreview(previewId)), preview: true };
+  if (document.querySelector("#active-theme")) return { manifest: null, preview: false };
+  return { manifest: await fetchOptionalJson(paths.activeTheme), preview: false };
 }
 
-async function applyTheme(manifest) {
-  if (!manifest) return false;
-  const root = document.documentElement;
-  for (const [name, value] of Object.entries(manifest.attributes)) {
-    root.dataset[name] = value;
-  }
-  const colorScheme = manifest.colors?.background && manifest.colors?.text
-    && Number.parseInt(manifest.colors.background.slice(1, 3), 16)
-      < Number.parseInt(manifest.colors.text.slice(1, 3), 16)
-    ? "dark"
-    : "light";
-  root.style.colorScheme = colorScheme;
+function relativeLuminance(color) {
+  const channels = [1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16) / 255);
+  const [red, green, blue] = channels.map((value) => (
+    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  ));
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
 
+function manifestColorScheme(manifest) {
+  return manifest.colorScheme
+    ?? (relativeLuminance(manifest.colors.background) < 0.36 ? "dark" : "light");
+}
+
+async function applyTheme(manifest, preview = false) {
+  if (!manifest) return false;
   const stylesheet = document.createElement("link");
-  stylesheet.id = "active-theme";
+  stylesheet.id = preview ? "theme-preview" : "active-theme";
   stylesheet.rel = "stylesheet";
   stylesheet.href = manifest.cssPath;
   const loaded = new Promise((resolve, reject) => {
@@ -68,7 +72,17 @@ async function applyTheme(manifest) {
     stylesheet.addEventListener("error", () => reject(new Error(`Failed to load ${manifest.cssPath}`)), { once: true });
   });
   document.head.append(stylesheet);
-  await loaded;
+  try {
+    await loaded;
+  } catch (error) {
+    stylesheet.remove();
+    throw error;
+  }
+  const root = document.documentElement;
+  for (const [name, value] of Object.entries(manifest.attributes)) root.dataset[name] = value;
+  const colorScheme = manifestColorScheme(manifest);
+  root.style.colorScheme = colorScheme;
+  document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", colorScheme);
   return true;
 }
 
@@ -88,11 +102,19 @@ function formatPublishedAt(value) {
   }).format(new Date(value));
 }
 
+export function classifyTitleLength(title) {
+  const length = [...title.trim()].length;
+  if (length <= 28) return "standard";
+  if (length <= 40) return "long";
+  return "extra-long";
+}
+
 function createArticle(item, module, isFirst) {
   const article = element("article", `story story--${module.size}`);
   article.id = item.id;
   article.dataset.size = module.size;
   article.dataset.span = String(module.span);
+  if (module.size === "large") article.dataset.titleLength = classifyTitleLength(item.title);
   article.style.gridColumn = `span ${module.span}`;
 
   const heading = element("header", "story__header");
@@ -102,7 +124,7 @@ function createArticle(item, module, isFirst) {
   heading.append(element(isFirst ? "h1" : "h2", "story__title", item.title));
 
   const summary = element("p", "story__summary", module.size === "large" ? item.summary : item.brief);
-  const source = element("div", "story__source");
+  const source = element("footer", "story__source");
   const primarySource = item.sources[0];
   const link = element("a", "story__primary-source", `${primarySource.name} ↗`);
   link.href = primarySource.url;
@@ -170,9 +192,9 @@ function renderIssue(issue) {
   let articleIndex = 0;
 
   const rows = issue.layout.rows.map((row, rowIndex) => {
-    const rowElement = element("section", `layout-row${rowIndex === 0 ? " layout-row--first" : " reveal"}`);
+    const rowElement = element("div", `layout-row${rowIndex === 0 ? " layout-row--first" : ""}`);
     rowElement.dataset.usedCapacity = String(row.usedCapacity);
-    rowElement.setAttribute("aria-label", `版面第 ${rowIndex + 1} 行`);
+    rowElement.dataset.row = String(rowIndex + 1);
 
     for (const module of row.modules) {
       const item = currentItemsById.get(module.itemId);
@@ -185,7 +207,6 @@ function renderIssue(issue) {
 
   content.className = "news-page";
   content.replaceChildren(...rows);
-  setupMotion();
 }
 
 function renderStatus(message) {
@@ -198,9 +219,9 @@ function renderStatus(message) {
 }
 
 function setupSite(site, hasTheme) {
+  currentSiteName = site.name;
   document.documentElement.style.setProperty("--site-accent", site.accentColor);
   if (!hasTheme) document.documentElement.style.setProperty("--color-accent", site.accentColor);
-  document.title = site.name;
 
   const name = document.querySelector(".brand__name");
   name.textContent = site.name;
@@ -211,30 +232,6 @@ function setupSite(site, hasTheme) {
     name.before(logo);
     name.hidden = true;
   }
-}
-
-function setupMotion() {
-  document.documentElement.classList.remove("motion-ready");
-  const targets = [...document.querySelectorAll(".reveal")];
-  if (
-    document.documentElement.dataset.motion === "none"
-    || !("IntersectionObserver" in window)
-    || window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  ) {
-    targets.forEach((target) => target.classList.add("is-visible"));
-    return;
-  }
-
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      entry.target.classList.add("is-visible");
-      observer.unobserve(entry.target);
-    }
-  }, { threshold: 0.08 });
-
-  document.documentElement.classList.add("motion-ready");
-  targets.forEach((target) => observer.observe(target));
 }
 
 function updateNavigation(date, dates) {
@@ -250,15 +247,34 @@ function updateNavigation(date, dates) {
   }
 }
 
-async function loadIssue(date, dates, updateUrl = false) {
+function updateDateUrl(date, method) {
+  const url = new URL(location.href);
+  url.searchParams.set("date", date);
+  history[method]({ date }, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function focusLoadedIssue() {
+  const target = document.querySelector("#content h1") ?? document.querySelector("#content");
+  target.tabIndex = -1;
+  target.dataset.focusOrigin = "programmatic";
+  target.addEventListener("blur", () => delete target.dataset.focusOrigin, { once: true });
+  target.focus({ preventScroll: true });
+}
+
+async function loadIssue(date, dates, options = {}) {
+  const { historyMethod = null, focusAfterLoad = false } = options;
   closeSourcePanel();
-  updateNavigation(date, dates);
-  if (updateUrl) history.pushState({ date }, "", `/?date=${date}`);
   window.scrollTo({ top: 0, behavior: "auto" });
   renderStatus("正在加载日报…");
 
   try {
-    renderIssue(await fetchJson(paths.issue(date)));
+    const issue = await fetchJson(paths.issue(date));
+    renderIssue(issue);
+    updateNavigation(date, dates);
+    if (historyMethod) updateDateUrl(date, historyMethod);
+    document.title = `${date} · ${currentSiteName}`;
+    document.querySelector("#edition-status").textContent = `${date} 内容已加载`;
+    if (focusAfterLoad) focusLoadedIssue();
   } catch (error) {
     console.error(error);
     renderStatus("这期日报暂时无法加载");
@@ -268,21 +284,22 @@ async function loadIssue(date, dates, updateUrl = false) {
 async function start() {
   let site;
   let index;
-  let theme;
+  let themeRequest;
+  const previewId = selectThemeRequest(location.search);
   try {
-    [site, index, theme] = await Promise.all([
+    [site, index, themeRequest] = await Promise.all([
       fetchJson(paths.site),
       fetchJson(paths.index),
       loadThemeManifest(location.search),
     ]);
-    await applyTheme(theme);
+    await applyTheme(themeRequest.manifest, themeRequest.preview);
   } catch (error) {
     console.error(error);
-    renderStatus("页面暂时无法加载");
+    renderStatus(previewId ? `主题预览 ${previewId} 加载失败` : "页面暂时无法加载");
     return;
   }
 
-  setupSite(site, Boolean(theme));
+  setupSite(site, Boolean(themeRequest.manifest || document.querySelector("#active-theme")));
   const sourcePanel = document.querySelector("#source-panel");
   sourcePanel.querySelector(".source-panel__close").addEventListener("click", closeSourcePanel);
   sourcePanel.addEventListener("close", () => {
@@ -295,28 +312,32 @@ async function start() {
     const item = currentItemsById.get(button.dataset.itemId);
     if (item) openSourcePanel(item, button);
   });
-  const stressMode = new URLSearchParams(location.search).get("themeStress") === "1";
+  if (index.dates.length === 0) {
+    renderStatus("暂无日报");
+    document.title = currentSiteName;
+    for (const button of document.querySelectorAll(".date-nav__button")) button.disabled = true;
+    return;
+  }
+
   const date = selectDate(location.search, index);
   const requested = new URLSearchParams(location.search).get("date");
-  if (requested && requested !== date) history.replaceState({ date }, "", "/");
+  if (requested && requested !== date) {
+    const url = new URL(location.href);
+    url.searchParams.delete("date");
+    history.replaceState({ date }, "", `${url.pathname}${url.search}${url.hash}`);
+  }
 
   document.querySelector(".date-nav").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-direction]");
     if (!button || button.disabled) return;
-    loadIssue(button.dataset.date, index.dates, true);
+    loadIssue(button.dataset.date, index.dates, { historyMethod: "pushState", focusAfterLoad: true });
   });
 
   window.addEventListener("popstate", () => {
-    loadIssue(selectDate(location.search, index), index.dates);
+    loadIssue(selectDate(location.search, index), index.dates, { focusAfterLoad: true });
   });
 
-  if (stressMode) {
-    const issue = await fetchJson(paths.stressIssue);
-    updateNavigation(issue.date, [issue.date]);
-    renderIssue(issue);
-  } else {
-    await loadIssue(date, index.dates);
-  }
+  await loadIssue(date, index.dates);
 }
 
 if (typeof document !== "undefined") start();

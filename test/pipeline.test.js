@@ -7,16 +7,17 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { processCandidate } from "../scripts/lib/pipeline.js";
+import { seedTestData } from "../test-support/helpers.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-pipeline-"));
-  for (const entry of ["config", "data", "public"]) {
+  for (const entry of ["config", "public"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
-  await mkdir(path.join(target, "data", "candidates"), { recursive: true });
+  await seedTestData(target);
   return target;
 }
 
