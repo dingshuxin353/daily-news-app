@@ -1,15 +1,36 @@
-# DailyNews Agent 写入入口
+# DailyNews AI Agent 内容使用指南
 
-规范版本：0.3
-目标系统版本：MVP 0.6
-更新日期：2026-08-20
-实现状态：统一入口与优先级数量配置已实现
+指南版本：1.0
+适用产品版本：0.8.0
+更新日期：2026-08-21
 
-这份文件是外部 Agent 进入 DailyNews 源码仓库后应首先读取的写入规范。它随源码一起迭代。
+这份指南告诉外部 AI Agent 如何为 DailyNews 搜集、整理和写入一期日报。字段的最终机器约束由源码中的 Validator 和 Writer 执行；本指南负责说明正确的使用流程、权限边界和完成条件。
 
-## 1. 当前能力
+如果任务是新增、修改或切换视觉主题，请改读 [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md)。内容候选和主题候选不能混在同一个文件或任务中。
 
-仓库提供统一处理命令：
+## 使用场景
+
+在用户要求生成、补充或更新某一期日报时使用本指南。Agent 负责搜集来源、合并同一事件、撰写候选和表达编辑判断；代码负责正式写入、revision、布局编译和索引更新。
+
+开始前先读取：
+
+- `config/site.json`：当前站点设置与三档优先级数量上限。
+- `data/issues/YYYY-MM-DD.json`：目标日期已存在时，只读获取 coverage、稳定 ID 和已有来源。
+- 用户指定的内容源、时间窗口和写入模式。
+
+## 1. 完成一次日报写入
+
+按以下顺序完成任务：
+
+1. 与用户要求对齐目标日期、内容源和采集时间窗口。
+2. 读取站点配置；目标日报已存在时，只读获取固定 coverage、稳定 ID 和已有来源。
+3. 搜集内容、核对来源、合并同一事件，并决定编辑优先级与阅读顺序。
+4. 生成一份完整 Candidate，写入 `data/candidates/YYYY-MM-DD.json`。
+5. 运行统一处理命令并等待结构化结果。
+6. 返回 `created`、`updated` 或 `unchanged` 后核对正式日报和编译产物，再报告完成。
+7. 返回 `rejected` 时保留 Candidate，根据 `field` 和 `reason` 修正或向用户报告。
+
+统一处理命令：
 
 ```bash
 npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode update
@@ -148,7 +169,7 @@ Agent 不得直接修改：
 - 删除指令、删除列表或删除标记
 - `resolvedPriority`
 - `large`、`medium`、`small`
-- 行号、栏位、跨度、容量和坐标
+- 行号、栏位、模块所占栏数、容量和坐标
 - HTML、CSS、组件或动画参数
 - 外部平台的 `score`、`selected`
 - 图片字段

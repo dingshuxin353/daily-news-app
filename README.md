@@ -1,6 +1,6 @@
 # DailyNews App
 
-文件驱动的 DailyNews（MVP 完成版后的 0.7.0）。外部 Agent 只提交声明式日报或主题候选；两条独立流水线分别维护正式日报与主题 revision，前端保持确定的四格内容骨架。
+文件驱动的 DailyNews（MVP 完成版后的 0.8.0）。外部 Agent 只提交声明式日报或主题候选；两条独立流水线分别维护正式日报与持久主题库，前端保持确定的四格内容骨架。
 
 ## 本地运行
 
@@ -10,7 +10,7 @@
 npm start
 ```
 
-打开 <http://127.0.0.1:4173>。启动前会校验站点配置和全部日报，并重新生成 `data/index.json`。
+打开 <http://127.0.0.1:4173>。启动前会校验站点配置、当前主题和全部日报，并重新生成 `data/index.json`。
 
 ## 验证与构建
 
@@ -23,7 +23,7 @@ npm run build
 
 ## 数据入口
 
-外部 Agent 必须先阅读仓库根目录的 [`AGENT_WRITE_SPEC.md`](./AGENT_WRITE_SPEC.md)。
+外部 Agent 必须先阅读仓库根目录的 [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md)。
 
 - `config/site.json`：站点名称、强调色、可选 Logo 与三档优先级数量上限
 - `data/candidates/YYYY-MM-DD.json`：Agent 唯一写入的完整候选
@@ -44,9 +44,22 @@ npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode 
 
 ## 主题入口
 
-外部 Agent 生成主题前必须阅读 [`AGENT_THEME_SPEC.md`](./AGENT_THEME_SPEC.md)，且只能写 `themes/candidates/`。三个官方 Preset 是 `newspaper-default`、`swiss-editorial` 和 `midnight-tech`。
+外部 Agent 处理主题前必须阅读 [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md)。三个官方主题是 `newspaper-default`、`swiss-editorial` 和 `midnight-tech`，安装后都可以直接切换。
 
-生成安全预览：
+查看当前主题与主题库：
+
+```bash
+npm run list-themes
+```
+
+切换已有主题不会生成 Candidate 或新 revision：
+
+```bash
+npm run switch-theme -- --theme <theme-id> --confirm <theme-id>
+npm run switch-theme -- --theme <theme-id> --revision <revision> --confirm <theme-id>
+```
+
+新增或修改主题时，Agent 只能写 `themes/candidates/`。生成安全预览：
 
 ```bash
 npm run process-theme -- --candidate themes/candidates/<theme-id>.json
@@ -61,6 +74,6 @@ npm run activate-theme -- --theme <theme-id> --confirm <theme-id>
 npm run rollback-theme -- --confirm
 ```
 
-Theme Writer 维护 `themes/definitions/`、`themes/compiled/` 和 `themes/active.json`。不要手工覆盖这些文件。没有 Active Theme 时，页面继续使用 `config/site.json.accentColor`。
+Theme Writer 维护 `config/theme.json`、`themes/definitions/`、`themes/compiled/` 和 `themes/active.json`。不要手工覆盖这些文件；配置与 Active Theme 不一致时，启动和构建会拒绝继续。
 
-产品边界、内容契约和视觉规范分别记录在工作区的 `docs/spec-v0.7.0.md`、`docs/content.md` 与 `docs/design.md` 中。
+产品边界、内容契约和视觉规范分别记录在工作区的 `docs/spec-v0.8.0.md`、`docs/content.md` 与 `docs/design.md` 中。

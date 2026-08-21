@@ -2,11 +2,13 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileIssue, formatWarning } from "./lib/compiler.js";
+import { validateConfiguredTheme } from "./lib/theme-pipeline.js";
 import { validateSources } from "./lib/validation.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 try {
+  await validateConfiguredTheme(rootDir);
   const { site, index, issues } = await validateSources(rootDir);
   const results = issues.map(({ issue, filePath }) => (
     compileIssue(issue, filePath, site.priorityLimits)

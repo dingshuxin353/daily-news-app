@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,9 +11,12 @@ import {
 } from "../scripts/lib/theme-compiler.js";
 import {
   activateTheme,
+  listThemes,
   processTheme,
   rollbackTheme,
+  switchTheme,
   validateActiveTheme,
+  validateConfiguredTheme,
   validateThemeStressFixture,
 } from "../scripts/lib/theme-pipeline.js";
 import {
@@ -150,7 +153,11 @@ test("激活按语义维护 Revision，且可回滚到上一已激活版本", as
   await processTheme(target, candidatePath);
   const first = await activateTheme(target, value.id, { confirm: value.id });
   assert.deepEqual({ result: first.result, revision: first.revision }, { result: "activated", revision: 1 });
-  assert.equal((await validateActiveTheme(target)).themeId, value.id);
+  assert.equal((await validateConfiguredTheme(target)).themeId, value.id);
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(target, "config", "theme.json"), "utf8")).activeTheme,
+    { id: value.id, revision: 1 },
+  );
   assert.equal((await activateTheme(target, value.id, { confirm: value.id })).result, "unchanged");
 
   value.recipes.normal = "compact";
@@ -164,7 +171,96 @@ test("激活按语义维护 Revision，且可回滚到上一已激活版本", as
     { result: rollback.result, themeId: rollback.themeId, revision: rollback.revision },
     { result: "rolled-back", themeId: value.id, revision: 1 },
   );
-  assert.equal((await validateActiveTheme(target)).revision, 1);
+  assert.equal((await validateConfiguredTheme(target)).revision, 1);
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(target, "config", "theme.json"), "utf8")).activeTheme,
+    { id: value.id, revision: 1 },
+  );
+});
+
+test("主题库列出三个官方主题，并可在没有 Candidate 时切换已有主题", async () => {
+  const target = await fixture();
+  const catalog = await listThemes(target);
+  assert.deepEqual(catalog.activeTheme, { id: "newspaper-default", revision: 1 });
+  assert.deepEqual(
+    catalog.themes.map(({ id, latestRevision, revisions }) => ({ id, latestRevision, revisions })),
+    [
+      { id: "midnight-tech", latestRevision: 1, revisions: [1] },
+      { id: "newspaper-default", latestRevision: 1, revisions: [1] },
+      { id: "swiss-editorial", latestRevision: 1, revisions: [1] },
+    ],
+  );
+
+  const definitionsBefore = await readdir(path.join(target, "themes", "definitions", "swiss-editorial"));
+  await assert.rejects(() => switchTheme(target, "swiss-editorial"), /必须使用 --confirm/);
+  const switched = await switchTheme(target, "swiss-editorial", { confirm: "swiss-editorial" });
+  assert.deepEqual(
+    { result: switched.result, themeId: switched.themeId, revision: switched.revision },
+    { result: "switched", themeId: "swiss-editorial", revision: 1 },
+  );
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(target, "config", "theme.json"), "utf8")).activeTheme,
+    { id: "swiss-editorial", revision: 1 },
+  );
+  assert.equal((await validateConfiguredTheme(target)).themeId, "swiss-editorial");
+  assert.deepEqual(
+    await readdir(path.join(target, "themes", "definitions", "swiss-editorial")),
+    definitionsBefore,
+  );
+  assert.equal(
+    (await switchTheme(target, "swiss-editorial", { confirm: "swiss-editorial" })).result,
+    "unchanged",
+  );
+});
+
+test("主题切换支持指定历史 Revision，失败时保持配置和 Active 不变", async () => {
+  const target = await fixture();
+  const value = candidate();
+  const candidatePath = await writeCandidate(target, value);
+  await processTheme(target, candidatePath);
+  await activateTheme(target, value.id, { confirm: value.id });
+
+  value.recipes.normal = "compact";
+  await writeCandidate(target, value);
+  await processTheme(target, candidatePath);
+  await activateTheme(target, value.id, { confirm: value.id });
+
+  await switchTheme(target, "newspaper-default", { confirm: "newspaper-default" });
+  const latest = await switchTheme(target, value.id, { confirm: value.id });
+  assert.deepEqual(
+    { result: latest.result, revision: latest.revision },
+    { result: "switched", revision: 2 },
+  );
+
+  const historical = await switchTheme(target, value.id, { revision: 1, confirm: value.id });
+  assert.deepEqual(
+    { result: historical.result, revision: historical.revision },
+    { result: "switched", revision: 1 },
+  );
+
+  const activePath = path.join(target, "themes", "active.json");
+  const configPath = path.join(target, "config", "theme.json");
+  const activeBefore = await readFile(activePath, "utf8");
+  const configBefore = await readFile(configPath, "utf8");
+  await assert.rejects(
+    () => switchTheme(target, "not-installed", { confirm: "not-installed" }),
+    /Theme Revision 不存在/,
+  );
+  await assert.rejects(
+    () => switchTheme(target, value.id, { revision: 99, confirm: value.id }),
+    /Theme Revision 不存在/,
+  );
+  assert.equal(await readFile(activePath, "utf8"), activeBefore);
+  assert.equal(await readFile(configPath, "utf8"), configBefore);
+});
+
+test("主题配置与 Active 不一致时拒绝启动和构建使用", async () => {
+  const target = await fixture();
+  const configPath = path.join(target, "config", "theme.json");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.activeTheme.id = "swiss-editorial";
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await assert.rejects(() => validateConfiguredTheme(target), /与 Active Theme 不一致/);
 });
 
 test("固定压力测试覆盖所有行型、多来源、无分类和未填满末行", async () => {

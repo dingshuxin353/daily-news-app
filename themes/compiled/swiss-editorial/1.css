@@ -1,0 +1,21 @@
+/* DailyNews Theme | schemaVersion=1 | id=swiss-editorial | revision=1 | compiler=1 */
+:root {
+  --color-background: #FFFFFF;
+  --color-text: #101010;
+  --color-muted: #595959;
+  --color-accent: #D83A24;
+  --color-accent-text: #D83A24;
+  --color-rule: #171717;
+  --font-headline: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --page-gutter: 38px;
+  --row-space: 22px;
+  --story-gap: 18px;
+  --source-gap: 16px;
+  --rule-width: 2px;
+  --rule-style: solid;
+  --headline-large: clamp(64px, 7.2vw, 98px);
+  --headline-medium: clamp(38px, 4vw, 54px);
+  --headline-small: clamp(27px, 2.6vw, 36px);
+  --surface-background: var(--color-background);
+}

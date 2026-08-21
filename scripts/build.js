@@ -1,12 +1,12 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateActiveTheme } from "./lib/theme-pipeline.js";
+import { validateConfiguredTheme } from "./lib/theme-pipeline.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = path.join(rootDir, "dist");
 
-const activeTheme = await validateActiveTheme(rootDir);
+const activeTheme = await validateConfiguredTheme(rootDir);
 
 await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });

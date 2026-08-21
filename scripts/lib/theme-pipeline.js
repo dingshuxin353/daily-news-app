@@ -31,6 +31,8 @@ export class ThemePipelineError extends Error {
   }
 }
 
+const THEME_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 async function readJson(filePath) {
   try {
     return JSON.parse(await readFile(filePath, "utf8"));
@@ -47,6 +49,32 @@ async function fileExists(filePath) {
     if (error.code === "ENOENT") return false;
     throw error;
   }
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requireExactFields(value, fields, field) {
+  if (!isObject(value)) throw new ThemePipelineError(field, "必须是对象");
+  const expected = new Set(fields);
+  for (const key of Object.keys(value)) {
+    if (!expected.has(key)) throw new ThemePipelineError(`${field}.${key}`, "不是允许的配置字段");
+  }
+  for (const key of fields) {
+    if (!(key in value)) throw new ThemePipelineError(`${field}.${key}`, "不能为空");
+  }
+}
+
+function themeConfig(themeId, revision) {
+  return {
+    schemaVersion: 1,
+    activeTheme: { id: themeId, revision },
+  };
+}
+
+function themeConfigSource(themeId, revision) {
+  return `${JSON.stringify(themeConfig(themeId, revision), null, 2)}\n`;
 }
 
 async function writeAtomic(filePath, source) {
@@ -182,16 +210,71 @@ export async function processTheme(rootDir, candidatePath) {
 }
 
 async function nextRevision(rootDir, themeId) {
+  const revisions = await storedRevisions(rootDir, themeId);
+  return revisions.length === 0 ? 1 : revisions.at(-1) + 1;
+}
+
+async function storedRevisions(rootDir, themeId) {
+  if (!THEME_ID_PATTERN.test(themeId)) {
+    throw new ThemePipelineError("themeId", "只能包含小写字母、数字和连字符");
+  }
   const definitionDir = path.join(rootDir, "themes", "definitions", themeId);
   const names = await readdir(definitionDir).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
   });
-  const revisions = names
+  return names
     .map((name) => /^(\d+)\.json$/.exec(name)?.[1])
     .filter(Boolean)
-    .map(Number);
-  return revisions.length === 0 ? 1 : Math.max(...revisions) + 1;
+    .map(Number)
+    .filter((revision) => Number.isInteger(revision) && revision >= 1)
+    .sort((first, second) => first - second);
+}
+
+async function loadStoredTheme(rootDir, themeId, revision) {
+  if (!THEME_ID_PATTERN.test(themeId)) {
+    throw new ThemePipelineError("themeId", "只能包含小写字母、数字和连字符");
+  }
+  if (!Number.isInteger(revision) || revision < 1) {
+    throw new ThemePipelineError("revision", "必须是大于等于 1 的整数");
+  }
+  const definitionPath = path.join(rootDir, "themes", "definitions", themeId, `${revision}.json`);
+  const compiledPath = path.join(rootDir, "themes", "compiled", themeId, `${revision}.css`);
+  const definition = await readJson(definitionPath);
+  if (!definition || !await fileExists(compiledPath)) {
+    throw new ThemePipelineError("theme", `Theme Revision 不存在：${themeId}@${revision}`);
+  }
+  if (
+    definition.schemaVersion !== 1
+    || definition.id !== themeId
+    || definition.revision !== revision
+    || definition.compilerVersion !== THEME_COMPILER_VERSION
+  ) {
+    throw new ThemePipelineError("theme", `Theme Revision 元数据无效：${themeId}@${revision}`);
+  }
+  const compiled = await readFile(compiledPath, "utf8");
+  const header = `schemaVersion=${definition.schemaVersion} | id=${themeId} | revision=${revision} | compiler=${definition.compilerVersion}`;
+  if (!compiled.startsWith(`/* DailyNews Theme | ${header}`)) {
+    throw new ThemePipelineError("theme", `Theme Revision 编译产物无效：${themeId}@${revision}`);
+  }
+  return {
+    definition,
+    relativeCssPath: `/themes/compiled/${themeId}/${revision}.css`,
+  };
+}
+
+async function validateThemeConfig(rootDir) {
+  const configPath = path.join(rootDir, "config", "theme.json");
+  const config = await readJson(configPath);
+  if (!config) throw new ThemePipelineError("config/theme.json", "不存在");
+  requireExactFields(config, ["schemaVersion", "activeTheme"], "config/theme.json");
+  if (config.schemaVersion !== 1) {
+    throw new ThemePipelineError("config/theme.json.schemaVersion", "必须等于 1");
+  }
+  requireExactFields(config.activeTheme, ["id", "revision"], "config/theme.json.activeTheme");
+  const { id, revision } = config.activeTheme;
+  await loadStoredTheme(rootDir, id, revision);
+  return config;
 }
 
 function semanticDefinition(definition) {
@@ -227,7 +310,7 @@ export async function activateTheme(rootDir, themeId, options = {}) {
   const releaseLock = await acquireLock(rootDir);
   try {
     const activePath = path.join(rootDir, "themes", "active.json");
-    const active = await readJson(activePath);
+    const active = await validateConfiguredTheme(rootDir);
     const activeDefinitionPath = active
       ? path.join(rootDir, "themes", "definitions", active.themeId, `${active.revision}.json`)
       : null;
@@ -246,6 +329,7 @@ export async function activateTheme(rootDir, themeId, options = {}) {
     const css = compileThemeCss(resolved, revision, { usesSiteAccent });
     const definitionPath = path.join(rootDir, "themes", "definitions", themeId, `${revision}.json`);
     const compiledPath = path.join(rootDir, "themes", "compiled", themeId, `${revision}.css`);
+    const configPath = path.join(rootDir, "config", "theme.json");
     const nextActive = {
       ...createThemeManifest(definition, relativeCssPath, candidateHash),
       previous: active ? { themeId: active.themeId, revision: active.revision } : null,
@@ -253,10 +337,78 @@ export async function activateTheme(rootDir, themeId, options = {}) {
     const stages = [
       await stageFile(definitionPath, stableJson(definition)),
       await stageFile(compiledPath, css),
+      await stageFile(configPath, themeConfigSource(themeId, revision)),
       await stageFile(activePath, stableJson(nextActive)),
     ];
     await commitStages(stages);
     return { result: "activated", themeId, revision, previous: nextActive.previous };
+  } finally {
+    await releaseLock();
+  }
+}
+
+export async function listThemes(rootDir) {
+  const active = await validateConfiguredTheme(rootDir);
+  const definitionsDir = path.join(rootDir, "themes", "definitions");
+  const entries = await readdir(definitionsDir, { withFileTypes: true }).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const themes = [];
+  for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+    const revisions = await storedRevisions(rootDir, entry.name);
+    if (revisions.length === 0) continue;
+    const latestRevision = revisions.at(-1);
+    const { definition } = await loadStoredTheme(rootDir, entry.name, latestRevision);
+    for (const revision of revisions.slice(0, -1)) {
+      await loadStoredTheme(rootDir, entry.name, revision);
+    }
+    themes.push({
+      id: definition.id,
+      name: definition.name,
+      ...(definition.description === undefined ? {} : { description: definition.description }),
+      latestRevision,
+      revisions,
+      activeRevision: active.themeId === definition.id ? active.revision : null,
+    });
+  }
+  return {
+    activeTheme: { id: active.themeId, revision: active.revision },
+    themes,
+  };
+}
+
+export async function switchTheme(rootDir, themeId, options = {}) {
+  if (options.confirm !== themeId) {
+    throw new ThemePipelineError("authorization", `必须使用 --confirm ${themeId} 明确确认切换`);
+  }
+  const releaseLock = await acquireLock(rootDir);
+  try {
+    const active = await validateConfiguredTheme(rootDir);
+    const revisions = await storedRevisions(rootDir, themeId);
+    const revision = options.revision ?? revisions.at(-1);
+    if (revision === undefined) {
+      throw new ThemePipelineError("theme", `Theme Revision 不存在：${themeId}`);
+    }
+    const { definition, relativeCssPath } = await loadStoredTheme(rootDir, themeId, revision);
+    if (active.themeId === themeId && active.revision === revision) {
+      return { result: "unchanged", themeId, revision };
+    }
+    const nextActive = {
+      ...createThemeManifest(definition, relativeCssPath, null),
+      previous: { themeId: active.themeId, revision: active.revision },
+    };
+    const stages = [
+      await stageFile(path.join(rootDir, "config", "theme.json"), themeConfigSource(themeId, revision)),
+      await stageFile(path.join(rootDir, "themes", "active.json"), stableJson(nextActive)),
+    ];
+    await commitStages(stages);
+    return {
+      result: "switched",
+      themeId,
+      revision,
+      previous: nextActive.previous,
+    };
   } finally {
     await releaseLock();
   }
@@ -269,24 +421,26 @@ export async function rollbackTheme(rootDir, options = {}) {
   const releaseLock = await acquireLock(rootDir);
   try {
     const activePath = path.join(rootDir, "themes", "active.json");
-    const active = await readJson(activePath);
+    const active = await validateConfiguredTheme(rootDir);
     if (!active?.previous) throw new ThemePipelineError("rollback", "当前主题没有可回滚版本");
     const target = active.previous;
-    const definitionPath = path.join(rootDir, "themes", "definitions", target.themeId, `${target.revision}.json`);
-    const definition = await readJson(definitionPath);
-    const compiledPath = path.join(rootDir, "themes", "compiled", target.themeId, `${target.revision}.css`);
-    if (!definition || !await fileExists(compiledPath)) {
-      throw new ThemePipelineError("rollback", "目标 Theme Revision 或编译产物不存在");
-    }
+    const { definition, relativeCssPath } = await loadStoredTheme(rootDir, target.themeId, target.revision);
     const nextActive = {
       ...createThemeManifest(
         definition,
-        `/themes/compiled/${target.themeId}/${target.revision}.css`,
+        relativeCssPath,
         null,
       ),
       previous: { themeId: active.themeId, revision: active.revision },
     };
-    await writeAtomic(activePath, stableJson(nextActive));
+    const stages = [
+      await stageFile(
+        path.join(rootDir, "config", "theme.json"),
+        themeConfigSource(target.themeId, target.revision),
+      ),
+      await stageFile(activePath, stableJson(nextActive)),
+    ];
+    await commitStages(stages);
     return {
       result: "rolled-back",
       themeId: target.themeId,
@@ -332,6 +486,22 @@ export async function validateActiveTheme(rootDir) {
   const header = `schemaVersion=${active.schemaVersion} | id=${active.themeId} | revision=${active.revision} | compiler=${active.compilerVersion}`;
   if (!compiled.startsWith(`/* DailyNews Theme | ${header}`)) {
     throw new ThemePipelineError("active", "与指向的编译产物元数据不一致");
+  }
+  return active;
+}
+
+export async function validateConfiguredTheme(rootDir) {
+  const config = await validateThemeConfig(rootDir);
+  const active = await validateActiveTheme(rootDir);
+  if (!active) throw new ThemePipelineError("active", "不存在，无法应用 config/theme.json");
+  if (
+    active.themeId !== config.activeTheme.id
+    || active.revision !== config.activeTheme.revision
+  ) {
+    throw new ThemePipelineError(
+      "config/theme.json.activeTheme",
+      "与 Active Theme 不一致，请使用 switch-theme 修改当前主题",
+    );
   }
   return active;
 }
