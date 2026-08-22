@@ -1,8 +1,13 @@
 # DailyNews MCP compatibility probe
 
-This directory contains the disposable M0 compatibility probe defined by
-`docs/plans/m0-mcp-validation.md`. It is independent from the DailyNews content,
-compiler, theme, and page pipelines.
+This directory contains the disposable M0 compatibility probe retained after
+the one-time validation. It is independent from the DailyNews content,
+compiler, theme, and page pipelines. The redacted outcome and evidence are in
+[`mcp-validation-report.md`](./mcp-validation-report.md).
+
+The validation endpoint has been removed and the deployed probe is stopped.
+Retaining this code does not mean WorkBuddy, Hermes, or scheduled execution was
+validated.
 
 ## Fixed baseline
 
