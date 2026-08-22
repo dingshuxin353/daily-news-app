@@ -232,6 +232,21 @@ describe("DailyNews MCP compatibility probe", () => {
     assert.equal(context.structuredContent.limits.maxRequestBytes, MAX_REQUEST_BYTES);
   });
 
+  test("negotiates the fixed protocol when a client proposes an older version", async () => {
+    const { url } = await trackedListen();
+    const body = initializeBody();
+    body.params.protocolVersion = "2025-06-18";
+
+    const response = await rawRequest(url, {
+      authorization: `Bearer ${tokens.codex}`,
+      body,
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.result.protocolVersion, PROTOCOL_VERSION);
+  });
+
   test("submits, reads, deduplicates, and rejects an idempotency conflict", async () => {
     const { url } = await trackedListen();
     const { client } = await trackedConnect(url, tokens.codex);

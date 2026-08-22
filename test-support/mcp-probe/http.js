@@ -178,11 +178,22 @@ export function createMcpProbeHttpServer({
         return;
       }
 
-      protocolVersion = requestProtocolVersion(parsed.body, request.headers["mcp-protocol-version"]);
-      if (protocolVersion !== PROTOCOL_VERSION) {
+      const isInitialize = parsed.body?.method === "initialize";
+      const requestedProtocolVersion = requestProtocolVersion(
+        parsed.body,
+        request.headers["mcp-protocol-version"],
+      );
+      protocolVersion = isInitialize ? PROTOCOL_VERSION : requestedProtocolVersion;
+      if (!isInitialize && protocolVersion !== PROTOCOL_VERSION) {
         result = "unsupported_protocol";
         sendHttpError(response, 400, `This probe requires MCP protocol ${PROTOCOL_VERSION}.`);
         return;
+      }
+      if (isInitialize && typeof requestedProtocolVersion === "string") {
+        parsed.body = {
+          ...parsed.body,
+          params: { ...parsed.body.params, protocolVersion: PROTOCOL_VERSION },
+        };
       }
 
       if (parsed.body?.method === "tools/call") {
