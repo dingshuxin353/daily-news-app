@@ -9,7 +9,7 @@
 | 生成、补充或更新日报 | [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md) | `data/candidates/YYYY-MM-DD.json` |
 | 查看、切换、新增或修改主题 | [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md) | 目标主题信息，或 `themes/candidates/<theme-id>.json` |
 | 修改站点设置 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | 用户明确要求的配置改动 |
-| 修改源码或测试 | 本文件和相关源码、测试 | 与任务直接相关的最小改动 |
+| 修改源码或测试 | 本文件、[`CONTRIBUTING.md`](./CONTRIBUTING.md) 和相关源码、测试 | 与任务直接相关的最小改动 |
 
 内容和主题任务不要混在同一个 Candidate 中。Agent 完成 Candidate 后即可报告结果，不要求所有 Agent 软件都能运行命令、启动服务或操作浏览器；后续消费、编译和正式写入由宿主环境负责。
 
@@ -36,6 +36,7 @@
 
 ## 源码开发边界
 
+- 遵守 `CONTRIBUTING.md` 中的分支、提交、Pull Request、验证和目录规则。
 - 不把 Candidate、正式数据、编译产物和源码改动混成同一种职责。
 - 不绕过现有 Validator、Writer 或 Compiler 直接生成正式产物。
 - 不改变四格布局、内容顺序或 Agent 契约，除非当前任务明确要求。
