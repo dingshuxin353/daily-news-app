@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startCandidateHost } from "./lib/candidate-host.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const staticRoot = path.join(projectRoot, "dist");
@@ -18,8 +19,11 @@ const contentTypes = new Map([
 function resolveRequestPath(urlPath) {
   const decoded = decodeURIComponent(urlPath);
   if (decoded === "/") return path.join(staticRoot, "index.html");
-  return path.join(staticRoot, decoded);
+  const requested = path.join(staticRoot, decoded);
+  return decoded.endsWith("/") ? path.join(requested, "index.html") : requested;
 }
+
+await startCandidateHost(projectRoot);
 
 createServer(async (request, response) => {
   let filePath;

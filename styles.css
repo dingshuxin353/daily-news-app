@@ -51,12 +51,14 @@ body {
 }
 
 button,
-a {
+a,
+select {
   font: inherit;
 }
 
 button:focus-visible,
 a:focus-visible,
+select:focus-visible,
 main:focus-visible {
   outline: 3px solid var(--color-focus);
   outline-offset: 4px;
@@ -126,6 +128,34 @@ main:focus-visible {
 
 .brand__name[hidden] {
   display: none;
+}
+
+.publication-nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.publication-select {
+  max-width: 180px;
+  padding: 6px 24px 6px 8px;
+  border: 0;
+  border-left: var(--rule-width) var(--rule-style) var(--color-rule);
+  border-radius: 0;
+  color: var(--color-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.submission-notice {
+  width: min(calc(100% - var(--page-gutter)), var(--page-width));
+  margin: 18px auto 0;
+  padding: 12px 0;
+  border-top: var(--rule-width) var(--rule-style) var(--color-rule);
+  border-bottom: var(--rule-width) var(--rule-style) var(--color-rule);
+  color: var(--color-muted);
+  font-size: 13px;
 }
 
 .date-nav {
@@ -675,6 +705,18 @@ main:focus-visible {
   .brand__name {
     max-width: 108px;
     font-size: 16px;
+  }
+
+  .publication-nav {
+    gap: 6px;
+  }
+
+  .publication-select {
+    width: 68px;
+    padding: 7px 18px 7px 6px;
+    border-left: 0;
+    color: var(--color-muted);
+    font-size: 11px;
   }
 
   .date-nav {

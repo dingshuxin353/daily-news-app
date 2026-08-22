@@ -107,11 +107,13 @@ npm run switch-theme -- --publication <publication-id> --theme <theme-id> --revi
 publications/<publication-id>/data/candidates/YYYY-MM-DD.json
 ```
 
-候选完成后，由宿主环境决定何时调用：
+候选完成后，运行中的 `npm start` 宿主会自动消费当前上海日期的安全 `update`；服务未运行时在下一次启动扫描。维护者也可以显式调用：
 
 ```bash
 npm run process-candidate -- --publication <publication-id> --candidate publications/<publication-id>/data/candidates/YYYY-MM-DD.json --mode update
 ```
+
+历史日期需要 `--allow-history`；`replace` 需要同时使用 `--mode replace --allow-replace`。这些授权只能来自用户或受信任宿主，不能写入 Candidate。
 
 各目录职责：
 
@@ -142,7 +144,7 @@ npm run process-candidate -- --publication <publication-id> --candidate publicat
 PORT=5173 npm start
 ```
 
-`npm start` 会在启动服务前运行数据准备；`npm run build` 会重新生成 `dist/`。这两个过程都可能更新编译数据和索引。
+`npm start` 会在启动服务前运行数据准备和静态构建，然后扫描并监听各 Publication 的 Candidate。只有当前上海日期的安全 `update` 会自动进入 Writer 与 Compiler；历史日期记录为 `authorization_required`，校验失败记录为 `rejected`。`npm run build` 会重新生成 `dist/`。这些过程可能更新编译数据、索引和 Submission Status。
 
 ## 7. 静态构建
 
@@ -152,6 +154,18 @@ npm run build
 
 构建输出位于 `dist/`，其中包含页面、站点配置、正式日报、编译主题和公开资源。部署时必须保持目录结构，不要只上传 `index.html`。
 
-## 8. 配置安全
+根路径进入 Registry 中的默认 Publication；正式入口是 `/p/<publication-id>/`，日期使用 `?date=YYYY-MM-DD`。未知 Publication 返回 404，不存在日期不会回退到其他日报。
+
+## 8. v0.9 数据迁移
+
+仅在尚未建立 Publication Registry 的 v0.9 单日报安装中运行：
+
+```bash
+npm run migrate-v0.9 -- --publication <publication-id> --confirm <publication-id>
+```
+
+命令复制并校验根级站点配置、Candidate、Issue、Compiled、索引和 Active Theme，校验成功后才创建 Registry。原始 `config/`、`data/` 和 `themes/active.json` 保持不变；目标目录已存在时不会合并或覆盖。
+
+## 9. 配置安全
 
 当前本地版本不需要 API Token、数据库密码或云端密钥。不要把任何内容源凭证、Cookie、Agent Token 或私人配置写入 Candidate、主题文件或源码仓库。

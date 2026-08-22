@@ -19,7 +19,7 @@ function publicationDir(target) {
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-pipeline-"));
-  for (const entry of ["public", "themes"]) {
+  for (const entry of ["index.html", "styles.css", "src", "public", "themes"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
   await mkdir(path.join(target, "config"), { recursive: true });
@@ -134,12 +134,31 @@ test("replace 只有显式模式才删除候选未包含的旧内容", async () 
   const result = await processCandidate(target, publicationId, candidatePath, {
     today: "2026-08-19",
     mode: "replace",
+    allowReplace: true,
   });
   const issue = await readIssue(target, "2026-08-19");
 
   assert.equal(result.result, "updated");
   assert.equal(issue.revision, 2);
   assert.equal(issue.items.length, 1);
+});
+
+test("replace 未显式授权时返回 authorization_required 且不写正式产物", async () => {
+  const target = await fixture();
+  const existing = await readIssue(target, "2026-08-19");
+  const candidate = candidateFromIssue(existing);
+  candidate.items = [candidate.items[0]];
+  const candidatePath = await writeCandidate(target, candidate);
+  const before = await snapshot(target, "2026-08-19");
+
+  await assert.rejects(
+    () => processCandidate(target, publicationId, candidatePath, {
+      today: "2026-08-19",
+      mode: "replace",
+    }),
+    (error) => error.result === "authorization_required" && /--allow-replace/.test(error.message),
+  );
+  assert.deepEqual(await snapshot(target, "2026-08-19"), before);
 });
 
 test("无业务变化保留 generatedAt 和 revision，仅修复过期 compiled 与 index", async () => {
@@ -249,7 +268,7 @@ test("候选必须位于 data/candidates 目录", async () => {
   );
 });
 
-test("process-candidate 命令输出结构化成功结果", async () => {
+test("process-candidate 宿主命令输出 published 与完整页面状态", async () => {
   const target = await fixture();
   await cp(path.join(rootDir, "scripts"), path.join(target, "scripts"), { recursive: true });
   const existing = await readIssue(target, "2026-08-19");
@@ -265,8 +284,14 @@ test("process-candidate 命令输出结构化成功结果", async () => {
     "--allow-history",
   ], { cwd: target });
   const result = JSON.parse(stdout);
-  assert.equal(result.result, "unchanged");
+  assert.equal(result.result, "published");
+  assert.equal(result.writerResult, "unchanged");
   assert.equal(result.publicationId, publicationId);
   assert.equal(result.date, "2026-08-19");
   assert.equal(result.revision, existing.revision);
+  assert.equal(result.pageUrl, "/p/ai-daily/?date=2026-08-19");
+  assert.match(
+    await readFile(path.join(target, "dist", "p", publicationId, "index.html"), "utf8"),
+    /2026-08-19/,
+  );
 });

@@ -15,11 +15,12 @@ import { loadPublicationContext } from "./publications.js";
 import { validateCandidate, validateIssue, validateSite } from "./validation.js";
 
 export class PipelineError extends Error {
-  constructor(date, field, message) {
+  constructor(date, field, message, result = "rejected") {
     super(`${date}: ${field} ${message}`);
     this.name = "PipelineError";
     this.date = date;
     this.field = field;
+    this.result = result;
   }
 }
 
@@ -137,7 +138,7 @@ export function planIssue(candidate, existingIssue, mode = "update") {
   return { result: "updated", issue: nextIssue };
 }
 
-function shanghaiDate(now = new Date()) {
+export function shanghaiDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
@@ -279,12 +280,25 @@ export async function processCandidate(rootDir, publicationId, candidatePath, op
     throw new PipelineError(candidate.date, "date", "不能处理未来日期");
   }
   if (candidate.date < today && !options.allowHistory) {
-    throw new PipelineError(candidate.date, "date", "历史日期必须显式使用 --allow-history");
+    throw new PipelineError(
+      candidate.date,
+      "date",
+      "历史日期必须显式使用 --allow-history",
+      "authorization_required",
+    );
   }
 
   const mode = options.mode ?? "update";
   if (mode !== "update" && mode !== "replace") {
     throw new PipelineError(candidate.date, "mode", "只能是 update 或 replace");
+  }
+  if (mode === "replace" && !options.allowReplace) {
+    throw new PipelineError(
+      candidate.date,
+      "mode",
+      "replace 必须显式使用 --allow-replace",
+      "authorization_required",
+    );
   }
 
   const releaseLock = await acquireDateLock(context.dataDir, candidate.date);

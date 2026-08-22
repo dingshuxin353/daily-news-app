@@ -207,11 +207,11 @@ test("Candidate Schema 保持 1，不能通过 publicationId 自行指定写入�
   );
 });
 
-test("无效或不存在的日期回退到最新一期", () => {
+test("无日期使用最新一期，无效或不存在日期明确失败", () => {
   const index = { latest: "2026-08-19", dates: ["2026-08-19", "2026-08-18"] };
   assert.equal(selectDate("", index), "2026-08-19");
-  assert.equal(selectDate("?date=not-a-date", index), "2026-08-19");
-  assert.equal(selectDate("?date=2026-08-17", index), "2026-08-19");
+  assert.equal(selectDate("?date=not-a-date", index), null);
+  assert.equal(selectDate("?date=2026-08-17", index), null);
   assert.equal(selectDate("?date=2026-08-18", index), "2026-08-18");
 });
 
