@@ -5,6 +5,11 @@ data/.locks/
 data/candidates/*.json
 data/compiled/*.json
 data/index.json
+publications/*/data/.locks/
+publications/*/data/candidates/*.json
+publications/*/data/compiled/*.json
+publications/*/data/index.json
+publications/*/data/submissions/*.json
 output/
 coverage/
 playwright-report/

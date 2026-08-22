@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { compileIssue, validateCompiled } from "./compiler.js";
+import { loadPublicationContext } from "./publications.js";
 import { validateCandidate, validateIssue, validateSite } from "./validation.js";
 
 export class PipelineError extends Error {
@@ -157,8 +158,8 @@ async function readJsonIfPresent(filePath, allowInvalid = false) {
   }
 }
 
-async function acquireDateLock(rootDir, date) {
-  const lockDir = path.join(rootDir, "data", ".locks");
+async function acquireDateLock(dataDir, date) {
+  const lockDir = path.join(dataDir, ".locks");
   const lockPath = path.join(lockDir, `${date}.lock`);
   await mkdir(lockDir, { recursive: true });
   let handle;
@@ -181,8 +182,8 @@ async function acquireDateLock(rootDir, date) {
   };
 }
 
-async function issueIndex(rootDir, date) {
-  const issuesDir = path.join(rootDir, "data", "issues");
+async function issueIndex(dataDir, date) {
+  const issuesDir = path.join(dataDir, "issues");
   const names = await readdir(issuesDir).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -258,16 +259,20 @@ function compiledIsCurrent(issue, compiled, filePath, priorityLimits) {
   }
 }
 
-export async function processCandidate(rootDir, candidatePath, options = {}) {
-  const resolvedRoot = await realpath(path.resolve(rootDir));
+export async function processCandidate(rootDir, publicationId, candidatePath, options = {}) {
+  const context = await loadPublicationContext(rootDir, publicationId);
   const resolvedCandidate = await realpath(path.resolve(candidatePath));
-  const candidateDir = path.join(resolvedRoot, "data", "candidates");
-  if (!resolvedCandidate.startsWith(`${candidateDir}${path.sep}`)) {
-    throw new PipelineError("unknown", "candidate", "必须位于 data/candidates/ 目录");
+  const candidateDir = await realpath(path.join(context.dataDir, "candidates"));
+  if (path.dirname(resolvedCandidate) !== candidateDir) {
+    throw new PipelineError(
+      "unknown",
+      "candidate",
+      `必须位于 Publication ${publicationId} 的 data/candidates/ 目录`,
+    );
   }
 
   const candidate = await validateCandidate(resolvedCandidate);
-  const site = await validateSite(resolvedRoot);
+  const site = await validateSite(context.rootDir, context.publicationDir);
   const { priorityLimits } = site;
   const today = options.today ?? shanghaiDate();
   if (candidate.date > today) {
@@ -282,15 +287,15 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
     throw new PipelineError(candidate.date, "mode", "只能是 update 或 replace");
   }
 
-  const releaseLock = await acquireDateLock(resolvedRoot, candidate.date);
+  const releaseLock = await acquireDateLock(context.dataDir, candidate.date);
   try {
-    const issuePath = path.join(resolvedRoot, "data", "issues", `${candidate.date}.json`);
-    const compiledPath = path.join(resolvedRoot, "data", "compiled", `${candidate.date}.json`);
-    const indexPath = path.join(resolvedRoot, "data", "index.json");
+    const issuePath = path.join(context.dataDir, "issues", `${candidate.date}.json`);
+    const compiledPath = path.join(context.dataDir, "compiled", `${candidate.date}.json`);
+    const indexPath = path.join(context.dataDir, "index.json");
     const existingIssue = await readJsonIfPresent(issuePath);
     if (existingIssue) await validateIssue(issuePath);
     const plan = planIssue(candidate, existingIssue, mode);
-    const nextIndex = await issueIndex(resolvedRoot, candidate.date);
+    const nextIndex = await issueIndex(context.dataDir, candidate.date);
     const currentIndex = await readJsonIfPresent(indexPath, true);
     const stages = [];
     let compiled;
@@ -311,6 +316,7 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
       if (stages.length > 0) await commitStages(stages);
       return {
         result: "unchanged",
+        publicationId,
         date: candidate.date,
         revision: plan.issue.revision,
         repaired,
@@ -333,6 +339,7 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
 
     return {
       result: plan.result,
+      publicationId,
       date: candidate.date,
       revision: plan.issue.revision,
       mode,

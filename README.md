@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前版本是 `v0.9.0`。它是一个文件驱动的本地版本：Agent 只提交声明式内容或主题候选，Node.js 负责校验、正式写入和确定性编排，前端按固定的四格报纸骨架展示结果。
+当前已发布版本是 `v0.9.0`；本分支正在开发 `v0.10.0`。当前开发结果已把内容与主题选择放入显式 Publication 上下文，但多日报页面、Candidate 自动消费、迁移和发布尚未完成。
 
 ## 主要能力
 
@@ -38,12 +38,12 @@ npm start
 PORT=5173 npm start
 ```
 
-启动前会校验站点配置、当前主题和正式日报，并重新生成 `data/compiled/` 与 `data/index.json`。
+启动前会校验 Publication Registry、各日报配置、当前主题和正式日报，并重新生成各 Publication 的 `data/compiled/` 与 `data/index.json`。
 新克隆默认不附带日报数据，因此第一次打开会显示“暂无日报”；让 Agent 生成第一份 Candidate 并由宿主处理后即可看到日报。
 
 ## 第一次配置
 
-编辑 [`config/site.json`](./config/site.json)，可以修改站点名称、强调色、可选 Logo 和三档内容数量上限：
+默认 Publication 由 [`config/publications.json`](./config/publications.json) 登记。编辑目标 Publication 的 [`publications/daily-news/config/site.json`](./publications/daily-news/config/site.json)，可以修改站点名称、强调色、可选 Logo 和三档内容数量上限：
 
 ```json
 {
@@ -72,13 +72,13 @@ PORT=5173 npm start
 Agent 的唯一内容产物是：
 
 ```text
-data/candidates/YYYY-MM-DD.json
+publications/<publication-id>/data/candidates/YYYY-MM-DD.json
 ```
 
 Agent 写完即可结束。随后由用户、自动化任务或其他宿主环境消费候选：
 
 ```bash
-npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode update
+npm run process-candidate -- --publication <publication-id> --candidate publications/<publication-id>/data/candidates/YYYY-MM-DD.json --mode update
 ```
 
 默认只允许处理当前上海日期。修订历史日期时追加 `--allow-history`；只有明确需要完整替换时才使用 `--mode replace`。
@@ -90,13 +90,13 @@ Candidate 字段、来源规则、去重方式和 Agent 完成条件见 [`AGENT_
 查看当前主题和已经保存的主题：
 
 ```bash
-npm run list-themes
+npm run list-themes -- --publication <publication-id>
 ```
 
 切换已有主题：
 
 ```bash
-npm run switch-theme -- --theme swiss-editorial --confirm swiss-editorial
+npm run switch-theme -- --publication <publication-id> --theme swiss-editorial --confirm swiss-editorial
 ```
 
 让 Agent 新增或修改主题时，可以使用：
@@ -116,7 +116,7 @@ npm run process-theme -- --candidate themes/candidates/<theme-id>.json
 运行 `npm start` 后，通过 `/?themePreview=<theme-id>` 查看真实日报预览。用户确认后再激活：
 
 ```bash
-npm run activate-theme -- --theme <theme-id> --confirm <theme-id>
+npm run activate-theme -- --publication <publication-id> --theme <theme-id> --confirm <theme-id>
 ```
 
 主题字段、允许值和 Agent 边界见 [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md)。
@@ -125,15 +125,16 @@ npm run activate-theme -- --theme <theme-id> --confirm <theme-id>
 
 | 路径 | 作用 | 维护者 |
 | --- | --- | --- |
-| `config/site.json` | 站点设置和内容数量上限 | 用户 |
-| `config/theme.json` | 当前主题选择 | 主题命令 |
-| `data/candidates/` | 日报 Candidate | Agent |
-| `data/issues/` | 正式日报事实 | Issue Writer |
-| `data/compiled/` | 前端渲染数据 | Layout Compiler |
+| `config/publications.json` | Publication 顺序和默认项 | 用户或宿主 |
+| `publications/<id>/config/site.json` | 站点设置和内容数量上限 | 用户 |
+| `publications/<id>/config/theme.json` | 当前主题选择 | 主题命令 |
+| `publications/<id>/data/candidates/` | 日报 Candidate | Agent |
+| `publications/<id>/data/issues/` | 正式日报事实 | Issue Writer |
+| `publications/<id>/data/compiled/` | 前端渲染数据 | Layout Compiler |
 | `themes/candidates/` | 主题 Candidate | Agent |
 | `themes/definitions/` | 持久主题库 | Theme Writer |
 | `themes/compiled/` | 编译后的主题 CSS | Theme Compiler |
-| `themes/active.json` | 当前主题运行时清单 | 主题命令 |
+| `publications/<id>/themes/active.json` | 当前主题运行时清单 | 主题命令 |
 
 不要手工修改生成目录来绕过 Writer、Compiler 或主题命令。
 

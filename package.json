@@ -12,7 +12,7 @@
     "switch-theme": "node scripts/switch-theme.js",
     "rollback-theme": "node scripts/rollback-theme.js",
     "build": "node scripts/prepare-data.js && node scripts/build.js",
-    "start": "node scripts/prepare-data.js && node scripts/serve.js",
+    "start": "node scripts/prepare-data.js && node scripts/build.js && node scripts/serve.js",
     "test": "node --test"
   },
   "engines": {

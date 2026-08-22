@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const staticRoot = path.join(projectRoot, "dist");
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -16,8 +17,8 @@ const contentTypes = new Map([
 
 function resolveRequestPath(urlPath) {
   const decoded = decodeURIComponent(urlPath);
-  if (decoded === "/") return path.join(rootDir, "index.html");
-  return path.join(rootDir, decoded);
+  if (decoded === "/") return path.join(staticRoot, "index.html");
+  return path.join(staticRoot, decoded);
 }
 
 createServer(async (request, response) => {
@@ -29,7 +30,7 @@ createServer(async (request, response) => {
     return;
   }
 
-  if (!filePath.startsWith(`${rootDir}${path.sep}`)) {
+  if (!filePath.startsWith(`${staticRoot}${path.sep}`)) {
     response.writeHead(403).end("Forbidden");
     return;
   }
