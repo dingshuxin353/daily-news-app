@@ -13,9 +13,19 @@
     "rollback-theme": "node scripts/rollback-theme.js",
     "build": "node scripts/prepare-data.js && node scripts/build.js",
     "start": "node scripts/prepare-data.js && node scripts/serve.js",
+    "mcp-probe:inspect": "mcp-inspector",
+    "mcp-probe:start": "node test-support/mcp-probe/server.js",
+    "mcp-probe:test": "node --test test/mcp-probe.test.js",
     "test": "node --test"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "2.3.0"
   }
 }

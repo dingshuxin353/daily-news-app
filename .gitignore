@@ -9,6 +9,7 @@ output/
 coverage/
 playwright-report/
 test-results/
+test-support/mcp-probe/.env
 themes/candidates/*.json
 themes/.theme.lock
 themes/previews/*.css
