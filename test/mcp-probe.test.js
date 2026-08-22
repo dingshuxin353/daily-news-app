@@ -388,6 +388,11 @@ describe("DailyNews MCP compatibility probe", () => {
       name: "dailynews_submit_probe",
       arguments: { clientRunId: "codex-log-test-01", candidate: createProbeCandidate() },
     });
+    const invalid = await client.callTool({
+      name: "dailynews_submit_probe",
+      arguments: { clientRunId: "short", candidate: {} },
+    });
+    assert.equal(invalid.isError, true);
 
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(logs.length >= 2);
@@ -406,6 +411,11 @@ describe("DailyNews MCP compatibility probe", () => {
     assert.doesNotMatch(serialized, /Authorization/i);
     assert.doesNotMatch(serialized, /DailyNews MCP Probe Fixture/);
     assert.doesNotMatch(serialized, /emoji/);
+    assert.ok(
+      logs.some(
+        (event) => event.tool === "dailynews_submit_probe" && event.result === "validation_error",
+      ),
+    );
   });
 
   test("reinitializes after restart and intentionally loses in-memory receipts", async () => {

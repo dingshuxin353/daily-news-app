@@ -60,6 +60,10 @@ const submitSchema = z.strictObject({
   candidate: candidateSchema,
 });
 
+export function validateProbeSubmission(input) {
+  return submitSchema.safeParse(input);
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(",")}]`;
@@ -172,7 +176,7 @@ export function createProbeMcpServer({ clientId, protocolVersion, store, onToolC
       annotations: { ...annotations, readOnlyHint: false },
     },
     async (input) => {
-      const parsed = submitSchema.safeParse(input);
+      const parsed = validateProbeSubmission(input);
       if (!parsed.success) {
         onToolCall?.("dailynews_submit_probe", "validation_error");
         return validationFailure(parsed);

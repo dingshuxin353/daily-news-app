@@ -8,6 +8,7 @@ import {
   MAX_REQUEST_BYTES,
   PROTOCOL_VERSION,
   ProbeReceiptStore,
+  validateProbeSubmission,
 } from "./probe.js";
 
 const ENDPOINT = "/mcp-test";
@@ -186,6 +187,12 @@ export function createMcpProbeHttpServer({
 
       if (parsed.body?.method === "tools/call") {
         tool = typeof parsed.body?.params?.name === "string" ? parsed.body.params.name : null;
+        if (
+          tool === "dailynews_submit_probe" &&
+          !validateProbeSubmission(parsed.body?.params?.arguments).success
+        ) {
+          result = "validation_error";
+        }
       } else if (typeof parsed.body?.method === "string") {
         tool = parsed.body.method;
       }
