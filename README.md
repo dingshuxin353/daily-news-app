@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前正式版本是 `v0.10.0`；本研发分支正在实现 `v0.11.0`，增加可选个人主页、主题继承和每条内容最多一张展示图片。
+当前版本是 `v0.11.1`。它包含可选个人主页、主题继承、每条内容最多一张展示图片，以及面向普通用户的统一 Agent 使用说明。
 
 ## 主要能力
 
@@ -21,7 +21,21 @@
 
 当前本地版本不包含账号、远程 MCP、图片上传或抓取、服务端 Agent 调度和偏好推荐。
 
+## 交给 Agent 配置和启动
+
+如果你的 AI Agent 可以读取本地文件并运行终端，把仓库目录交给它后直接复制这段话：
+
+```text
+请先阅读仓库根目录的 AGENTS.md。
+帮我把这个 DailyNews 配置好并启动。我不懂代码，请先检查现状，
+按推荐方案用简单问题和我确认；完成后验证页面，并把可以点击的首页和日报链接发给我。
+```
+
+Agent 会从唯一的 [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) 入口判断需要读取的配置、内容或主题说明。你不需要先找 Publication ID、修改 JSON 或运行命令。
+
 ## 快速开始
+
+如果没有可以操作本地文件和终端的 Agent，再使用下面的手工方式。
 
 需要：
 
@@ -36,14 +50,16 @@ cd daily-news-app
 npm start
 ```
 
-打开 <http://127.0.0.1:4173>。如需修改本地端口：
+保持命令运行，然后在同一台电脑打开 <http://127.0.0.1:4173>。如需修改本地端口：
 
 ```bash
 PORT=5173 npm start
 ```
 
 启动前会校验 Publication Registry、各日报配置、当前主题和正式日报，并重新生成各 Publication 的 `data/compiled/` 与 `data/index.json`。宿主随后扫描并监听已注册 Publication 的 Candidate：仅当前上海日期的安全 `update` 会自动发布。
-新克隆默认不附带日报数据，因此第一次打开会显示“暂无日报”；让 Agent 生成第一份 Candidate 并由宿主处理后即可看到日报。
+新克隆默认不附带日报数据，因此第一次打开会显示“暂无日报”；这是正常状态。让 Agent 生成第一份 Candidate 并由宿主处理后即可看到日报。
+
+`127.0.0.1` 是本机地址，不能直接发给朋友访问。公开分享需要先构建，再把完整 `dist/` 部署到静态站点；这是独立的部署任务。
 
 ## 第一次配置
 
@@ -65,13 +81,12 @@ PORT=5173 npm start
 
 ## 让 Agent 写日报
 
-把仓库目录交给支持本地文件读写的 Agent，然后使用类似下面的任务描述：
+使用统一 Agent 入口提出内容要求，不需要自己提供技术 ID：
 
 ```text
-请先阅读仓库根目录的 AGENTS.md 和 AGENT_CONTENT_GUIDE.md，
-目标 Publication ID 是 <publication-id>，
-根据我指定的内容源生成今天的 DailyNews Candidate。
-只写候选文件，不直接修改正式日报或编译产物。
+请先阅读仓库根目录的 AGENTS.md。
+为我的 AI 日报生成今天的内容，关注我指定的方向，重点新闻有可靠图片时配图。
+完成后告诉我候选是否已经正式发布；如果服务可用，请验证日报页面并把链接发给我。
 ```
 
 Agent 的唯一内容产物是：
@@ -111,12 +126,12 @@ npm run inherit-theme -- --publication <publication-id> --confirm
 npm run switch-theme -- --home --theme swiss-editorial --revision 1 --confirm swiss-editorial
 ```
 
-让 Agent 新增或修改主题时，可以使用：
+让 Agent 新增、修改或切换主题时，也从统一入口表达希望看到的结果：
 
 ```text
-请先阅读仓库根目录的 AGENTS.md 和 AGENT_THEME_GUIDE.md，
-根据我的风格要求生成一个 Theme Candidate。
-只写 themes/candidates/ 下的候选文件，不直接覆盖正式主题或当前配置。
+请先阅读仓库根目录的 AGENTS.md。
+把产品日报改成独立的深色科技风格，其他日报继续跟随首页。
+请先检查现有主题；需要正式切换前用简单摘要和我确认。
 ```
 
 Agent 写完 Candidate 后即可结束。支持本地命令的宿主或维护者可以继续处理：
@@ -180,11 +195,14 @@ npm run build
 
 构建成功后，完整静态站点位于 `dist/`。把该目录中的全部文件部署到任意能够按原路径提供 HTML、JavaScript、CSS 和 JSON 的静态站点即可。
 
+`npm start` 只提供本机服务；静态构建成功也不等于已经公开部署。只有部署后的公开地址经过真实访问验证，才能作为可分享链接交付。
+
 ## 文档入口
 
 | 文档 | 读者 | 用途 |
 | --- | --- | --- |
-| [`AGENTS.md`](./AGENTS.md) | AI Agent | 判断任务类型和允许修改的路径 |
+| [`AGENTS.md`](./AGENTS.md) | AI Agent | 判断用户支持或源码开发任务 |
+| [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) | 用户服务 Agent | 理解自然语言意图、编排配置与启动、路由专项说明和处理常见问题 |
 | [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md) | 内容 Agent | 生成日报 Candidate |
 | [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md) | 主题 Agent | 查看、切换或生成主题 Candidate |
 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | 用户与维护者 | 配置站点、主题和运行方式 |
@@ -199,7 +217,7 @@ node --check src/app.js
 git diff --check
 ```
 
-v0.11.0 研发分支会继续执行多 Publication 隔离、主题继承、Schema 兼容、图片失败退化、桌面、移动端、键盘焦点和无 JavaScript 检查。通过研发自检不等于独立验收或发布完成。
+`v0.11.1` 只更新 Agent 使用说明和产品版本元数据，不修改运行逻辑、Schema、配置或测试。发布前仍需通过现有测试、正式构建、文档链接检查和本地启动冒烟。
 
 ## 开源许可
 

@@ -1,7 +1,7 @@
 # DailyNews AI Agent 主题使用指南
 
 指南版本：1.2
-适用产品版本：0.11.0
+适用产品版本：0.11.1
 Theme Schema：1
 更新日期：2026-08-23
 
@@ -22,6 +22,20 @@ Theme Schema：1
 | 回到上一次选择 | 确定上一次主题 ID 与 revision | 否 |
 
 切换不是覆盖：所有正式主题都保存在 `themes/definitions/<theme-id>/<revision>.json`，旧主题和旧 revision 不会因为切换而删除。
+
+### 从用户语言解析主题意图
+
+Agent 能读取主题库时，应自己解析主题 ID 和 revision，不要求普通用户提供技术值：
+
+| 用户表达 | 目标行为 |
+| --- | --- |
+| “跟首页一样”“恢复跟随首页” | 目标 Publication 显式切换为 `inherit` |
+| “这份日报单独用深色科技” | 从主题库选择合适的深色主题，并把目标 Publication 切换为 `override` |
+| “首页换成简洁风格” | 选择匹配的已有主题并切换 Home；所有 `inherit` Publications 随之变化 |
+| “换回上一个主题” | 只对用户明确的 Home 或 Publication 执行受控回滚 |
+| “做一个新的蓝色财经风格” | 生成 Theme Candidate，后续先预览，再由用户确认是否激活 |
+
+如果同一句话无法唯一判断目标是 Home 还是某份日报，先用人类名称确认目标。Agent 可以在确认摘要中补充解析出的主题 ID 和 revision，但不能反过来要求用户先选择它们。
 
 ## 2. 开始前读取当前状态
 

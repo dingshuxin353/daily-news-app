@@ -1,19 +1,17 @@
 # DailyNews Agent 工作入口
 
-本仓库同时接受内容任务、主题任务和源码开发任务。开始前先判断任务类型，只读取并修改对应范围。
+本仓库同时接受用户配置与使用支持，以及源码开发任务。开始前先判断任务类型，只读取并修改对应范围。
 
 ## 任务路由
 
-| 任务 | 必须先读 | Agent 的直接产物 |
+| 任务 | 必须先读 | 目标 |
 | --- | --- | --- |
-| 生成、补充或更新日报 | [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md) | `publications/<publication-id>/data/candidates/YYYY-MM-DD.json` |
-| 查看、切换、新增或修改主题 | [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md) | 目标主题信息，或 `themes/candidates/<theme-id>.json` |
-| 修改站点设置 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | 用户明确要求的配置改动 |
-| 修改源码或测试 | 本文件、[`CONTRIBUTING.md`](./CONTRIBUTING.md) 和相关源码、测试 | 与任务直接相关的最小改动 |
+| 第一次使用、配置、启动、获取链接、生成日报、调整主题或排查问题 | [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) | 由统一指南理解用户意图，再读取当前任务需要的专项说明并完成真实验证 |
+| 修改源码、测试或工程文档 | 本文件、[`CONTRIBUTING.md`](./CONTRIBUTING.md) 和相关源码、测试 | 与任务直接相关的最小改动 |
 
-内容和主题任务不要混在同一个 Candidate 中。Agent 完成 Candidate 后即可报告结果，不要求所有 Agent 软件都能运行命令、启动服务或操作浏览器；后续消费、编译和正式写入由宿主环境负责。
+面向用户的任务不能只根据本文件猜测配置或直接写入。先由 `AGENT_USER_GUIDE.md` 判断是否需要配置、内容或主题专项说明；只读取当前任务需要的文档。
 
-内容或主题任务开始前必须先由用户或宿主确定唯一目标 Publication。默认 Publication 只简化阅读入口，不能替模糊的写入任务选择目标。
+内容和主题任务不要混在同一个 Candidate 中。Agent 完成 Candidate 后即可报告结果，不要求所有 Agent 软件都能运行命令、启动服务或操作浏览器；后续消费、编译和正式写入由宿主环境负责。内容或主题任务开始前必须先由用户或宿主确定唯一目标 Publication。默认 Publication 只简化阅读入口，不能替模糊的写入任务选择目标。
 
 ## 写入边界
 
