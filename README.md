@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前版本是 `v0.11.1`。它包含可选个人主页、主题继承、每条内容最多一张展示图片，以及面向普通用户的统一 Agent 使用说明。
+当前版本是 `v0.12.0`。它在多日报与个人主页之外，新增一份默认关闭、只在本机展示、通过 Agent 对话维护的个人待办。
 
 ## 主要能力
 
@@ -17,9 +17,10 @@
 - 可选 Home 从各 Publication 最新正式 Compiled Edition 生成只读总览，并保持内容池隔离。
 - Publication 可以继承 Home 固定主题，也可以保持独立固定 revision。
 - Schema `2` 内容可以携带一张严格图片；图片不改变优先级、顺序、跨度或行结构。
+- 可选个人待办提供只读 `/todo/` 页面和 Home 摘要；正式状态与公开 `dist/` 严格隔离。
 - 可以构建为纯静态文件并部署到普通静态站点。
 
-当前本地版本不包含账号、远程 MCP、图片上传或抓取、服务端 Agent 调度和偏好推荐。
+当前本地版本不包含账号、远程 MCP、图片上传或抓取、服务端 Agent 调度、提醒通知和网页内待办编辑。
 
 ## 交给 Agent 配置和启动
 
@@ -56,7 +57,7 @@ npm start
 PORT=5173 npm start
 ```
 
-启动前会校验 Publication Registry、各日报配置、当前主题和正式日报，并重新生成各 Publication 的 `data/compiled/` 与 `data/index.json`。宿主随后扫描并监听已注册 Publication 的 Candidate：仅当前上海日期的安全 `update` 会自动发布。
+启动前会校验 Publication Registry、各日报配置、当前主题、Todo 配置和正式数据，并生成仅供本机使用的 `local-dist/`。宿主随后扫描并监听日报与 Todo Candidate：日报只自动发布当前上海日期的安全 `update`，Todo 按唯一正式 State 的 revision 受控处理。
 新克隆默认不附带日报数据，因此第一次打开会显示“暂无日报”；这是正常状态。让 Agent 生成第一份 Candidate 并由宿主处理后即可看到日报。
 
 `127.0.0.1` 是本机地址，不能直接发给朋友访问。公开分享需要先构建，再把完整 `dist/` 部署到静态站点；这是独立的部署任务。
@@ -104,6 +105,24 @@ npm run process-candidate -- --publication <publication-id> --candidate publicat
 默认只允许处理当前上海日期。修订历史日期时追加 `--allow-history`；只有明确需要完整替换时才同时使用 `--mode replace --allow-replace`。
 
 Candidate 字段、来源规则、去重方式和 Agent 完成条件见 [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md)。
+
+## 让 Agent 管理个人待办
+
+个人待办默认关闭。先让 Agent 读取配置并确认启用，再直接用自然语言提出任务：
+
+```text
+请先阅读仓库根目录的 AGENTS.md。
+帮我在首页增加个人待办事项，并记下：2026-08-24 15:00 提交本周周报。
+如果宿主已处理，请验证个人待办页面并把本机链接发给我。
+```
+
+Todo Agent 的唯一写入产物是：
+
+```text
+todo/data/candidates/<candidate-id>.json
+```
+
+Agent 只交付 Candidate；正式 State、处理状态和本地页面由宿主维护。网页是只读界面，“删除”会映射为可恢复归档，不提供物理删除或提醒通知。完整操作、歧义和完成边界见 [`AGENT_TODO_GUIDE.md`](./AGENT_TODO_GUIDE.md)。
 
 ## 切换或定制主题
 
@@ -154,6 +173,7 @@ npm run activate-theme -- --publication <publication-id> --theme <theme-id> --co
 | --- | --- | --- |
 | `config/publications.json` | Publication 顺序和默认项 | 用户或宿主 |
 | `config/home.json` | Home 开关、名称、强调色和固定主题 | 用户或宿主 |
+| `config/todo.json` | 本地个人待办开关 | 用户或宿主 |
 | `publications/<id>/config/site.json` | 站点设置和内容数量上限 | 用户 |
 | `publications/<id>/config/theme.json` | 当前主题选择 | 主题命令 |
 | `publications/<id>/data/candidates/` | 日报 Candidate | Agent |
@@ -164,6 +184,9 @@ npm run activate-theme -- --publication <publication-id> --theme <theme-id> --co
 | `themes/definitions/` | 持久主题库 | Theme Writer |
 | `themes/compiled/` | 编译后的主题 CSS | Theme Compiler |
 | `publications/<id>/themes/active.json` | 当前主题运行时清单 | 主题命令 |
+| `todo/data/candidates/` | Todo Candidate | Agent |
+| `todo/data/state.json` | 唯一正式 Todo State | Todo Writer |
+| `todo/data/submissions/` | Todo Candidate 处理状态 | 本地宿主 |
 
 不要手工修改生成目录来绕过 Writer、Compiler 或主题命令。
 
@@ -193,9 +216,9 @@ npm test
 npm run build
 ```
 
-构建成功后，完整静态站点位于 `dist/`。把该目录中的全部文件部署到任意能够按原路径提供 HTML、JavaScript、CSS 和 JSON 的静态站点即可。
+构建成功后，公开静态站点位于 `dist/`。即使 Todo 已启用，普通构建也不会把 Todo 页面、导航、任务数量或私人数据写入 `dist/`。把该目录中的全部文件部署到任意能够按原路径提供 HTML、JavaScript、CSS 和 JSON 的静态站点即可。
 
-`npm start` 只提供本机服务；静态构建成功也不等于已经公开部署。只有部署后的公开地址经过真实访问验证，才能作为可分享链接交付。
+`npm start` 只绑定本机并使用包含 Todo 的私有 `local-dist/`；不要部署或分享这个目录。静态构建成功也不等于已经公开部署。只有部署后的公开地址经过真实访问验证，才能作为可分享链接交付。
 
 ## 文档入口
 
@@ -204,6 +227,7 @@ npm run build
 | [`AGENTS.md`](./AGENTS.md) | AI Agent | 判断用户支持或源码开发任务 |
 | [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) | 用户服务 Agent | 理解自然语言意图、编排配置与启动、路由专项说明和处理常见问题 |
 | [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md) | 内容 Agent | 生成日报 Candidate |
+| [`AGENT_TODO_GUIDE.md`](./AGENT_TODO_GUIDE.md) | Todo Agent | 生成 Todo Candidate、处理歧义并区分候选与正式状态 |
 | [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md) | 主题 Agent | 查看、切换或生成主题 Candidate |
 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | 用户与维护者 | 配置站点、主题和运行方式 |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | 贡献者与开发 Agent | 分支、提交、审查、验证和目录规则 |
@@ -217,7 +241,7 @@ node --check src/app.js
 git diff --check
 ```
 
-`v0.11.1` 只更新 Agent 使用说明和产品版本元数据，不修改运行逻辑、Schema、配置或测试。发布前仍需通过现有测试、正式构建、文档链接检查和本地启动冒烟。
+`v0.12.0` 保持 Content Schema `2` 与 Theme Schema `1`，新增独立 Todo Schema `1`。发布前仍需通过全量测试、公开隐私构建、文档链接检查和本地浏览器验收。
 
 ## 开源许可
 

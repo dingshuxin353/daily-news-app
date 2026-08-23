@@ -37,6 +37,10 @@ await writeJson(path.join(target, "config", "home.json"), {
   accentColor: "#B37721",
   activeTheme: { id: "newspaper-default", revision: 1 },
 });
+await writeJson(path.join(target, "config", "todo.json"), {
+  schemaVersion: 1,
+  enabled: false,
+});
 
 async function createPublication(id, name, theme, issue = null) {
   const publication = path.join(target, "publications", id);

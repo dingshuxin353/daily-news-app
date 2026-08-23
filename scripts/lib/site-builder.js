@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { renderBuiltHtml, renderHomeHtml } from "./build-html.js";
+import { renderBuiltHtml, renderHomeHtml, renderTodoHtml } from "./build-html.js";
 import { validateCompiled } from "./compiler.js";
 import { buildHomeOverview, resolveHomeTheme, validateHomeProfile } from "./home.js";
 import { loadPublicationRegistry } from "./publications.js";
 import { validateConfiguredTheme } from "./theme-pipeline.js";
+import { readTodoState } from "./todo-pipeline.js";
+import { loadTodoConfig } from "./todo-validation.js";
+import { buildTodoProjection } from "./todo-view.js";
 import { validateIssue } from "./validation.js";
 
 function redirectHtml(publicationId) {
@@ -90,8 +93,19 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
   const registry = await loadPublicationRegistry(rootDir);
   const home = await validateHomeProfile(rootDir);
   const homeTheme = await resolveHomeTheme(rootDir, home);
+  const todoConfig = await loadTodoConfig(rootDir);
+  const localTodoEnabled = options.local === true && todoConfig.enabled;
+  const todoState = localTodoEnabled
+    ? options.todoState ?? await readTodoState(rootDir)
+    : null;
+  const todo = todoState
+    ? buildTodoProjection(todoState, { asOfDate: options.asOfDate })
+    : null;
   const template = await readFile(path.join(rootDir, "index.html"), "utf8");
   const homeTemplate = await readFile(path.join(rootDir, "home.html"), "utf8");
+  const todoTemplate = localTodoEnabled
+    ? await readFile(path.join(rootDir, "todo.html"), "utf8")
+    : null;
   const publications = [];
   for (const publication of registry.publications) {
     const site = JSON.parse(await readFile(path.join(publication.configDir, "site.json"), "utf8"));
@@ -132,6 +146,9 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
   for (const entry of ["styles.css", "src"]) {
     await cp(path.join(rootDir, entry), path.join(stagingDir, entry), { recursive: true });
   }
+  if (localTodoEnabled) {
+    await cp(path.join(rootDir, "todo.css"), path.join(stagingDir, "todo.css"));
+  }
   await cp(path.join(rootDir, "public"), stagingDir, { recursive: true });
   await mkdir(path.join(stagingDir, "config"), { recursive: true });
   await cp(
@@ -157,6 +174,7 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
         site,
         publicationId: publication.publicationId,
         publications,
+        todoEnabled: localTodoEnabled,
       }),
       "utf8",
     );
@@ -177,7 +195,13 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
     );
     await writeFile(
       path.join(stagingDir, "index.html"),
-      renderHomeHtml(homeTemplate, { activeTheme: homeTheme, home, overview, publications }),
+      renderHomeHtml(homeTemplate, {
+        activeTheme: homeTheme,
+        home,
+        overview,
+        publications,
+        todo,
+      }),
       "utf8",
     );
   } else {
@@ -187,10 +211,35 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
       "utf8",
     );
   }
+  if (localTodoEnabled) {
+    await mkdir(path.join(stagingDir, "todo"), { recursive: true });
+    await writeFile(
+      path.join(stagingDir, "todo", "index.html"),
+      renderTodoHtml(todoTemplate, {
+        activeTheme: homeTheme,
+        home,
+        projection: todo,
+        publications,
+      }),
+      "utf8",
+    );
+  }
   await replaceOutput(stagingDir, resolvedOutput);
   } catch (error) {
     await rm(stagingDir, { recursive: true, force: true });
     throw error;
   }
-  return { outputDir: resolvedOutput, registry, publications, home, overview };
+  return {
+    outputDir: resolvedOutput,
+    registry,
+    publications,
+    home,
+    overview,
+    todoConfig,
+    todo,
+  };
+}
+
+export function buildLocalSite(rootDir, options = {}) {
+  return buildSite(rootDir, path.join(rootDir, "local-dist"), { ...options, local: true });
 }

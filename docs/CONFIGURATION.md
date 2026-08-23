@@ -1,6 +1,6 @@
 # DailyNews 配置说明
 
-适用产品版本：`0.11.1`
+适用产品版本：`0.12.0`
 
 更新日期：2026-08-23
 
@@ -13,6 +13,21 @@ DailyNews 使用全局 Publication Registry，并把每份日报的站点配置�
 文件：[`config/home.json`](../config/home.json)
 
 `enabled` 决定根路径展示个人总览还是进入默认 Publication；`name` 和 `accentColor` 只属于主页；`activeTheme` 固定主页主题 ID 与 revision。主页只读取各 Publication 最新正式 Compiled Edition，不拥有 Candidate、Issue 或独立内容池。
+
+## Personal Todo
+
+文件：[`config/todo.json`](../config/todo.json)
+
+```json
+{
+  "schemaVersion": 1,
+  "enabled": false
+}
+```
+
+Todo 默认关闭且安装级唯一，只在绑定 `127.0.0.1` 的本地运行中展示。启用后，本地 `/todo/` 提供只读五分组页面，Home 与 Todo 同时启用时首页显示最多五条摘要；Home 关闭不影响 `/todo/` 和正式 State。关闭 Todo 只停止展示与自动处理，不删除已有数据。
+
+Todo Agent 按 [`AGENT_TODO_GUIDE.md`](../AGENT_TODO_GUIDE.md) 写 `todo/data/candidates/<candidate-id>.json`。`todo/data/state.json`、`todo/data/submissions/` 和锁均由 Writer 或宿主维护，不能手工修改。Todo 不属于 Publication，也不创建独立主题，固定使用 Home Effective Theme。
 
 ## 1. Publication Registry
 
@@ -188,16 +203,16 @@ npm run process-candidate -- --publication <publication-id> --candidate publicat
 PORT=5173 npm start
 ```
 
-`npm start` 会在启动服务前运行数据准备和静态构建，然后扫描并监听各 Publication 的 Candidate。只有当前上海日期的安全 `update` 会自动进入 Writer 与 Compiler；历史日期记录为 `authorization_required`，校验失败记录为 `rejected`。`npm run build` 会重新生成 `dist/`。这些过程可能更新编译数据、索引和 Submission Status。
+`npm start` 会在启动服务前运行数据准备和本地构建，然后扫描并监听各 Publication 与 Todo Candidate。只有当前上海日期的安全日报 `update` 会自动进入 Writer 与 Compiler；Todo 使用唯一正式 State 的 revision 和安装级锁处理。历史日报日期记录为 `authorization_required`，校验失败记录为 `rejected`。本地页面写入 `local-dist/`，其中可能包含私人 Todo 内容，不能部署或分享。
 
 ### Agent 配置与验证顺序
 
-1. 确认当前目录、Git 状态、Node.js 和 npm，并读取现有 Home、Registry、站点和主题配置。
+1. 确认当前目录、Git 状态、Node.js 和 npm，并读取现有 Home、Todo、Registry、站点和主题配置。
 2. 用人类可理解的结果摘要取得确认；保留用户已有设置和无关工作区改动。
 3. 只修改与确认结果直接相关的配置，不手工写生成产物。
 4. 不需要保持服务时运行 `npm run build`，确认配置、数据和主题校验通过。
 5. 需要交付链接时，先检查是否已有可用实例，再用 `npm start` 或实际选定端口启动。
-6. 等待启动成功，并通过真实 HTTP 请求检查根路径和每个目标 `/p/<publication-id>/`；最终只返回本次实际验证过的端口与链接。
+6. 等待启动成功，并通过真实 HTTP 请求检查根路径、每个目标 `/p/<publication-id>/` 和启用时的 `/todo/`；最终只返回本次实际验证过的端口与链接。
 
 构建通过只证明静态产物可生成，不代表服务仍在运行。配置文件已修改也不等于页面已发布或公开部署。
 
@@ -207,9 +222,11 @@ PORT=5173 npm start
 npm run build
 ```
 
-构建输出位于 `dist/`，其中包含页面、站点配置、正式日报、编译主题和公开资源。部署时必须保持目录结构，不要只上传 `index.html`。
+构建输出位于 `dist/`，其中只包含公开页面、站点配置、正式日报、编译主题和公开资源。即使 `config/todo.json.enabled` 为 `true`，普通构建也不生成 Todo 页面、导航、模块或任何任务数据。部署时必须保持目录结构，不要只上传 `index.html`。
 
 Home 开启时根路径是个人总览，关闭时进入 Registry 中的默认 Publication；正式入口是 `/p/<publication-id>/`，日期使用 `?date=YYYY-MM-DD`。未知 Publication 返回 404，不存在日期不会回退到其他日报。
+
+Todo 只存在于 `npm start` 使用的私有 `local-dist/`，不是公开静态构建的一部分。不要把 `local-dist/` 当成部署产物。
 
 ## 8. v0.9 数据迁移
 
@@ -232,7 +249,7 @@ npm run migrate-v0.10 -- --home-enabled false --apply --confirm migrate-v0.11.0
 
 默认 Publication 迁移为 `inherit`，其他 Publications 保留原主题并迁移为 `override`。不要在真实安装上运行迁移，除非用户另行明确授权并已备份。
 
-当前本地版本不需要 API Token、数据库密码或云端密钥。不要把任何内容源凭证、Cookie、Agent Token 或私人配置写入 Candidate、主题文件或源码仓库。
+当前本地版本不需要 API Token、数据库密码或云端密钥。不要把任何内容源凭证、Cookie、Agent Token、私人配置或真实 Todo 内容写入文档、测试、日报 Candidate、主题文件、日志或源码仓库。
 
 Agent 还必须遵守：
 
