@@ -1,7 +1,7 @@
 # DailyNews AI Agent 个人待办指南
 
-适用产品版本：0.12.0  
-Todo Schema：1  
+适用产品版本：0.12.0
+Todo Schema：1
 更新日期：2026-08-23
 
 本指南只用于唯一的本地个人待办。Agent 理解自然语言、读取当前正式 State，并交付一份完整 Todo Candidate；宿主负责校验、并发控制、正式写入、页面重建和链接验证。
