@@ -32,6 +32,18 @@ with sync_playwright() as playwright:
     page.screenshot(path=output_dir / "home-desktop.png", full_page=True)
     results["home_desktop"] = "passed"
 
+    failed_home = desktop.new_page()
+    failed_home.route(
+        "**/*",
+        lambda route: route.abort() if route.request.resource_type == "image" else route.continue_(),
+    )
+    failed_home.goto(f"{base_url}/")
+    failed_home.wait_for_load_state("networkidle")
+    assert failed_home.locator(".home-highlight img").count() == 0
+    assert failed_home.locator(".home-highlight .story__media").count() == 0
+    results["home_all_images_failed_fallback"] = "passed"
+    failed_home.close()
+
     with page.expect_navigation():
         page.locator('.home-highlight h3 a[href*="#test-item-1"]').first.click()
     page.wait_for_load_state("networkidle")

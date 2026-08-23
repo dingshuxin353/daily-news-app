@@ -86,7 +86,7 @@ async function writeAtomic(filePath, source) {
   await rename(temporaryPath, filePath);
 }
 
-async function stageFile(filePath, source) {
+export async function stageFile(filePath, source) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const temporaryPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${randomUUID()}.tmp`);
   const previous = await readFile(filePath).catch((error) => {
@@ -109,7 +109,7 @@ async function restoreStage(stage) {
   await rename(temporaryPath, stage.filePath);
 }
 
-async function commitStages(stages) {
+export async function commitStages(stages) {
   const committed = [];
   try {
     for (const stage of stages) {
@@ -132,7 +132,7 @@ async function commitStages(stages) {
   }
 }
 
-async function acquireLock(rootDir) {
+export async function acquireLock(rootDir) {
   const lockPath = path.join(rootDir, "themes", ".theme.lock");
   let handle;
   try {
@@ -538,11 +538,6 @@ export async function validateActiveTheme(rootDir, storageRoot = rootDir) {
 
 export async function validateConfiguredTheme(rootDir, storageRoot = rootDir) {
   const selection = await validateThemeConfig(rootDir, storageRoot);
-  if (selection.inherited) {
-    const { id, revision } = selection.activeTheme;
-    const { definition, relativeCssPath } = await loadStoredTheme(rootDir, id, revision);
-    return createThemeManifest(definition, relativeCssPath, null);
-  }
   const active = await validateActiveTheme(rootDir, storageRoot);
   if (!active) throw new ThemePipelineError("active", "不存在，无法应用 config/theme.json");
   if (
@@ -550,8 +545,8 @@ export async function validateConfiguredTheme(rootDir, storageRoot = rootDir) {
     || active.revision !== selection.activeTheme.revision
   ) {
     throw new ThemePipelineError(
-      "config/theme.json.activeTheme",
-      "与 Active Theme 不一致，请使用 switch-theme 修改当前主题",
+      selection.inherited ? "config/home.json.activeTheme" : "config/theme.json.activeTheme",
+      `与 Active Theme 不一致，请使用 switch-theme 修改${selection.inherited ? " Home Theme" : "当前主题"}`,
     );
   }
   return active;

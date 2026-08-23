@@ -144,6 +144,25 @@ test("构建失败保留上一份正式 dist", async () => {
   assert.equal(await readFile(path.join(outputDir, "index.html"), "utf8"), previous);
 });
 
+test("继承 Publication 的 Active Manifest 与 Home 不一致时构建失败关闭", async () => {
+  const target = await fixture();
+  await writeJson(path.join(target, "publications", "ai-daily", "config", "theme.json"), {
+    schemaVersion: 2,
+    mode: "inherit",
+  });
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, {
+    ...home,
+    activeTheme: { id: "midnight-tech", revision: 1 },
+  });
+
+  await assert.rejects(
+    () => buildSite(target),
+    /Active Theme.*不一致/,
+  );
+});
+
 test("Schema 2 图片进入 Home 投影和 Publication 无脚本退化且小模块不展示", async () => {
   const target = await fixture();
   const homePath = path.join(target, "config", "home.json");
