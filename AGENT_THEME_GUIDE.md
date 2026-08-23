@@ -1,9 +1,9 @@
 # DailyNews AI Agent 主题使用指南
 
-指南版本：1.1
-适用产品版本：0.9.0
+指南版本：1.2
+适用产品版本：0.10.0（开发中）
 Theme Schema：1
-更新日期：2026-08-21
+更新日期：2026-08-22
 
 这份指南告诉外部 AI Agent 如何查看、切换、新增和修改 DailyNews 主题。它只规定 Agent 需要读取的信息、需要生成的文件和主题边界，不要求 Agent 运行主题处理命令或操作浏览器。
 
@@ -27,14 +27,15 @@ Theme Schema：1
 
 开始前只读查看：
 
-- `config/theme.json`：用户当前选择的主题 ID 和 revision。
+- 用户或宿主明确给出的唯一目标 Publication ID。
+- `publications/<publication-id>/config/theme.json`：目标日报当前选择的主题 ID 和 revision。
 - `themes/presets/*.json`：Agent 创建 Candidate 时可继承的官方 Preset。
 - `themes/definitions/<theme-id>/<revision>.json`：已保存主题的只读定义。
 - `themes/candidates/<theme-id>.json`：尚在编辑的候选，如果存在。
 
 不要根据文件名猜测当前主题，也不要把 `themes/presets/` 与已经保存的主题库混为一体。
 
-如果 Agent 所在环境支持项目命令，可以使用 `npm run list-themes` 辅助读取主题库；这不是完成任务的必要条件。
+如果 Agent 所在环境支持项目命令，可以使用 `npm run list-themes -- --publication <publication-id>` 辅助读取主题库；这不是完成任务的必要条件。
 
 ## 3. 权限边界
 
@@ -46,8 +47,8 @@ themes/candidates/<theme-id>.json
 
 Agent 不得直接写入或覆盖：
 
-- `config/theme.json`
-- `themes/active.json`
+- `publications/*/config/theme.json`
+- `publications/*/themes/active.json`
 - `themes/presets/`
 - `themes/previews/`
 - `themes/definitions/`
@@ -59,24 +60,24 @@ Agent 不得直接写入或覆盖：
 
 ## 4. 查看与表达切换目标
 
-当前主题来自 `config/theme.json`，可用主题来自 `themes/definitions/`。Agent 应先确认目标 ID 和 revision 已存在。
+当前主题来自目标 Publication 的 `config/theme.json`，可用主题来自全局 `themes/definitions/`。Agent 应先确认目标 ID 和 revision 已存在。
 
 如果所在环境支持项目命令，可以使用：
 
 ```bash
-npm run list-themes
+npm run list-themes -- --publication <publication-id>
 ```
 
 切换到目标主题的最新 revision：
 
 ```bash
-npm run switch-theme -- --theme <theme-id> --confirm <theme-id>
+npm run switch-theme -- --publication <publication-id> --theme <theme-id> --confirm <theme-id>
 ```
 
 切换到指定历史 revision：
 
 ```bash
-npm run switch-theme -- --theme <theme-id> --revision <revision> --confirm <theme-id>
+npm run switch-theme -- --publication <publication-id> --theme <theme-id> --revision <revision> --confirm <theme-id>
 ```
 
 命令返回：
@@ -176,7 +177,7 @@ Candidate 不得包含 HTML、CSS、CSS 选择器、JavaScript、`style`、`@imp
 - `editorial.priority`
 - 大、中、小模块映射
 - Layout Compiler 输出
-- `data/issues/`、`data/compiled/` 或 `data/index.json`
+- `publications/*/data/issues/`、`publications/*/data/compiled/` 或 `publications/*/data/index.json`
 
 ## 8. Agent 完成条件
 

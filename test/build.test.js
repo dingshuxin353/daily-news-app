@@ -22,6 +22,8 @@ test("构建 HTML 注入 Active Theme、根属性和一致的 color-scheme", asy
     activeTheme,
     issue,
     site: { name: "DailyNews Test" },
+    publicationId: "daily-news-test",
+    publications: [{ id: "daily-news-test", name: "DailyNews Test", pageUrl: "/p/daily-news-test/" }],
   });
 
   assert.match(html, /<html[^>]+data-theme="newspaper-default"[^>]+data-lead="split"/);
@@ -29,6 +31,9 @@ test("构建 HTML 注入 Active Theme、根属性和一致的 color-scheme", asy
   assert.match(html, /<meta name="color-scheme" content="light">/);
   assert.match(html, /<title>2026-08-19 · DailyNews Test<\/title>/);
   assert.match(html, /<span class="brand__name">DailyNews Test<\/span>/);
+  assert.match(html, /class="brand" href="\/p\/daily-news-test\/"/);
+  assert.match(html, /<option value="\/p\/daily-news-test\/" selected>DailyNews Test<\/option>/);
+  assert.match(html, /"publicationId":"daily-news-test"/);
   assert.match(html, /datetime="2026-08-19"[^>]*>2026\.08\.19<\/time>/);
   assert.doesNotMatch(html, /build:noscript/);
   assert.equal(colorSchemeFor("#0D1117"), "dark");
@@ -52,7 +57,13 @@ test("深色 Active Theme 在脚本执行前写入根属性、样式表和 dark 
     },
     colors: { background: "#0D1117", text: "#F0F3F6" },
   };
-  const html = renderBuiltHtml(template, { activeTheme, issue, site: { name: "DailyNews Test" } });
+  const html = renderBuiltHtml(template, {
+    activeTheme,
+    issue,
+    site: { name: "DailyNews Test" },
+    publicationId: "daily-news-test",
+    publications: [{ id: "daily-news-test", name: "DailyNews Test", pageUrl: "/p/daily-news-test/" }],
+  });
   const linkIndex = html.indexOf('id="active-theme"');
   const scriptIndex = html.indexOf('<script type="module"');
   assert.match(html, /<html[^>]+data-theme="midnight-tech"[^>]+color-scheme: dark/);
@@ -89,6 +100,8 @@ test("空仓构建生成明确的暂无日报状态", async () => {
     activeTheme,
     issue: null,
     site: { name: "DailyNews" },
+    publicationId: "daily-news",
+    publications: [{ id: "daily-news", name: "DailyNews", pageUrl: "/p/daily-news/" }],
   });
 
   assert.match(html, /<title>DailyNews<\/title>/);

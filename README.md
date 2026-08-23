@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前版本是 `v0.9.0`。它是一个文件驱动的本地版本：Agent 只提交声明式内容或主题候选，Node.js 负责校验、正式写入和确定性编排，前端按固定的四格报纸骨架展示结果。
+当前已发布版本是 `v0.9.0`；本分支正在开发 `v0.10.0`。本地实现已支持显式 Publication 上下文、多日报静态入口、独立主题、Candidate 宿主闭环和显式 v0.9 迁移；尚未合入或发布。
 
 ## 主要能力
 
@@ -13,6 +13,7 @@
 - 支持一条内容关联多个来源，并通过共享来源面板查看。
 - 内置 `newspaper-default`、`swiss-editorial`、`midnight-tech` 三个可切换主题。
 - AI Agent 可以通过受约束的 JSON Candidate 写内容或定制主题，不直接生成 HTML、CSS 和版面坐标。
+- 多份 Publication 使用独立配置、内容、提交状态和主题选择，并通过 `/p/<publication-id>/` 读取和切换。
 - 可以构建为纯静态文件并部署到普通静态站点。
 
 当前版本只处理纯文字日报，不包含账号、远程 MCP、图片、服务端 Agent 调度或偏好推荐。
@@ -38,12 +39,12 @@ npm start
 PORT=5173 npm start
 ```
 
-启动前会校验站点配置、当前主题和正式日报，并重新生成 `data/compiled/` 与 `data/index.json`。
+启动前会校验 Publication Registry、各日报配置、当前主题和正式日报，并重新生成各 Publication 的 `data/compiled/` 与 `data/index.json`。宿主随后扫描并监听已注册 Publication 的 Candidate：仅当前上海日期的安全 `update` 会自动发布。
 新克隆默认不附带日报数据，因此第一次打开会显示“暂无日报”；让 Agent 生成第一份 Candidate 并由宿主处理后即可看到日报。
 
 ## 第一次配置
 
-编辑 [`config/site.json`](./config/site.json)，可以修改站点名称、强调色、可选 Logo 和三档内容数量上限：
+默认 Publication 由 [`config/publications.json`](./config/publications.json) 登记。编辑目标 Publication 的 [`publications/daily-news/config/site.json`](./publications/daily-news/config/site.json)，可以修改站点名称、强调色、可选 Logo 和三档内容数量上限：
 
 ```json
 {
@@ -72,16 +73,16 @@ PORT=5173 npm start
 Agent 的唯一内容产物是：
 
 ```text
-data/candidates/YYYY-MM-DD.json
+publications/<publication-id>/data/candidates/YYYY-MM-DD.json
 ```
 
-Agent 写完即可结束。随后由用户、自动化任务或其他宿主环境消费候选：
+Agent 写完即可用 `candidate_ready` 语义结束。`npm start` 正在运行时，宿主会自动消费今天的安全 `update`；服务未运行时会在下一次启动时扫描。维护者也可以显式调用统一处理入口：
 
 ```bash
-npm run process-candidate -- --candidate data/candidates/YYYY-MM-DD.json --mode update
+npm run process-candidate -- --publication <publication-id> --candidate publications/<publication-id>/data/candidates/YYYY-MM-DD.json --mode update
 ```
 
-默认只允许处理当前上海日期。修订历史日期时追加 `--allow-history`；只有明确需要完整替换时才使用 `--mode replace`。
+默认只允许处理当前上海日期。修订历史日期时追加 `--allow-history`；只有明确需要完整替换时才同时使用 `--mode replace --allow-replace`。
 
 Candidate 字段、来源规则、去重方式和 Agent 完成条件见 [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md)。
 
@@ -90,13 +91,13 @@ Candidate 字段、来源规则、去重方式和 Agent 完成条件见 [`AGENT_
 查看当前主题和已经保存的主题：
 
 ```bash
-npm run list-themes
+npm run list-themes -- --publication <publication-id>
 ```
 
 切换已有主题：
 
 ```bash
-npm run switch-theme -- --theme swiss-editorial --confirm swiss-editorial
+npm run switch-theme -- --publication <publication-id> --theme swiss-editorial --confirm swiss-editorial
 ```
 
 让 Agent 新增或修改主题时，可以使用：
@@ -113,10 +114,10 @@ Agent 写完 Candidate 后即可结束。支持本地命令的宿主或维护者
 npm run process-theme -- --candidate themes/candidates/<theme-id>.json
 ```
 
-运行 `npm start` 后，通过 `/?themePreview=<theme-id>` 查看真实日报预览。用户确认后再激活：
+运行 `npm start` 后，通过 `/p/<publication-id>/?themePreview=<theme-id>` 查看目标日报预览。用户确认后再激活：
 
 ```bash
-npm run activate-theme -- --theme <theme-id> --confirm <theme-id>
+npm run activate-theme -- --publication <publication-id> --theme <theme-id> --confirm <theme-id>
 ```
 
 主题字段、允许值和 Agent 边界见 [`AGENT_THEME_GUIDE.md`](./AGENT_THEME_GUIDE.md)。
@@ -125,17 +126,29 @@ npm run activate-theme -- --theme <theme-id> --confirm <theme-id>
 
 | 路径 | 作用 | 维护者 |
 | --- | --- | --- |
-| `config/site.json` | 站点设置和内容数量上限 | 用户 |
-| `config/theme.json` | 当前主题选择 | 主题命令 |
-| `data/candidates/` | 日报 Candidate | Agent |
-| `data/issues/` | 正式日报事实 | Issue Writer |
-| `data/compiled/` | 前端渲染数据 | Layout Compiler |
+| `config/publications.json` | Publication 顺序和默认项 | 用户或宿主 |
+| `publications/<id>/config/site.json` | 站点设置和内容数量上限 | 用户 |
+| `publications/<id>/config/theme.json` | 当前主题选择 | 主题命令 |
+| `publications/<id>/data/candidates/` | 日报 Candidate | Agent |
+| `publications/<id>/data/issues/` | 正式日报事实 | Issue Writer |
+| `publications/<id>/data/compiled/` | 前端渲染数据 | Layout Compiler |
+| `publications/<id>/data/submissions/` | Candidate 处理状态 | 本地宿主 |
 | `themes/candidates/` | 主题 Candidate | Agent |
 | `themes/definitions/` | 持久主题库 | Theme Writer |
 | `themes/compiled/` | 编译后的主题 CSS | Theme Compiler |
-| `themes/active.json` | 当前主题运行时清单 | 主题命令 |
+| `publications/<id>/themes/active.json` | 当前主题运行时清单 | 主题命令 |
 
 不要手工修改生成目录来绕过 Writer、Compiler 或主题命令。
+
+## 从 v0.9 迁移
+
+在仍使用根级 `config/site.json`、`data/` 和 `themes/active.json` 的 v0.9 安装中，先备份并明确选择默认 Publication ID，再运行：
+
+```bash
+npm run migrate-v0.9 -- --publication <publication-id> --confirm <publication-id>
+```
+
+迁移只复制并校验数据，最后才激活 Publication Registry；不会删除或覆盖原始 v0.9 文件。目标已存在时拒绝合并，重复执行同一份已成功迁移的结果只返回 `unchanged`。不要在已经使用多 Publication 的仓库中运行此命令。
 
 ## 构建与部署
 
@@ -165,7 +178,7 @@ node --check src/app.js
 git diff --check
 ```
 
-v0.9.0 已通过桌面、移动端、三个官方主题、压力日报、键盘焦点和无 JavaScript 退化检查。临时测试产物不保存在源码仓库。
+v0.9.0 已通过桌面、移动端、三个官方主题、压力日报、键盘焦点和无 JavaScript 退化检查。v0.10.0 仍需用户完成双日报视觉确认和独立验收后才可合入发布。临时测试产物不保存在源码仓库。
 
 ## 开源许可
 

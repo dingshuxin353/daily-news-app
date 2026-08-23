@@ -193,11 +193,25 @@ test("候选要求固定 coverage 且禁止 revision 和布局字段", async () 
   await assert.rejects(() => validateCandidate(candidatePath), /coverage.*start 必须早于 end/);
 });
 
-test("无效或不存在的日期回退到最新一期", () => {
+test("Candidate Schema 保持 1，不能通过 publicationId 自行指定写入目标", async () => {
+  const target = await fixture();
+  const source = JSON.parse(await readFile(path.join(target, "data", "issues", "2026-08-19.json"), "utf8"));
+  delete source.revision;
+  source.publicationId = "finance-daily";
+  const candidatePath = path.join(target, "data", "candidates", "2026-08-19.json");
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+
+  await assert.rejects(
+    () => validateCandidate(candidatePath),
+    /publicationId.*不允许出现在候选中/,
+  );
+});
+
+test("无日期使用最新一期，无效或不存在日期明确失败", () => {
   const index = { latest: "2026-08-19", dates: ["2026-08-19", "2026-08-18"] };
   assert.equal(selectDate("", index), "2026-08-19");
-  assert.equal(selectDate("?date=not-a-date", index), "2026-08-19");
-  assert.equal(selectDate("?date=2026-08-17", index), "2026-08-19");
+  assert.equal(selectDate("?date=not-a-date", index), null);
+  assert.equal(selectDate("?date=2026-08-17", index), null);
   assert.equal(selectDate("?date=2026-08-18", index), "2026-08-18");
 });
 

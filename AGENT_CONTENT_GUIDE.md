@@ -1,8 +1,8 @@
 # DailyNews AI Agent 内容使用指南
 
-指南版本：1.1
-适用产品版本：0.9.0
-更新日期：2026-08-21
+指南版本：1.2
+适用产品版本：0.10.0（开发中）
+更新日期：2026-08-22
 
 这份指南告诉外部 AI Agent 如何为 DailyNews 搜集、整理和生成一期日报候选。它只规定 Agent 需要读取的信息、需要生成的文件和内容边界，不要求 Agent 运行项目命令或操作浏览器。
 
@@ -14,9 +14,12 @@
 
 开始前先读取：
 
-- `config/site.json`：当前站点设置与三档优先级数量上限。
-- `data/issues/YYYY-MM-DD.json`：目标日期已存在时，只读获取 coverage、稳定 ID 和已有来源。
+- 用户或宿主明确给出的唯一目标 Publication ID。
+- `publications/<publication-id>/config/site.json`：目标日报的站点设置与三档优先级数量上限。
+- `publications/<publication-id>/data/issues/YYYY-MM-DD.json`：目标日期已存在时，只读获取 coverage、稳定 ID 和已有来源。
 - 用户指定的内容源、时间窗口和写入模式。
+
+不能因为注册表存在默认 Publication，就替一个目标不明确的写入任务自行选择目标。
 
 站点配置字段见 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md)。
 
@@ -24,10 +27,10 @@
 
 按以下顺序完成任务：
 
-1. 与用户要求对齐目标日期、内容源和采集时间窗口。
+1. 与用户要求对齐唯一目标 Publication、目标日期、内容源和采集时间窗口。
 2. 读取站点配置；目标日报已存在时，只读获取固定 coverage、稳定 ID 和已有来源。
 3. 搜集内容、核对来源、合并同一事件，并决定编辑优先级与阅读顺序。
-4. 生成一份完整 Candidate，写入 `data/candidates/YYYY-MM-DD.json`。
+4. 生成一份完整 Candidate，写入 `publications/<publication-id>/data/candidates/YYYY-MM-DD.json`。
 5. 向用户或宿主环境报告候选路径、日期、coverage 和内容数量。
 
 ## 2. Agent 的唯一数据产物
@@ -35,20 +38,21 @@
 Agent 只生成一份完整候选：
 
 ```text
-data/candidates/YYYY-MM-DD.json
+publications/<publication-id>/data/candidates/YYYY-MM-DD.json
 ```
 
 候选必须放在该目录中，文件名、`date` 和目标日期保持一致。候选是一轮运行的完整提案，不是 JSON Patch，也不是向正式日报直接追加的数组。
 
 Agent 不得直接修改：
 
-- `data/issues/`
-- `data/compiled/`
-- `data/index.json`
-- `config/`
+- `publications/*/data/issues/`
+- `publications/*/data/compiled/`
+- `publications/*/data/index.json`
+- `publications/*/config/`
+- `config/publications.json`
 - 源码和构建产物
 
-候选保存完成后，Agent 的文件写入任务即结束。后续何时消费 Candidate 由宿主环境决定。
+候选保存完成后，Agent 的文件写入任务即结束。Agent 应报告 `candidate_ready` 或等价的“候选已准备”，不能称为日报已发布或页面已可查看。后续何时消费 Candidate 由宿主环境决定。
 
 ## 3. 候选 JSON
 
@@ -140,7 +144,7 @@ Agent 不得直接修改：
 
 ## 7. 选择、去重和顺序
 
-- 分配优先级前读取 `config/site.json.priorityLimits`；非负整数表示上限，`null` 表示不限。
+- 分配优先级前读取目标 Publication 的 `config/site.json.priorityLimits`；非负整数表示上限，`null` 表示不限。
 - 如果正式日报已存在，可以只读获取已有 coverage、稳定 ID 和来源；不得直接修改该文件。
 - 每条内容必须可追溯到至少一个真实来源。
 - 在候选生成阶段完成语义去重；代码只做 ID 和来源 URL 的确定性匹配。
@@ -157,6 +161,7 @@ Agent 不得直接修改：
 候选不得包含：
 
 - `revision`
+- `publicationId`、Publication 路径或目标选择字段
 - `mode`、`writeMode`、写入结果或历史写入权限
 - 删除指令、删除列表或删除标记
 - `resolvedPriority`
@@ -180,6 +185,7 @@ Agent 不得直接修改：
 - 最终顺序为候选处理结果在前，未匹配旧条目按原相对顺序在后。
 - 匹配歧义、coverage 变化和未授权历史日期整次拒绝。
 - Candidate 不能自行指定写入结果或授予 `replace` 权限。
+- 目标 Publication 由宿主上下文和受控 Candidate 路径共同确定，Candidate 不能通过自身字段改变目标。
 
 ## 10. Agent 与宿主环境的分工
 
@@ -194,5 +200,7 @@ Agent 只负责生成完整 Candidate。Writer 和 Compiler 的执行时机由�
 1. Candidate 是完整 JSON，日期、coverage、内容和来源字段齐全。
 2. 已完成同一事件的语义去重。
 3. 编辑优先级、选择理由和阅读顺序完整。
-4. Candidate 已保存到正确路径。
+4. Candidate 已保存到目标 Publication 的正确路径。
 5. 已向用户或宿主环境报告候选路径和本次产出摘要。
+
+完成报告必须明确使用 `candidate_ready` 语义。只有宿主完成 Validator、Writer、Compiler 和正式提交后，才能报告 `published`。

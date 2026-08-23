@@ -11,14 +11,16 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { compileIssue, validateCompiled } from "./compiler.js";
+import { loadPublicationContext } from "./publications.js";
 import { validateCandidate, validateIssue, validateSite } from "./validation.js";
 
 export class PipelineError extends Error {
-  constructor(date, field, message) {
+  constructor(date, field, message, result = "rejected") {
     super(`${date}: ${field} ${message}`);
     this.name = "PipelineError";
     this.date = date;
     this.field = field;
+    this.result = result;
   }
 }
 
@@ -136,7 +138,7 @@ export function planIssue(candidate, existingIssue, mode = "update") {
   return { result: "updated", issue: nextIssue };
 }
 
-function shanghaiDate(now = new Date()) {
+export function shanghaiDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
@@ -157,8 +159,8 @@ async function readJsonIfPresent(filePath, allowInvalid = false) {
   }
 }
 
-async function acquireDateLock(rootDir, date) {
-  const lockDir = path.join(rootDir, "data", ".locks");
+async function acquireDateLock(dataDir, date) {
+  const lockDir = path.join(dataDir, ".locks");
   const lockPath = path.join(lockDir, `${date}.lock`);
   await mkdir(lockDir, { recursive: true });
   let handle;
@@ -181,8 +183,8 @@ async function acquireDateLock(rootDir, date) {
   };
 }
 
-async function issueIndex(rootDir, date) {
-  const issuesDir = path.join(rootDir, "data", "issues");
+async function issueIndex(dataDir, date) {
+  const issuesDir = path.join(dataDir, "issues");
   const names = await readdir(issuesDir).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -258,39 +260,56 @@ function compiledIsCurrent(issue, compiled, filePath, priorityLimits) {
   }
 }
 
-export async function processCandidate(rootDir, candidatePath, options = {}) {
-  const resolvedRoot = await realpath(path.resolve(rootDir));
+export async function processCandidate(rootDir, publicationId, candidatePath, options = {}) {
+  const context = await loadPublicationContext(rootDir, publicationId);
   const resolvedCandidate = await realpath(path.resolve(candidatePath));
-  const candidateDir = path.join(resolvedRoot, "data", "candidates");
-  if (!resolvedCandidate.startsWith(`${candidateDir}${path.sep}`)) {
-    throw new PipelineError("unknown", "candidate", "必须位于 data/candidates/ 目录");
+  const candidateDir = await realpath(path.join(context.dataDir, "candidates"));
+  if (path.dirname(resolvedCandidate) !== candidateDir) {
+    throw new PipelineError(
+      "unknown",
+      "candidate",
+      `必须位于 Publication ${publicationId} 的 data/candidates/ 目录`,
+    );
   }
 
   const candidate = await validateCandidate(resolvedCandidate);
-  const site = await validateSite(resolvedRoot);
+  const site = await validateSite(context.rootDir, context.publicationDir);
   const { priorityLimits } = site;
   const today = options.today ?? shanghaiDate();
   if (candidate.date > today) {
     throw new PipelineError(candidate.date, "date", "不能处理未来日期");
   }
   if (candidate.date < today && !options.allowHistory) {
-    throw new PipelineError(candidate.date, "date", "历史日期必须显式使用 --allow-history");
+    throw new PipelineError(
+      candidate.date,
+      "date",
+      "历史日期必须显式使用 --allow-history",
+      "authorization_required",
+    );
   }
 
   const mode = options.mode ?? "update";
   if (mode !== "update" && mode !== "replace") {
     throw new PipelineError(candidate.date, "mode", "只能是 update 或 replace");
   }
+  if (mode === "replace" && !options.allowReplace) {
+    throw new PipelineError(
+      candidate.date,
+      "mode",
+      "replace 必须显式使用 --allow-replace",
+      "authorization_required",
+    );
+  }
 
-  const releaseLock = await acquireDateLock(resolvedRoot, candidate.date);
+  const releaseLock = await acquireDateLock(context.dataDir, candidate.date);
   try {
-    const issuePath = path.join(resolvedRoot, "data", "issues", `${candidate.date}.json`);
-    const compiledPath = path.join(resolvedRoot, "data", "compiled", `${candidate.date}.json`);
-    const indexPath = path.join(resolvedRoot, "data", "index.json");
+    const issuePath = path.join(context.dataDir, "issues", `${candidate.date}.json`);
+    const compiledPath = path.join(context.dataDir, "compiled", `${candidate.date}.json`);
+    const indexPath = path.join(context.dataDir, "index.json");
     const existingIssue = await readJsonIfPresent(issuePath);
     if (existingIssue) await validateIssue(issuePath);
     const plan = planIssue(candidate, existingIssue, mode);
-    const nextIndex = await issueIndex(resolvedRoot, candidate.date);
+    const nextIndex = await issueIndex(context.dataDir, candidate.date);
     const currentIndex = await readJsonIfPresent(indexPath, true);
     const stages = [];
     let compiled;
@@ -311,6 +330,7 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
       if (stages.length > 0) await commitStages(stages);
       return {
         result: "unchanged",
+        publicationId,
         date: candidate.date,
         revision: plan.issue.revision,
         repaired,
@@ -333,6 +353,7 @@ export async function processCandidate(rootDir, candidatePath, options = {}) {
 
     return {
       result: plan.result,
+      publicationId,
       date: candidate.date,
       revision: plan.issue.revision,
       mode,

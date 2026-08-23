@@ -1,0 +1,9 @@
+{
+  "name": "DailyNews",
+  "accentColor": "#F2B84B",
+  "priorityLimits": {
+    "lead": 1,
+    "important": 2,
+    "normal": null
+  }
+}
