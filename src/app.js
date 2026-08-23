@@ -1,8 +1,33 @@
-const paths = {
-  site: "/config/site.json",
-  index: "/data/index.json",
-  issue: (date) => `/data/compiled/${date}.json`,
-  activeTheme: "/themes/active.json",
+export function publicationPaths(publicationId) {
+  const base = `/p/${publicationId}`;
+  return {
+    site: `${base}/config/site.json`,
+    index: `${base}/data/index.json`,
+    issue: (date) => `${base}/data/compiled/${date}.json`,
+    submission: (date) => `${base}/data/submissions/${date}.json`,
+    latestSubmission: `${base}/data/submissions/latest.json`,
+    activeTheme: `${base}/themes/active.json`,
+    themePreview: (id) => `/themes/previews/${id}.json`,
+  };
+}
+
+export function parsePublicationContext(documentRef) {
+  const node = documentRef.querySelector("#publication-context");
+  if (!node) throw new Error("Missing publication context");
+  const context = JSON.parse(node.textContent);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(context.publicationId)) {
+    throw new Error("Invalid publication context");
+  }
+  return context;
+}
+
+let paths = {
+  site: "",
+  index: "",
+  issue: () => "",
+  submission: () => "",
+  latestSubmission: "",
+  activeTheme: "",
   themePreview: (id) => `/themes/previews/${id}.json`,
 };
 
@@ -12,7 +37,10 @@ let currentSiteName = "DailyNews";
 
 export function selectDate(search, index) {
   const requested = new URLSearchParams(search).get("date");
-  return index.dates.includes(requested) ? requested : index.latest;
+  if (!requested) return index.latest;
+  return /^\d{4}-\d{2}-\d{2}$/.test(requested) && index.dates.includes(requested)
+    ? requested
+    : null;
 }
 
 export function getAdjacentDates(date, dates) {
@@ -46,6 +74,33 @@ async function loadThemeManifest(search) {
   if (previewId) return { manifest: await fetchJson(paths.themePreview(previewId)), preview: true };
   if (document.querySelector("#active-theme")) return { manifest: null, preview: false };
   return { manifest: await fetchOptionalJson(paths.activeTheme), preview: false };
+}
+
+function setupPublicationNavigation(context) {
+  const selector = document.querySelector("#publication-select");
+  selector.addEventListener("change", () => {
+    location.assign(selector.value);
+  });
+  const current = context.publications.find(({ id }) => id === context.publicationId);
+  if (!current) throw new Error("Current publication is not registered");
+}
+
+function renderSubmissionNotice(status) {
+  const notice = document.querySelector("#submission-notice");
+  const messages = {
+    candidate_ready: "今日候选稿已就绪，等待系统处理。",
+    processing: "今日候选稿正在处理。",
+    authorization_required: "这份候选稿需要人工授权后才能写入。",
+    rejected: "候选稿未通过校验，请检查提交状态。",
+  };
+  const message = status && messages[status.result];
+  notice.hidden = !message;
+  notice.textContent = message ?? "";
+}
+
+async function loadSubmissionNotice(date = null) {
+  const status = await fetchOptionalJson(date ? paths.submission(date) : paths.latestSubmission);
+  renderSubmissionNotice(status);
 }
 
 function relativeLuminance(color) {
@@ -287,6 +342,9 @@ async function start() {
   let themeRequest;
   const previewId = selectThemeRequest(location.search);
   try {
+    const context = parsePublicationContext(document);
+    paths = publicationPaths(context.publicationId);
+    setupPublicationNavigation(context);
     [site, index, themeRequest] = await Promise.all([
       fetchJson(paths.site),
       fetchJson(paths.index),
@@ -300,6 +358,7 @@ async function start() {
   }
 
   setupSite(site, Boolean(themeRequest.manifest || document.querySelector("#active-theme")));
+  await loadSubmissionNotice();
   const sourcePanel = document.querySelector("#source-panel");
   sourcePanel.querySelector(".source-panel__close").addEventListener("click", closeSourcePanel);
   sourcePanel.addEventListener("close", () => {
@@ -321,10 +380,11 @@ async function start() {
 
   const date = selectDate(location.search, index);
   const requested = new URLSearchParams(location.search).get("date");
-  if (requested && requested !== date) {
-    const url = new URL(location.href);
-    url.searchParams.delete("date");
-    history.replaceState({ date }, "", `${url.pathname}${url.search}${url.hash}`);
+  if (requested && !date) {
+    renderStatus("这期日报不存在");
+    document.title = `未找到日报 · ${currentSiteName}`;
+    for (const button of document.querySelectorAll(".date-nav__button")) button.disabled = true;
+    return;
   }
 
   document.querySelector(".date-nav").addEventListener("click", (event) => {
@@ -334,7 +394,12 @@ async function start() {
   });
 
   window.addEventListener("popstate", () => {
-    loadIssue(selectDate(location.search, index), index.dates, { focusAfterLoad: true });
+    const selected = selectDate(location.search, index);
+    if (!selected) {
+      renderStatus("这期日报不存在");
+      return;
+    }
+    loadIssue(selected, index.dates, { focusAfterLoad: true });
   });
 
   await loadIssue(date, index.dates);

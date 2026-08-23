@@ -40,7 +40,17 @@ ${stories}
     </section>`;
 }
 
-export function renderBuiltHtml(template, { activeTheme, issue, site }) {
+function safeJson(value) {
+  return JSON.stringify(value).replaceAll("<", "\\u003c");
+}
+
+export function renderBuiltHtml(template, {
+  activeTheme,
+  issue,
+  site,
+  publicationId,
+  publications,
+}) {
   const attributes = Object.entries(activeTheme.attributes)
     .map(([name, value]) => ` data-${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}="${escapeHtml(value)}"`)
     .join("");
@@ -49,6 +59,11 @@ export function renderBuiltHtml(template, { activeTheme, issue, site }) {
   const title = issue ? `${issue.date} · ${site.name}` : site.name;
   const visibleDate = issue ? issue.date.replaceAll("-", ".") : "—";
   const dateAttribute = issue ? ` datetime="${issue.date}"` : "";
+  const pageUrl = `/p/${publicationId}/`;
+  const publicationOptions = publications.map((publication) => (
+    `            <option value="${escapeHtml(publication.pageUrl)}"${publication.id === publicationId ? " selected" : ""}>${escapeHtml(publication.name)}</option>`
+  )).join("\n");
+  const publicationContext = safeJson({ publicationId, publications });
 
   return template
     .replace('<html lang="zh-CN">', `<html lang="zh-CN"${attributes} style="color-scheme: ${colorScheme}">`)
@@ -56,6 +71,9 @@ export function renderBuiltHtml(template, { activeTheme, issue, site }) {
     .replace("<title>DailyNews</title>", `<title>${escapeHtml(title)}</title>`)
     .replace('    <link rel="stylesheet" href="/styles.css">', `    <link rel="stylesheet" href="/styles.css">\n${themeLink}`)
     .replace('<span class="brand__name">DailyNews</span>', `<span class="brand__name">${escapeHtml(site.name)}</span>`)
+    .replace('class="brand" href="/"', `class="brand" href="${pageUrl}"`)
+    .replace("            <!-- build:publication-options -->", publicationOptions)
+    .replace("<!-- build:publication-context -->", publicationContext)
     .replace(
       '<time class="date-nav__current" aria-live="polite">—</time>',
       `<time class="date-nav__current"${dateAttribute} aria-live="polite">${visibleDate}</time>`,

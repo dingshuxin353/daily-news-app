@@ -182,8 +182,8 @@ function validateItems(items, filePath, strictCandidate = false) {
   }
 }
 
-export async function validateSite(rootDir) {
-  const filePath = path.join(rootDir, "config", "site.json");
+export async function validateSite(rootDir, storageRoot = rootDir) {
+  const filePath = path.join(storageRoot, "config", "site.json");
   const site = await readJson(filePath);
   requireObject(site, filePath, "$");
   requireString(site.name, filePath, "name");
@@ -250,9 +250,9 @@ export async function validateCandidate(filePath) {
   return candidate;
 }
 
-export async function validateSources(rootDir) {
-  const site = await validateSite(rootDir);
-  const issuesDir = path.join(rootDir, "data", "issues");
+export async function validateSources(rootDir, storageRoot = rootDir) {
+  const site = await validateSite(rootDir, storageRoot);
+  const issuesDir = path.join(storageRoot, "data", "issues");
   let fileNames;
   try {
     fileNames = (await readdir(issuesDir)).filter((name) => name.endsWith(".json"));
@@ -273,6 +273,6 @@ export async function validateSources(rootDir) {
   };
 }
 
-export async function validateAll(rootDir) {
-  return (await validateSources(rootDir)).index;
+export async function validateAll(rootDir, storageRoot = rootDir) {
+  return (await validateSources(rootDir, storageRoot)).index;
 }

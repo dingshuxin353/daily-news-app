@@ -3,8 +3,10 @@ import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startCandidateHost } from "./lib/candidate-host.js";
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const staticRoot = path.join(projectRoot, "dist");
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -16,9 +18,12 @@ const contentTypes = new Map([
 
 function resolveRequestPath(urlPath) {
   const decoded = decodeURIComponent(urlPath);
-  if (decoded === "/") return path.join(rootDir, "index.html");
-  return path.join(rootDir, decoded);
+  if (decoded === "/") return path.join(staticRoot, "index.html");
+  const requested = path.join(staticRoot, decoded);
+  return decoded.endsWith("/") ? path.join(requested, "index.html") : requested;
 }
+
+await startCandidateHost(projectRoot);
 
 createServer(async (request, response) => {
   let filePath;
@@ -29,7 +34,7 @@ createServer(async (request, response) => {
     return;
   }
 
-  if (!filePath.startsWith(`${rootDir}${path.sep}`)) {
+  if (!filePath.startsWith(`${staticRoot}${path.sep}`)) {
     response.writeHead(403).end("Forbidden");
     return;
   }
