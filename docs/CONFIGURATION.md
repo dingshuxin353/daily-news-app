@@ -1,10 +1,12 @@
 # DailyNews 配置说明
 
-适用产品版本：`0.11.0`
+适用产品版本：`0.11.1`
 
 更新日期：2026-08-23
 
 DailyNews 使用全局 Publication Registry，并把每份日报的站点配置、内容数据和主题选择保存在自己的目录中。正式日报、编译数据和 Active Theme 由代码维护，不应通过手工编辑生成文件来配置。
+
+面向用户的配置任务由 [`AGENT_USER_GUIDE.md`](../AGENT_USER_GUIDE.md) 统一路由。进入本页后，在用户确认结果的前提下，Agent 可以修改本页列出的配置文件；不能把正式 Issue、Compiled、索引、Submission Status 或 Active Manifest 当作普通配置手工覆盖。
 
 ## Home Profile
 
@@ -25,6 +27,18 @@ DailyNews 使用全局 Publication Registry，并把每份日报的站点配置�
 ```
 
 `publicationIds` 必须是非空、不重复的有序数组；ID 只使用小写字母、数字和连字符。`defaultPublicationId` 必须属于该数组。默认项只影响阅读入口，不能替模糊的内容或主题写入任务选择目标。
+
+### 新增或调整 Publication 的一致性
+
+当前没有专用的 Publication 创建命令。Agent 只有在用户明确确认后，才能在现有文件架构内新增或调整，并同时保证：
+
+- 稳定 ID 与 `publications/<id>/` 目录名完全一致，Registry 顺序和默认项明确。
+- 每份 Publication 都有自己的 `config/site.json`、`config/theme.json`、`data/` 子目录、`data/index.json` 和 `themes/active.json`。
+- 新 Publication 的主题选择使用 Schema `2` 的 `inherit`；Active Manifest 必须与当前 Home Effective Theme 一致。
+- Candidate、Issue、Compiled 和 Submission 目录彼此独立；不能复制另一份日报的正式内容冒充新日报。
+- 目标目录和所需文件全部准备完成后再登记到 Registry；不能留下半配置状态。
+
+如果 Agent 无法从当前合法安装安全形成完整结构，应停止并说明“当前没有创建命令”，不能猜测缺失文件、Schema 或正式主题产物。调整已有 Publication 时只修改用户要求的配置，不重建或覆盖其内容目录。
 
 ## 2. 站点配置
 
@@ -176,6 +190,17 @@ PORT=5173 npm start
 
 `npm start` 会在启动服务前运行数据准备和静态构建，然后扫描并监听各 Publication 的 Candidate。只有当前上海日期的安全 `update` 会自动进入 Writer 与 Compiler；历史日期记录为 `authorization_required`，校验失败记录为 `rejected`。`npm run build` 会重新生成 `dist/`。这些过程可能更新编译数据、索引和 Submission Status。
 
+### Agent 配置与验证顺序
+
+1. 确认当前目录、Git 状态、Node.js 和 npm，并读取现有 Home、Registry、站点和主题配置。
+2. 用人类可理解的结果摘要取得确认；保留用户已有设置和无关工作区改动。
+3. 只修改与确认结果直接相关的配置，不手工写生成产物。
+4. 不需要保持服务时运行 `npm run build`，确认配置、数据和主题校验通过。
+5. 需要交付链接时，先检查是否已有可用实例，再用 `npm start` 或实际选定端口启动。
+6. 等待启动成功，并通过真实 HTTP 请求检查根路径和每个目标 `/p/<publication-id>/`；最终只返回本次实际验证过的端口与链接。
+
+构建通过只证明静态产物可生成，不代表服务仍在运行。配置文件已修改也不等于页面已发布或公开部署。
+
 ## 7. 静态构建
 
 ```bash
@@ -208,3 +233,10 @@ npm run migrate-v0.10 -- --home-enabled false --apply --confirm migrate-v0.11.0
 默认 Publication 迁移为 `inherit`，其他 Publications 保留原主题并迁移为 `override`。不要在真实安装上运行迁移，除非用户另行明确授权并已备份。
 
 当前本地版本不需要 API Token、数据库密码或云端密钥。不要把任何内容源凭证、Cookie、Agent Token 或私人配置写入 Candidate、主题文件或源码仓库。
+
+Agent 还必须遵守：
+
+- 不清理、重置或覆盖无法识别的工作区修改。
+- 不因配置任务删除日报、迁移真实数据或修改源码。
+- 安装 Node.js、修改系统环境、执行迁移或公开部署前另行取得用户同意。
+- 校验失败时只修复相关配置，并用人话说明影响；不能绕过 Validator 或直接改生成文件获得绿灯。
