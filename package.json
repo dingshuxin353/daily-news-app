@@ -6,6 +6,7 @@
   "scripts": {
     "prepare-data": "node scripts/prepare-data.js",
     "process-candidate": "node scripts/process-candidate.js",
+    "process-todo": "node scripts/process-todo.js",
     "migrate-v0.9": "node scripts/migrate-v0.9.js",
     "migrate-v0.10": "node scripts/migrate-v0.10.js",
     "process-theme": "node scripts/process-theme.js",

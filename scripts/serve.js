@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCandidateHost } from "./lib/candidate-host.js";
+import { startTodoHost } from "./lib/todo-host.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const staticRoot = path.join(projectRoot, "dist");
@@ -24,6 +25,7 @@ function resolveRequestPath(urlPath) {
 }
 
 await startCandidateHost(projectRoot);
+await startTodoHost(projectRoot);
 
 createServer(async (request, response) => {
   let filePath;
