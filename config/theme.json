@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "mode": "override",
   "activeTheme": {
     "id": "newspaper-default",
     "revision": 1

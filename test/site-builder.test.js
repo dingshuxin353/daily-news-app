@@ -6,6 +6,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { buildSite } from "../scripts/lib/site-builder.js";
+import { compileIssue } from "../scripts/lib/compiler.js";
+import { switchHomeTheme } from "../scripts/lib/home.js";
 import { switchTheme } from "../scripts/lib/theme-pipeline.js";
 import { createTestIssue, seedTestData } from "../test-support/helpers.js";
 
@@ -34,7 +36,7 @@ async function createPublication(target, publicationId, name) {
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-build-"));
-  for (const entry of ["index.html", "styles.css", "src", "public", "themes"]) {
+  for (const entry of ["index.html", "home.html", "styles.css", "src", "public", "themes"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
   await mkdir(path.join(target, "config"), { recursive: true });
@@ -43,6 +45,8 @@ async function fixture() {
     defaultPublicationId: "ai-daily",
     publicationIds: ["ai-daily", "finance-daily"],
   });
+  const home = JSON.parse(await readFile(path.join(rootDir, "config", "home.json"), "utf8"));
+  await writeJson(path.join(target, "config", "home.json"), { ...home, enabled: false });
   await createPublication(target, "ai-daily", "AI 日报");
   const finance = await createPublication(target, "finance-daily", "财经日报");
   await switchTheme(target, "midnight-tech", {
@@ -65,6 +69,9 @@ test("构建为每个 Publication 生成独立入口、数据和首帧主题，�
   assert.match(aiHtml, /data-theme="newspaper-default"/);
   assert.match(financeHtml, /<span class="brand__name">财经日报<\/span>/);
   assert.match(financeHtml, /data-theme="midnight-tech"/);
+  assert.match(financeHtml, /<a href="\/">总览<\/a>/);
+  assert.match(financeHtml, /<a href="\/p\/finance-daily\/" aria-current="page">财经日报<\/a>/);
+  assert.match(financeHtml, /<option value="\/">总览<\/option>/);
   assert.match(financeHtml, /<option value="\/p\/ai-daily\/">AI 日报<\/option>/);
   assert.match(financeHtml, /<option value="\/p\/finance-daily\/" selected>财经日报<\/option>/);
   assert.match(financeHtml, /2026-08-19 最新一期来源清单/);
@@ -80,4 +87,125 @@ test("构建为每个 Publication 生成独立入口、数据和首帧主题，�
     () => stat(path.join(outputDir, "p", "ai-daily", "data", "candidates", "2026-08-20.json")),
     /ENOENT/,
   );
+});
+
+test("Home 开启时根路径生成总览、真实深链、目录和独立主题 Manifest", async () => {
+  const target = await fixture();
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, enabled: true, name: "我的日报" });
+  await writeJson(path.join(target, "publications", "ai-daily", "config", "theme.json"), {
+    schemaVersion: 2,
+    mode: "inherit",
+  });
+
+  const { outputDir, overview } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const homeHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const overviewOutput = JSON.parse(await readFile(
+    path.join(outputDir, "home", "data", "overview.json"),
+    "utf8",
+  ));
+  const active = JSON.parse(await readFile(
+    path.join(outputDir, "home", "themes", "active.json"),
+    "utf8",
+  ));
+
+  assert.equal(overview.asOfDate, "2026-08-23");
+  assert.deepEqual(overviewOutput, overview);
+  assert.equal(active.themeId, "newspaper-default");
+  assert.match(homeHtml, /<h1>我的日报<\/h1>/);
+  assert.match(homeHtml, /<a href="\/" aria-current="page">总览<\/a>/);
+  assert.match(homeHtml, /<option value="\/" selected>总览<\/option>/);
+  assert.match(homeHtml, /\/p\/ai-daily\/\?date=2026-08-19#test-item-1/);
+  assert.ok(homeHtml.indexOf("AI 日报") < homeHtml.indexOf("财经日报"));
+
+  await switchHomeTheme(target, "swiss-editorial", {
+    revision: 1,
+    confirm: "swiss-editorial",
+  });
+  await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const nextHome = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const nextAi = await readFile(path.join(outputDir, "p", "ai-daily", "index.html"), "utf8");
+  const nextFinance = await readFile(path.join(outputDir, "p", "finance-daily", "index.html"), "utf8");
+  assert.match(nextHome, /data-theme="swiss-editorial"/);
+  assert.match(nextAi, /data-theme="swiss-editorial"/);
+  assert.match(nextFinance, /data-theme="midnight-tech"/);
+});
+
+test("构建失败保留上一份正式 dist", async () => {
+  const target = await fixture();
+  const { outputDir } = await buildSite(target);
+  const previous = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, accentColor: "invalid" });
+
+  await assert.rejects(() => buildSite(target), /accentColor/);
+  assert.equal(await readFile(path.join(outputDir, "index.html"), "utf8"), previous);
+});
+
+test("继承 Publication 的 Active Manifest 与 Home 不一致时构建失败关闭", async () => {
+  const target = await fixture();
+  await writeJson(path.join(target, "publications", "ai-daily", "config", "theme.json"), {
+    schemaVersion: 2,
+    mode: "inherit",
+  });
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, {
+    ...home,
+    activeTheme: { id: "midnight-tech", revision: 1 },
+  });
+
+  await assert.rejects(
+    () => buildSite(target),
+    /Active Theme.*不一致/,
+  );
+});
+
+test("Schema 2 图片进入 Home 投影和 Publication 无脚本退化且小模块不展示", async () => {
+  const target = await fixture();
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, enabled: true });
+  const publication = path.join(target, "publications", "ai-daily");
+  const issuePath = path.join(publication, "data", "issues", "2026-08-19.json");
+  const issue = JSON.parse(await readFile(issuePath, "utf8"));
+  issue.schemaVersion = 2;
+  issue.items[0].image = {
+    src: "https://cdn.example.com/lead.jpg",
+    alt: "头条测试图片",
+    width: 1200,
+    height: 800,
+    credit: "图片来源",
+    sourceUrl: "https://example.com/image-source",
+  };
+  issue.items.at(-1).image = {
+    src: "https://cdn.example.com/small.jpg",
+    alt: "小模块测试图片",
+    width: 1200,
+    height: 800,
+    credit: "图片来源",
+  };
+  await writeJson(issuePath, issue);
+  await writeJson(
+    path.join(publication, "data", "compiled", "2026-08-19.json"),
+    compileIssue(issue).compiled,
+  );
+
+  const { outputDir } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const homeHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const publicationHtml = await readFile(
+    path.join(outputDir, "p", "ai-daily", "index.html"),
+    "utf8",
+  );
+  const overview = JSON.parse(await readFile(
+    path.join(outputDir, "home", "data", "overview.json"),
+    "utf8",
+  ));
+  assert.equal(overview.publications[0].highlights[0].image.src, "https://cdn.example.com/lead.jpg");
+  assert.match(homeHtml, /src="https:\/\/cdn\.example\.com\/lead\.jpg"/);
+  assert.match(homeHtml, /loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"/);
+  assert.match(publicationHtml, /src="https:\/\/cdn\.example\.com\/lead\.jpg"/);
+  assert.doesNotMatch(publicationHtml, /src="https:\/\/cdn\.example\.com\/small\.jpg"/);
 });

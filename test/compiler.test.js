@@ -125,6 +125,46 @@ test("历史 image 字段产生警告且不进入编译产物", () => {
   assert.equal(warnings.some(({ type }) => type === "image"), true);
 });
 
+test("Schema 2 原样保留图片并只按模块尺寸生成 mediaVariant", () => {
+  const source = issue(["lead", "important", "normal"]);
+  source.schemaVersion = 2;
+  const image = {
+    src: "https://cdn.example.com/image.jpg",
+    alt: "测试图片",
+    width: 1200,
+    height: 800,
+    credit: "测试来源",
+  };
+  source.items.forEach((entry) => {
+    entry.image = structuredClone(image);
+  });
+  const withImages = compileIssue(source).compiled;
+  const modules = withImages.layout.rows.flatMap(({ modules: rowModules }) => rowModules);
+  assert.deepEqual(modules.map(({ mediaVariant }) => mediaVariant), [
+    "lead-split",
+    "medium-split",
+    "none",
+  ]);
+  assert.deepEqual(withImages.items[0].image, image);
+
+  const withoutImagesSource = structuredClone(source);
+  withoutImagesSource.items.forEach((entry) => delete entry.image);
+  const withoutImages = compileIssue(withoutImagesSource).compiled;
+  assert.deepEqual(
+    withoutImages.layout.rows.map(({ usedCapacity }) => usedCapacity),
+    withImages.layout.rows.map(({ usedCapacity }) => usedCapacity),
+  );
+  assert.deepEqual(
+    withoutImages.layout.rows.flatMap(({ modules: rowModules }) => rowModules.map(({ span }) => span)),
+    modules.map(({ span }) => span),
+  );
+  assert.equal(
+    withoutImages.layout.rows.flatMap(({ modules: rowModules }) => rowModules)
+      .every(({ mediaVariant }) => mediaVariant === "none"),
+    true,
+  );
+});
+
 test("标题、brief 和 summary 超出建议长度时只产生警告", () => {
   const source = issue(["normal"]);
   source.items[0].title = "长".repeat(29);

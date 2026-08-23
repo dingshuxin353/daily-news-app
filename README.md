@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前版本是 `v0.10.0`。它支持显式 Publication 上下文、多日报静态入口、独立主题、Candidate 宿主闭环和显式 v0.9 迁移。
+当前正式版本是 `v0.10.0`；本研发分支正在实现 `v0.11.0`，增加可选个人主页、主题继承和每条内容最多一张展示图片。
 
 ## 主要能力
 
@@ -14,9 +14,12 @@
 - 内置 `newspaper-default`、`swiss-editorial`、`midnight-tech` 三个可切换主题。
 - AI Agent 可以通过受约束的 JSON Candidate 写内容或定制主题，不直接生成 HTML、CSS 和版面坐标。
 - 多份 Publication 使用独立配置、内容、提交状态和主题选择，并通过 `/p/<publication-id>/` 读取和切换。
+- 可选 Home 从各 Publication 最新正式 Compiled Edition 生成只读总览，并保持内容池隔离。
+- Publication 可以继承 Home 固定主题，也可以保持独立固定 revision。
+- Schema `2` 内容可以携带一张严格图片；图片不改变优先级、顺序、跨度或行结构。
 - 可以构建为纯静态文件并部署到普通静态站点。
 
-当前版本只处理纯文字日报，不包含账号、远程 MCP、图片、服务端 Agent 调度或偏好推荐。
+当前本地版本不包含账号、远程 MCP、图片上传或抓取、服务端 Agent 调度和偏好推荐。
 
 ## 快速开始
 
@@ -101,6 +104,13 @@ npm run list-themes -- --publication <publication-id>
 npm run switch-theme -- --publication <publication-id> --theme swiss-editorial --confirm swiss-editorial
 ```
 
+恢复跟随 Home 或直接切换 Home：
+
+```bash
+npm run inherit-theme -- --publication <publication-id> --confirm
+npm run switch-theme -- --home --theme swiss-editorial --revision 1 --confirm swiss-editorial
+```
+
 让 Agent 新增或修改主题时，可以使用：
 
 ```text
@@ -128,6 +138,7 @@ npm run activate-theme -- --publication <publication-id> --theme <theme-id> --co
 | 路径 | 作用 | 维护者 |
 | --- | --- | --- |
 | `config/publications.json` | Publication 顺序和默认项 | 用户或宿主 |
+| `config/home.json` | Home 开关、名称、强调色和固定主题 | 用户或宿主 |
 | `publications/<id>/config/site.json` | 站点设置和内容数量上限 | 用户 |
 | `publications/<id>/config/theme.json` | 当前主题选择 | 主题命令 |
 | `publications/<id>/data/candidates/` | 日报 Candidate | Agent |
@@ -150,6 +161,15 @@ npm run migrate-v0.9 -- --publication <publication-id> --confirm <publication-id
 ```
 
 迁移只复制并校验数据，最后才激活 Publication Registry；不会删除或覆盖原始 v0.9 文件。目标已存在时拒绝合并，重复执行同一份已成功迁移的结果只返回 `unchanged`。不要在已经使用多 Publication 的仓库中运行此命令。
+
+从 v0.10 升级 Home 与主题选择时，先只生成报告，再明确应用，并显式选择 Home 开关：
+
+```bash
+npm run migrate-v0.10 -- --home-enabled false
+npm run migrate-v0.10 -- --home-enabled false --apply --confirm migrate-v0.11.0
+```
+
+该命令不能未经用户单独授权用于真实数据。
 
 ## 构建与部署
 
@@ -179,7 +199,7 @@ node --check src/app.js
 git diff --check
 ```
 
-v0.10.0 已通过双日报隔离、独立主题、Candidate 闭环、迁移、桌面、移动端、键盘焦点和无 JavaScript 退化检查。临时测试产物不保存在源码仓库。
+v0.11.0 研发分支会继续执行多 Publication 隔离、主题继承、Schema 兼容、图片失败退化、桌面、移动端、键盘焦点和无 JavaScript 检查。通过研发自检不等于独立验收或发布完成。
 
 ## 开源许可
 
