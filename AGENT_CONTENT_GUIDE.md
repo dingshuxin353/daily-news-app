@@ -2,7 +2,7 @@
 
 指南版本：1.2
 适用产品版本：0.10.0（开发中）
-更新日期：2026-08-22
+更新日期：2026-08-23
 
 这份指南告诉外部 AI Agent 如何为 DailyNews 搜集、整理和生成一期日报候选。它只规定 Agent 需要读取的信息、需要生成的文件和内容边界，不要求 Agent 运行项目命令或操作浏览器。
 
@@ -47,6 +47,7 @@ Agent 不得直接修改：
 
 - `publications/*/data/issues/`
 - `publications/*/data/compiled/`
+- `publications/*/data/submissions/`
 - `publications/*/data/index.json`
 - `publications/*/config/`
 - `config/publications.json`

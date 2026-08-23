@@ -21,6 +21,7 @@
 
 - `publications/*/data/issues/`
 - `publications/*/data/compiled/`
+- `publications/*/data/submissions/`
 - `publications/*/data/index.json`
 - `publications/*/config/`
 - 页面源码和构建产物
