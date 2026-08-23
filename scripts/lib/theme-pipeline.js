@@ -69,7 +69,8 @@ function requireExactFields(value, fields, field) {
 
 function themeConfig(themeId, revision) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    mode: "override",
     activeTheme: { id: themeId, revision },
   };
 }
@@ -240,14 +241,35 @@ async function validateThemeConfig(rootDir, storageRoot = rootDir) {
   const configPath = path.join(storageRoot, "config", "theme.json");
   const config = await readJson(configPath);
   if (!config) throw new ThemePipelineError("config/theme.json", "不存在");
-  requireExactFields(config, ["schemaVersion", "activeTheme"], "config/theme.json");
-  if (config.schemaVersion !== 1) {
-    throw new ThemePipelineError("config/theme.json.schemaVersion", "必须等于 1");
+  if (config.schemaVersion === 1) {
+    requireExactFields(config, ["schemaVersion", "activeTheme"], "config/theme.json");
+    requireExactFields(config.activeTheme, ["id", "revision"], "config/theme.json.activeTheme");
+    const { id, revision } = config.activeTheme;
+    await loadStoredTheme(rootDir, id, revision);
+    return { config, activeTheme: config.activeTheme, inherited: false, legacy: true };
   }
+  if (config.schemaVersion !== 2) {
+    throw new ThemePipelineError("config/theme.json.schemaVersion", "必须等于 2");
+  }
+  if (config.mode === "inherit") {
+    requireExactFields(config, ["schemaVersion", "mode"], "config/theme.json");
+    const homePath = path.join(rootDir, "config", "home.json");
+    const home = await readJson(homePath);
+    if (!home?.activeTheme) {
+      throw new ThemePipelineError("config/home.json.activeTheme", "不存在，无法继承主页主题");
+    }
+    requireExactFields(home.activeTheme, ["id", "revision"], "config/home.json.activeTheme");
+    await loadStoredTheme(rootDir, home.activeTheme.id, home.activeTheme.revision);
+    return { config, activeTheme: home.activeTheme, inherited: true, legacy: false };
+  }
+  if (config.mode !== "override") {
+    throw new ThemePipelineError("config/theme.json.mode", "只能是 inherit 或 override");
+  }
+  requireExactFields(config, ["schemaVersion", "mode", "activeTheme"], "config/theme.json");
   requireExactFields(config.activeTheme, ["id", "revision"], "config/theme.json.activeTheme");
   const { id, revision } = config.activeTheme;
   await loadStoredTheme(rootDir, id, revision);
-  return config;
+  return { config, activeTheme: config.activeTheme, inherited: false, legacy: false };
 }
 
 function semanticDefinition(definition) {
@@ -389,6 +411,54 @@ export async function switchTheme(rootDir, themeId, options = {}) {
   }
 }
 
+export async function inheritTheme(rootDir, options = {}) {
+  if (options.confirm !== true) {
+    throw new ThemePipelineError("authorization", "必须使用 --confirm 明确确认恢复继承");
+  }
+  const storageRoot = options.storageRoot;
+  if (!storageRoot || path.resolve(storageRoot) === path.resolve(rootDir)) {
+    throw new ThemePipelineError("storageRoot", "恢复继承只适用于明确的 Publication");
+  }
+  const releaseLock = await acquireLock(rootDir);
+  try {
+    const configPath = path.join(storageRoot, "config", "theme.json");
+    const current = await readJson(configPath);
+    if (current?.schemaVersion === 2 && current.mode === "inherit") {
+      await validateConfiguredTheme(rootDir, storageRoot);
+      return { result: "unchanged", mode: "inherit" };
+    }
+    const home = await readJson(path.join(rootDir, "config", "home.json"));
+    if (!home?.activeTheme) {
+      throw new ThemePipelineError("config/home.json.activeTheme", "不存在，无法恢复继承");
+    }
+    const { definition, relativeCssPath } = await loadStoredTheme(
+      rootDir,
+      home.activeTheme.id,
+      home.activeTheme.revision,
+    );
+    const manifest = createThemeManifest(definition, relativeCssPath, null);
+    const stages = [
+      await stageFile(
+        configPath,
+        `${JSON.stringify({ schemaVersion: 2, mode: "inherit" }, null, 2)}\n`,
+      ),
+      await stageFile(
+        path.join(storageRoot, "themes", "active.json"),
+        stableJson(manifest),
+      ),
+    ];
+    await commitStages(stages);
+    return {
+      result: "inherited",
+      mode: "inherit",
+      themeId: manifest.themeId,
+      revision: manifest.revision,
+    };
+  } finally {
+    await releaseLock();
+  }
+}
+
 export async function rollbackTheme(rootDir, options = {}) {
   if (options.confirm !== true) {
     throw new ThemePipelineError("authorization", "必须使用 --confirm 明确确认回滚");
@@ -467,12 +537,17 @@ export async function validateActiveTheme(rootDir, storageRoot = rootDir) {
 }
 
 export async function validateConfiguredTheme(rootDir, storageRoot = rootDir) {
-  const config = await validateThemeConfig(rootDir, storageRoot);
+  const selection = await validateThemeConfig(rootDir, storageRoot);
+  if (selection.inherited) {
+    const { id, revision } = selection.activeTheme;
+    const { definition, relativeCssPath } = await loadStoredTheme(rootDir, id, revision);
+    return createThemeManifest(definition, relativeCssPath, null);
+  }
   const active = await validateActiveTheme(rootDir, storageRoot);
   if (!active) throw new ThemePipelineError("active", "不存在，无法应用 config/theme.json");
   if (
-    active.themeId !== config.activeTheme.id
-    || active.revision !== config.activeTheme.revision
+    active.themeId !== selection.activeTheme.id
+    || active.revision !== selection.activeTheme.revision
   ) {
     throw new ThemePipelineError(
       "config/theme.json.activeTheme",

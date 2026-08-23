@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { buildSite } from "../scripts/lib/site-builder.js";
+import { switchHomeTheme } from "../scripts/lib/home.js";
 import { switchTheme } from "../scripts/lib/theme-pipeline.js";
 import { createTestIssue, seedTestData } from "../test-support/helpers.js";
 
@@ -92,6 +93,10 @@ test("Home 开启时根路径生成总览、真实深链、目录和独立主题
   const homePath = path.join(target, "config", "home.json");
   const home = JSON.parse(await readFile(homePath, "utf8"));
   await writeJson(homePath, { ...home, enabled: true, name: "我的日报" });
+  await writeJson(path.join(target, "publications", "ai-daily", "config", "theme.json"), {
+    schemaVersion: 2,
+    mode: "inherit",
+  });
 
   const { outputDir, overview } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
   const homeHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
@@ -112,6 +117,18 @@ test("Home 开启时根路径生成总览、真实深链、目录和独立主题
   assert.match(homeHtml, /<option value="\/" selected>总览<\/option>/);
   assert.match(homeHtml, /\/p\/ai-daily\/\?date=2026-08-19#test-item-1/);
   assert.ok(homeHtml.indexOf("AI 日报") < homeHtml.indexOf("财经日报"));
+
+  await switchHomeTheme(target, "swiss-editorial", {
+    revision: 1,
+    confirm: "swiss-editorial",
+  });
+  await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const nextHome = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const nextAi = await readFile(path.join(outputDir, "p", "ai-daily", "index.html"), "utf8");
+  const nextFinance = await readFile(path.join(outputDir, "p", "finance-daily", "index.html"), "utf8");
+  assert.match(nextHome, /data-theme="swiss-editorial"/);
+  assert.match(nextAi, /data-theme="swiss-editorial"/);
+  assert.match(nextFinance, /data-theme="midnight-tech"/);
 });
 
 test("构建失败保留上一份正式 dist", async () => {

@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createThemeManifest } from "./theme-compiler.js";
@@ -77,6 +78,55 @@ export async function resolveHomeTheme(rootDir, home) {
     home.activeTheme.revision,
   );
   return createThemeManifest(definition, relativeCssPath, null);
+}
+
+export async function switchHomeTheme(rootDir, themeId, options = {}) {
+  if (options.confirm !== themeId) fail("authorization", `必须使用 --confirm ${themeId} 明确确认切换`);
+  const home = await validateHomeProfile(rootDir);
+  const revisionNames = await readdir(path.join(rootDir, "themes", "definitions", themeId))
+    .catch((error) => {
+      if (error.code === "ENOENT") fail("theme", `Theme Revision 不存在：${themeId}`);
+      throw error;
+    });
+  const revisions = revisionNames
+    .filter((name) => /^[1-9]\d*\.json$/.test(name))
+    .map((name) => Number(name.slice(0, -5)))
+    .sort((left, right) => left - right);
+  const targetRevision = options.revision ?? revisions.at(-1);
+  const { definition } = await loadStoredTheme(rootDir, themeId, targetRevision);
+  if (home.activeTheme.id === themeId && home.activeTheme.revision === targetRevision) {
+    return { result: "unchanged", themeId, revision: targetRevision };
+  }
+
+  const lockPath = path.join(rootDir, "themes", ".theme.lock");
+  let lock;
+  try {
+    lock = await open(lockPath, "wx");
+    await lock.writeFile(`${process.pid}\n`);
+  } catch (error) {
+    await lock?.close().catch(() => {});
+    if (error.code === "EEXIST") fail("lock", "已有主题写入流程正在执行");
+    throw error;
+  }
+  await lock.close();
+  try {
+    const next = {
+      ...home,
+      activeTheme: { id: definition.id, revision: definition.revision },
+    };
+    const homePath = path.join(rootDir, "config", "home.json");
+    const temporaryPath = path.join(
+      path.dirname(homePath),
+      `.${path.basename(homePath)}.${randomUUID()}.tmp`,
+    );
+    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { flag: "wx" });
+    await rename(temporaryPath, homePath);
+    return { result: "switched", themeId, revision: targetRevision };
+  } finally {
+    await unlink(lockPath).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
 }
 
 export function shanghaiDate(now = new Date()) {

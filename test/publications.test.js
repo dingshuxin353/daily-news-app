@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import { processCandidate } from "../scripts/lib/pipeline.js";
 import { loadPublicationRegistry } from "../scripts/lib/publications.js";
-import { switchTheme, validateConfiguredTheme } from "../scripts/lib/theme-pipeline.js";
+import { inheritTheme, switchTheme, validateConfiguredTheme } from "../scripts/lib/theme-pipeline.js";
+import { switchHomeTheme } from "../scripts/lib/home.js";
 import { seedTestData } from "../test-support/helpers.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,6 +42,7 @@ async function fixture(publicationIds = ["ai-daily", "finance-daily"]) {
   await cp(path.join(rootDir, "themes"), path.join(target, "themes"), { recursive: true });
   await cp(path.join(rootDir, "public"), path.join(target, "public"), { recursive: true });
   await mkdir(path.join(target, "config"), { recursive: true });
+  await cp(path.join(rootDir, "config", "home.json"), path.join(target, "config", "home.json"));
   for (const publicationId of publicationIds) await createPublication(target, publicationId);
   await writeJson(path.join(target, "config", "publications.json"), {
     schemaVersion: 1,
@@ -289,5 +291,70 @@ test("共享主题库下的主题选择和 Active Manifest 按 Publication 隔�
       readFile(financeActivePath, "utf8"),
     ]),
     financeBefore,
+  );
+});
+
+test("继承主题跟随 Home，显式切换转为 override，恢复继承必须确认", async () => {
+  const target = await fixture();
+  const aiPublicationDir = publicationDir(target, "ai-daily");
+  const financePublicationDir = publicationDir(target, "finance-daily");
+  await writeJson(path.join(aiPublicationDir, "config", "theme.json"), {
+    schemaVersion: 2,
+    mode: "inherit",
+  });
+
+  assert.equal((await validateConfiguredTheme(target, aiPublicationDir)).themeId, "newspaper-default");
+  assert.equal((await validateConfiguredTheme(target, financePublicationDir)).themeId, "newspaper-default");
+  await switchHomeTheme(target, "midnight-tech", {
+    revision: 1,
+    confirm: "midnight-tech",
+  });
+  assert.equal((await validateConfiguredTheme(target, aiPublicationDir)).themeId, "midnight-tech");
+  assert.equal((await validateConfiguredTheme(target, financePublicationDir)).themeId, "newspaper-default");
+
+  await switchTheme(target, "swiss-editorial", {
+    confirm: "swiss-editorial",
+    revision: 1,
+    storageRoot: aiPublicationDir,
+  });
+  assert.deepEqual(await readJson(path.join(aiPublicationDir, "config", "theme.json")), {
+    schemaVersion: 2,
+    mode: "override",
+    activeTheme: { id: "swiss-editorial", revision: 1 },
+  });
+  await switchHomeTheme(target, "newspaper-default", {
+    revision: 1,
+    confirm: "newspaper-default",
+  });
+  assert.equal((await validateConfiguredTheme(target, aiPublicationDir)).themeId, "swiss-editorial");
+
+  await assert.rejects(
+    () => inheritTheme(target, { storageRoot: aiPublicationDir }),
+    /必须使用 --confirm/,
+  );
+  await inheritTheme(target, { confirm: true, storageRoot: aiPublicationDir });
+  assert.deepEqual(await readJson(path.join(aiPublicationDir, "config", "theme.json")), {
+    schemaVersion: 2,
+    mode: "inherit",
+  });
+  assert.equal((await validateConfiguredTheme(target, aiPublicationDir)).themeId, "newspaper-default");
+});
+
+test("Theme Selection Schema 2 拒绝隐藏覆盖和不完整 override", async () => {
+  const target = await fixture();
+  const configPath = path.join(publicationDir(target, "ai-daily"), "config", "theme.json");
+  await writeJson(configPath, {
+    schemaVersion: 2,
+    mode: "inherit",
+    activeTheme: { id: "newspaper-default", revision: 1 },
+  });
+  await assert.rejects(
+    () => validateConfiguredTheme(target, publicationDir(target, "ai-daily")),
+    /activeTheme.*不是允许的配置字段/,
+  );
+  await writeJson(configPath, { schemaVersion: 2, mode: "override" });
+  await assert.rejects(
+    () => validateConfiguredTheme(target, publicationDir(target, "ai-daily")),
+    /activeTheme.*不能为空/,
   );
 });

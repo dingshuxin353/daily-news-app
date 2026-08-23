@@ -25,7 +25,7 @@ function redirectHtml(publicationId) {
 `;
 }
 
-async function copyPublicationAssets(publication, outputDir) {
+async function copyPublicationAssets(publication, outputDir, activeTheme) {
   const publicationOutput = path.join(outputDir, "p", publication.publicationId);
   await mkdir(path.join(publicationOutput, "config"), { recursive: true });
   await mkdir(path.join(publicationOutput, "data"), { recursive: true });
@@ -53,9 +53,10 @@ async function copyPublicationAssets(publication, outputDir) {
     path.join(publication.dataDir, "index.json"),
     path.join(publicationOutput, "data", "index.json"),
   );
-  await cp(
-    path.join(publication.themeSelectionDir, "active.json"),
+  await writeFile(
     path.join(publicationOutput, "themes", "active.json"),
+    `${JSON.stringify(activeTheme, null, 2)}\n`,
+    "utf8",
   );
   return publicationOutput;
 }
@@ -142,7 +143,7 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
   }
 
   for (const { publication, activeTheme, issue, site } of publicationBuilds) {
-    const publicationOutput = await copyPublicationAssets(publication, stagingDir);
+    const publicationOutput = await copyPublicationAssets(publication, stagingDir, activeTheme);
     await writeFile(
       path.join(publicationOutput, "index.html"),
       renderBuiltHtml(template, {
