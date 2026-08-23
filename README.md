@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前已发布版本是 `v0.9.0`；本分支正在开发 `v0.10.0`。本地实现已支持显式 Publication 上下文、多日报静态入口、独立主题、Candidate 宿主闭环和显式 v0.9 迁移；尚未合入或发布。
+当前已发布版本是 `v0.9.0`。`v0.10.0` 已通过独立验收并集成到 `version/v0.10.0`，支持显式 Publication 上下文、多日报静态入口、独立主题、Candidate 宿主闭环和显式 v0.9 迁移；尚未合入 `main` 或发布。
 
 ## 主要能力
 
@@ -66,6 +66,7 @@ PORT=5173 npm start
 
 ```text
 请先阅读仓库根目录的 AGENTS.md 和 AGENT_CONTENT_GUIDE.md，
+目标 Publication ID 是 <publication-id>，
 根据我指定的内容源生成今天的 DailyNews Candidate。
 只写候选文件，不直接修改正式日报或编译产物。
 ```
@@ -178,7 +179,7 @@ node --check src/app.js
 git diff --check
 ```
 
-v0.9.0 已通过桌面、移动端、三个官方主题、压力日报、键盘焦点和无 JavaScript 退化检查。v0.10.0 仍需用户完成双日报视觉确认和独立验收后才可合入发布。临时测试产物不保存在源码仓库。
+v0.9.0 已通过桌面、移动端、三个官方主题、压力日报、键盘焦点和无 JavaScript 退化检查。v0.10.0 已通过双日报视觉确认、独立验收和版本分支集成；合入 `main`、创建 Tag 和正式发布仍需单独通过发布闸门。临时测试产物不保存在源码仓库。
 
 ## 开源许可
 
