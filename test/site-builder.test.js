@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { buildSite } from "../scripts/lib/site-builder.js";
+import { buildLocalSite, buildSite } from "../scripts/lib/site-builder.js";
 import { compileIssue } from "../scripts/lib/compiler.js";
 import { switchHomeTheme } from "../scripts/lib/home.js";
 import { switchTheme } from "../scripts/lib/theme-pipeline.js";
@@ -36,7 +36,7 @@ async function createPublication(target, publicationId, name) {
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-build-"));
-  for (const entry of ["index.html", "home.html", "styles.css", "src", "public", "themes"]) {
+  for (const entry of ["index.html", "home.html", "todo.html", "styles.css", "todo.css", "src", "public", "themes"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
   await mkdir(path.join(target, "config"), { recursive: true });
@@ -47,6 +47,7 @@ async function fixture() {
   });
   const home = JSON.parse(await readFile(path.join(rootDir, "config", "home.json"), "utf8"));
   await writeJson(path.join(target, "config", "home.json"), { ...home, enabled: false });
+  await cp(path.join(rootDir, "config", "todo.json"), path.join(target, "config", "todo.json"));
   await createPublication(target, "ai-daily", "AI 日报");
   const finance = await createPublication(target, "finance-daily", "财经日报");
   await switchTheme(target, "midnight-tech", {
@@ -55,6 +56,50 @@ async function fixture() {
     storageRoot: finance,
   });
   return target;
+}
+
+async function seedTodo(target, { enabled = true } = {}) {
+  await writeJson(path.join(target, "config", "todo.json"), { schemaVersion: 1, enabled });
+  await mkdir(path.join(target, "todo", "data", "candidates"), { recursive: true });
+  await mkdir(path.join(target, "todo", "data", "submissions"), { recursive: true });
+  await writeJson(path.join(target, "todo", "data", "state.json"), {
+    schemaVersion: 1,
+    revision: 1,
+    updatedAt: "2026-08-23T18:30:00+08:00",
+    items: [
+      {
+        id: "todo-11111111",
+        title: "PRIVATE-TODO-PROBE-OVERDUE <script>alert(1)</script>",
+        note: "PRIVATE-TODO-NOTE",
+        dueDate: "2026-08-22",
+        dueTime: "15:00",
+        status: "open",
+        createdAt: "2026-08-20T10:00:00+08:00",
+        updatedAt: "2026-08-23T18:30:00+08:00",
+        completedAt: null,
+        archivedAt: null,
+      },
+      {
+        id: "todo-22222222",
+        title: "今天任务",
+        dueDate: "2026-08-23",
+        status: "open",
+        createdAt: "2026-08-21T10:00:00+08:00",
+        updatedAt: "2026-08-23T18:30:00+08:00",
+        completedAt: null,
+        archivedAt: null,
+      },
+      {
+        id: "todo-33333333",
+        title: "今天完成",
+        status: "completed",
+        createdAt: "2026-08-20T10:00:00+08:00",
+        updatedAt: "2026-08-23T17:00:00+08:00",
+        completedAt: "2026-08-23T17:00:00+08:00",
+        archivedAt: null,
+      },
+    ],
+  });
 }
 
 test("构建为每个 Publication 生成独立入口、数据和首帧主题，根路径进入默认项", async () => {
@@ -208,4 +253,71 @@ test("Schema 2 图片进入 Home 投影和 Publication 无脚本退化且小模�
   assert.match(homeHtml, /loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"/);
   assert.match(publicationHtml, /src="https:\/\/cdn\.example\.com\/lead\.jpg"/);
   assert.doesNotMatch(publicationHtml, /src="https:\/\/cdn\.example\.com\/small\.jpg"/);
+});
+
+test("公开构建即使 Todo 启用也不包含路由、导航、样式或私人探针", async () => {
+  const target = await fixture();
+  await seedTodo(target);
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, enabled: true });
+  const { outputDir } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const files = [
+    path.join(outputDir, "index.html"),
+    path.join(outputDir, "p", "ai-daily", "index.html"),
+    path.join(outputDir, "src", "app.js"),
+    path.join(outputDir, "src", "home.js"),
+  ];
+  const source = (await Promise.all(files.map((filePath) => readFile(filePath, "utf8")))).join("\n");
+  assert.doesNotMatch(source, /个人待办|\/todo\/|PRIVATE-TODO/);
+  await assert.rejects(() => stat(path.join(outputDir, "todo")), /ENOENT/);
+  await assert.rejects(() => stat(path.join(outputDir, "todo.css")), /ENOENT/);
+});
+
+test("本地构建生成 Todo 页面、Home 模块和导航，并继承 Home Theme", async () => {
+  const target = await fixture();
+  await seedTodo(target);
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, enabled: true, name: "我的日报" });
+  const { outputDir, todo } = await buildLocalSite(target, { asOfDate: "2026-08-23" });
+  const homeHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const todoHtml = await readFile(path.join(outputDir, "todo", "index.html"), "utf8");
+  const publicationHtml = await readFile(path.join(outputDir, "p", "ai-daily", "index.html"), "utf8");
+
+  assert.equal(todo.homeItems.length, 2);
+  assert.match(homeHtml, /class="home-todo" data-module="todo"/);
+  assert.match(homeHtml, /href="\/todo\/"/);
+  assert.match(homeHtml, /PRIVATE-TODO-PROBE-OVERDUE &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(homeHtml, /<script>alert\(1\)<\/script>/);
+  assert.match(todoHtml, /data-theme="newspaper-default"/);
+  assert.match(todoHtml, /<h2 id="todo-group-overdue">已逾期<\/h2>/);
+  assert.match(todoHtml, /id="todo-11111111"/);
+  assert.match(todoHtml, /PRIVATE-TODO-PROBE-OVERDUE &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(todoHtml, /<script>alert\(1\)<\/script>/);
+  assert.match(todoHtml, /PRIVATE-TODO-NOTE/);
+  assert.match(publicationHtml, /<a href="\/todo\/">个人待办事项<\/a>/);
+});
+
+test("Home 关闭时保留本地 Todo 页面和 Publication 导航，但不生成 Home 模块", async () => {
+  const target = await fixture();
+  await seedTodo(target);
+  const { outputDir } = await buildLocalSite(target, { asOfDate: "2026-08-23" });
+  const rootHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const publicationHtml = await readFile(path.join(outputDir, "p", "ai-daily", "index.html"), "utf8");
+  assert.match(rootHtml, /location\.replace\("\/p\/ai-daily\/"\)/);
+  assert.doesNotMatch(rootHtml, /home-todo/);
+  assert.match(publicationHtml, /href="\/todo\/"/);
+  assert.equal((await stat(path.join(outputDir, "todo", "index.html"))).isFile(), true);
+});
+
+test("Todo 关闭时本地页面和导航消失，但 State 保持不变", async () => {
+  const target = await fixture();
+  await seedTodo(target, { enabled: false });
+  const before = await readFile(path.join(target, "todo", "data", "state.json"), "utf8");
+  const { outputDir } = await buildLocalSite(target, { asOfDate: "2026-08-23" });
+  const publicationHtml = await readFile(path.join(outputDir, "p", "ai-daily", "index.html"), "utf8");
+  assert.doesNotMatch(publicationHtml, /个人待办|\/todo\//);
+  await assert.rejects(() => stat(path.join(outputDir, "todo")), /ENOENT/);
+  assert.equal(await readFile(path.join(target, "todo", "data", "state.json"), "utf8"), before);
 });

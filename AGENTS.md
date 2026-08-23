@@ -6,12 +6,14 @@
 
 | 任务 | 必须先读 | 目标 |
 | --- | --- | --- |
-| 第一次使用、配置、启动、获取链接、生成日报、调整主题或排查问题 | [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) | 由统一指南理解用户意图，再读取当前任务需要的专项说明并完成真实验证 |
+| 第一次使用、配置、启动、获取链接、生成日报、管理个人待办、调整主题或排查问题 | [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) | 由统一指南理解用户意图，再读取当前任务需要的专项说明并完成真实验证 |
 | 修改源码、测试或工程文档 | 本文件、[`CONTRIBUTING.md`](./CONTRIBUTING.md) 和相关源码、测试 | 与任务直接相关的最小改动 |
 
-面向用户的任务不能只根据本文件猜测配置或直接写入。先由 `AGENT_USER_GUIDE.md` 判断是否需要配置、内容或主题专项说明；只读取当前任务需要的文档。
+面向用户的任务不能只根据本文件猜测配置或直接写入。先由 `AGENT_USER_GUIDE.md` 判断是否需要配置、内容、待办或主题专项说明；只读取当前任务需要的文档。
 
 内容和主题任务不要混在同一个 Candidate 中。Agent 完成 Candidate 后即可报告结果，不要求所有 Agent 软件都能运行命令、启动服务或操作浏览器；后续消费、编译和正式写入由宿主环境负责。内容或主题任务开始前必须先由用户或宿主确定唯一目标 Publication。默认 Publication 只简化阅读入口，不能替模糊的写入任务选择目标。
+
+Todo 与内容、主题使用彼此独立的 Candidate。Todo Agent 同样只交付 Candidate；正式 State、Submission Status 和本地页面由宿主维护。
 
 ## 写入边界
 
@@ -34,6 +36,8 @@
 - `themes/compiled/`
 
 已有主题的切换目标可以由 Agent 表达；正式切换由受控命令或宿主应用执行。新增和修改主题时，Agent 只写 Theme Candidate。
+
+Todo Agent 不得直接修改 `todo/data/state.json`、`todo/data/submissions/`、`todo/data/.locks/` 或本地页面产物，也不得物理删除任务。
 
 ## 源码开发边界
 
