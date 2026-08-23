@@ -169,6 +169,7 @@ function createArticle(item, module, isFirst) {
   article.id = item.id;
   article.dataset.size = module.size;
   article.dataset.span = String(module.span);
+  article.dataset.mediaVariant = module.mediaVariant ?? "none";
   if (module.size === "large") article.dataset.titleLength = classifyTitleLength(item.title);
   article.style.gridColumn = `span ${module.span}`;
 
@@ -179,6 +180,34 @@ function createArticle(item, module, isFirst) {
   heading.append(element(isFirst ? "h1" : "h2", "story__title", item.title));
 
   const summary = element("p", "story__summary", module.size === "large" ? item.summary : item.brief);
+  let media = null;
+  if (item.image && module.mediaVariant && module.mediaVariant !== "none") {
+    media = element("figure", "story__media");
+    const image = element("img", "story__image");
+    image.src = item.image.src;
+    image.alt = item.image.alt;
+    image.width = item.image.width;
+    image.height = item.image.height;
+    image.decoding = "async";
+    image.loading = isFirst ? "eager" : "lazy";
+    if (isFirst) image.fetchPriority = "high";
+    if (item.image.src.startsWith("https://")) image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => {
+      media.remove();
+      article.dataset.mediaVariant = "none";
+    }, { once: true });
+    const caption = element("figcaption", "story__credit");
+    if (item.image.sourceUrl) {
+      const credit = element("a", "", item.image.credit);
+      credit.href = item.image.sourceUrl;
+      credit.target = "_blank";
+      credit.rel = "noopener noreferrer";
+      caption.append(credit);
+    } else {
+      caption.textContent = item.image.credit;
+    }
+    media.append(image, caption);
+  }
   const source = element("footer", "story__source");
   const primarySource = item.sources[0];
   const link = element("a", "story__primary-source", `${primarySource.name} ↗`);
@@ -192,7 +221,7 @@ function createArticle(item, module, isFirst) {
     sourceCount.dataset.itemId = item.id;
     source.append(sourceCount);
   }
-  article.append(heading, summary, source);
+  article.append(heading, ...(media ? [media] : []), summary, source);
   return article;
 }
 
@@ -426,6 +455,7 @@ async function start() {
     }
     loadIssue(selected, index.dates, { focusAfterLoad: true, focusHash: true });
   });
+  window.addEventListener("hashchange", focusRequestedItem);
 
   await loadIssue(date, index.dates, { focusHash: true });
 }

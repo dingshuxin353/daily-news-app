@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { buildSite } from "../scripts/lib/site-builder.js";
+import { compileIssue } from "../scripts/lib/compiler.js";
 import { switchHomeTheme } from "../scripts/lib/home.js";
 import { switchTheme } from "../scripts/lib/theme-pipeline.js";
 import { createTestIssue, seedTestData } from "../test-support/helpers.js";
@@ -141,4 +142,51 @@ test("构建失败保留上一份正式 dist", async () => {
 
   await assert.rejects(() => buildSite(target), /accentColor/);
   assert.equal(await readFile(path.join(outputDir, "index.html"), "utf8"), previous);
+});
+
+test("Schema 2 图片进入 Home 投影和 Publication 无脚本退化且小模块不展示", async () => {
+  const target = await fixture();
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, enabled: true });
+  const publication = path.join(target, "publications", "ai-daily");
+  const issuePath = path.join(publication, "data", "issues", "2026-08-19.json");
+  const issue = JSON.parse(await readFile(issuePath, "utf8"));
+  issue.schemaVersion = 2;
+  issue.items[0].image = {
+    src: "https://cdn.example.com/lead.jpg",
+    alt: "头条测试图片",
+    width: 1200,
+    height: 800,
+    credit: "图片来源",
+    sourceUrl: "https://example.com/image-source",
+  };
+  issue.items.at(-1).image = {
+    src: "https://cdn.example.com/small.jpg",
+    alt: "小模块测试图片",
+    width: 1200,
+    height: 800,
+    credit: "图片来源",
+  };
+  await writeJson(issuePath, issue);
+  await writeJson(
+    path.join(publication, "data", "compiled", "2026-08-19.json"),
+    compileIssue(issue).compiled,
+  );
+
+  const { outputDir } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const homeHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const publicationHtml = await readFile(
+    path.join(outputDir, "p", "ai-daily", "index.html"),
+    "utf8",
+  );
+  const overview = JSON.parse(await readFile(
+    path.join(outputDir, "home", "data", "overview.json"),
+    "utf8",
+  ));
+  assert.equal(overview.publications[0].highlights[0].image.src, "https://cdn.example.com/lead.jpg");
+  assert.match(homeHtml, /src="https:\/\/cdn\.example\.com\/lead\.jpg"/);
+  assert.match(homeHtml, /loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer"/);
+  assert.match(publicationHtml, /src="https:\/\/cdn\.example\.com\/lead\.jpg"/);
+  assert.doesNotMatch(publicationHtml, /src="https:\/\/cdn\.example\.com\/small\.jpg"/);
 });

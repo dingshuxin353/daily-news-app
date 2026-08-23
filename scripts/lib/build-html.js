@@ -13,6 +13,18 @@ export function colorSchemeFor(background) {
   return relativeLuminance(background) < 0.36 ? "dark" : "light";
 }
 
+function renderImage(image, options = {}) {
+  if (!image) return "";
+  const external = image.src.startsWith("https://");
+  const credit = image.sourceUrl
+    ? `<a href="${escapeHtml(image.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(image.credit)}</a>`
+    : escapeHtml(image.credit);
+  return `<figure class="story__media">
+              <img class="story__image" src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt)}" width="${image.width}" height="${image.height}" loading="${options.eager ? "eager" : "lazy"}" decoding="async"${options.eager ? ' fetchpriority="high"' : ""}${external ? ' referrerpolicy="no-referrer"' : ""}>
+              <figcaption class="story__credit">${credit}</figcaption>
+            </figure>`;
+}
+
 export function renderNoscriptFallback(issue) {
   if (!issue) {
     return `<section class="noscript-fallback" aria-labelledby="noscript-title">
@@ -22,10 +34,22 @@ export function renderNoscriptFallback(issue) {
     </section>`;
   }
 
-  const stories = issue.items.map((item) => {
+  const modules = new Map(
+    (issue.layout?.rows ?? []).flatMap(({ modules: rowModules }) => (
+      rowModules.map((module) => [module.itemId, module])
+    )),
+  );
+  const stories = issue.items.map((item, index) => {
     const source = item.sources[0];
+    const module = modules.get(item.id);
+    const media = module?.mediaVariant && module.mediaVariant !== "none"
+      ? renderImage(item.image, { eager: index === 0 })
+      : "";
     return `        <li class="noscript-fallback__item">
-          <h2>${escapeHtml(item.title)}</h2>
+          <div>
+            <h2>${escapeHtml(item.title)}</h2>
+            ${media}
+          </div>
           <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.name)} ↗</a>
         </li>`;
   }).join("\n");
@@ -95,6 +119,7 @@ function renderHomePublication(publication, primary = false) {
         </section>`;
   }
   const [lead, ...secondary] = publication.highlights;
+  const media = lead.image ? renderImage(lead.image, { eager: primary }) : "";
   const secondaryHtml = secondary.length === 0 ? "" : `<ol class="home-highlights__secondary">
 ${secondary.map((item) => `            <li><a href="${escapeHtml(item.itemUrl)}">${escapeHtml(item.title)}</a></li>`).join("\n")}
           </ol>`;
@@ -106,10 +131,13 @@ ${secondary.map((item) => `            <li><a href="${escapeHtml(item.itemUrl)}"
             </div>
             <a href="${escapeHtml(publication.pageUrl)}">完整日报 →</a>
           </header>
-          <article class="home-highlight">
-            ${lead.category ? `<p class="story__category">${escapeHtml(lead.category)}</p>` : ""}
-            <h3><a href="${escapeHtml(lead.itemUrl)}">${escapeHtml(lead.title)}</a></h3>
-            <p>${escapeHtml(primary ? lead.summary : lead.brief)}</p>
+          <article class="home-highlight${media ? " home-highlight--media" : ""}">
+            <div class="home-highlight__text">
+              ${lead.category ? `<p class="story__category">${escapeHtml(lead.category)}</p>` : ""}
+              <h3><a href="${escapeHtml(lead.itemUrl)}">${escapeHtml(lead.title)}</a></h3>
+              <p>${escapeHtml(primary ? lead.summary : lead.brief)}</p>
+            </div>
+            ${media}
           </article>
           ${secondaryHtml}
         </section>`;

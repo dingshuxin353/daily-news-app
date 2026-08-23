@@ -125,6 +125,71 @@ test("update 按来源 URL 匹配并复用稳定 ID，保留旧来源和未匹�
   );
 });
 
+test("Schema 2 图片新增、替换、移除会升级 revision，未匹配条目保留图片", async () => {
+  const target = await fixture();
+  const existing = await readIssue(target, "2026-08-19");
+  const candidate = candidateFromIssue(existing);
+  candidate.schemaVersion = 2;
+  candidate.generatedAt = "2026-08-19T09:00:00+08:00";
+  candidate.items[0].image = {
+    src: "https://cdn.example.com/first.jpg",
+    alt: "第一张测试图片",
+    width: 1200,
+    height: 800,
+    credit: "测试来源",
+  };
+  candidate.items[1].image = {
+    src: "https://cdn.example.com/second.jpg",
+    alt: "第二张测试图片",
+    width: 1200,
+    height: 800,
+    credit: "测试来源",
+  };
+  let candidatePath = await writeCandidate(target, candidate);
+  let result = await processCandidate(target, publicationId, candidatePath, { today: "2026-08-19" });
+  let issue = await readIssue(target, "2026-08-19");
+  assert.equal(result.result, "updated");
+  assert.equal(issue.schemaVersion, 2);
+  assert.equal(issue.revision, 2);
+
+  const next = candidateFromIssue(issue);
+  next.generatedAt = "2026-08-19T10:00:00+08:00";
+  next.items = [structuredClone(issue.items[0])];
+  next.items[0].image.credit = "替换后的署名";
+  candidatePath = await writeCandidate(target, next);
+  result = await processCandidate(target, publicationId, candidatePath, { today: "2026-08-19" });
+  issue = await readIssue(target, "2026-08-19");
+  assert.equal(result.revision, 3);
+  assert.equal(issue.items[0].image.credit, "替换后的署名");
+  assert.equal(issue.items[1].image.src, "https://cdn.example.com/second.jpg");
+
+  const remove = candidateFromIssue(issue);
+  remove.generatedAt = "2026-08-19T11:00:00+08:00";
+  delete remove.items[0].image;
+  candidatePath = await writeCandidate(target, remove);
+  result = await processCandidate(target, publicationId, candidatePath, { today: "2026-08-19" });
+  issue = await readIssue(target, "2026-08-19");
+  assert.equal(result.revision, 4);
+  assert.equal("image" in issue.items[0], false);
+});
+
+test("Schema 1 Candidate 不能更新 Schema 2 Issue", async () => {
+  const target = await fixture();
+  const issuePath = path.join(publicationDir(target), "data", "issues", "2026-08-19.json");
+  const existing = await readJson(issuePath);
+  existing.schemaVersion = 2;
+  await writeFile(issuePath, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+  const candidate = candidateFromIssue(existing);
+  candidate.schemaVersion = 1;
+  const candidatePath = await writeCandidate(target, candidate);
+  const before = await snapshot(target, "2026-08-19");
+  await assert.rejects(
+    () => processCandidate(target, publicationId, candidatePath, { today: "2026-08-19" }),
+    /Schema 1 Candidate 不能更新 Schema 2 Issue/,
+  );
+  assert.deepEqual(await snapshot(target, "2026-08-19"), before);
+});
+
 test("replace 只有显式模式才删除候选未包含的旧内容", async () => {
   const target = await fixture();
   const existing = await readIssue(target, "2026-08-19");

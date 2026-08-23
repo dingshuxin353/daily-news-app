@@ -28,7 +28,8 @@ Theme Schema：1
 开始前只读查看：
 
 - 用户或宿主明确给出的唯一目标 Publication ID。
-- `publications/<publication-id>/config/theme.json`：目标日报当前选择的主题 ID 和 revision。
+- `config/home.json`：Home 当前固定的主题 ID 和 revision。
+- `publications/<publication-id>/config/theme.json`：目标日报是继承 Home，还是独立覆盖固定主题。
 - `themes/presets/*.json`：Agent 创建 Candidate 时可继承的官方 Preset。
 - `themes/definitions/<theme-id>/<revision>.json`：已保存主题的只读定义。
 - `themes/candidates/<theme-id>.json`：尚在编辑的候选，如果存在。
@@ -60,7 +61,7 @@ Agent 不得直接写入或覆盖：
 
 ## 4. 查看与表达切换目标
 
-当前主题来自目标 Publication 的 `config/theme.json`，可用主题来自全局 `themes/definitions/`。Agent 应先确认目标 ID 和 revision 已存在。
+Effective Theme 来自 Home 固定主题和目标 Publication 的 `inherit` / `override` 选择，可用主题来自全局 `themes/definitions/`。Agent 应先确认唯一目标是 Home 还是某个 Publication，并确认目标 ID 和 revision 已存在。
 
 如果所在环境支持项目命令，可以使用：
 
@@ -78,6 +79,13 @@ npm run switch-theme -- --publication <publication-id> --theme <theme-id> --conf
 
 ```bash
 npm run switch-theme -- --publication <publication-id> --theme <theme-id> --revision <revision> --confirm <theme-id>
+```
+
+显式恢复 Publication 继承，或切换 Home 固定主题：
+
+```bash
+npm run inherit-theme -- --publication <publication-id> --confirm
+npm run switch-theme -- --home --theme <theme-id> --revision <revision> --confirm <theme-id>
 ```
 
 命令返回：

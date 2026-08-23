@@ -3,9 +3,11 @@ import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:
 import path from "node:path";
 
 import { renderBuiltHtml, renderHomeHtml } from "./build-html.js";
+import { validateCompiled } from "./compiler.js";
 import { buildHomeOverview, resolveHomeTheme, validateHomeProfile } from "./home.js";
 import { loadPublicationRegistry } from "./publications.js";
 import { validateConfiguredTheme } from "./theme-pipeline.js";
+import { validateIssue } from "./validation.js";
 
 function redirectHtml(publicationId) {
   const target = `/p/${publicationId}/`;
@@ -104,13 +106,16 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
   for (const publication of registry.publications) {
     const activeTheme = await validateConfiguredTheme(rootDir, publication.publicationDir);
     const index = JSON.parse(await readFile(path.join(publication.dataDir, "index.json"), "utf8"));
-    const issue = index.latest
-      ? JSON.parse(await readFile(
-        path.join(publication.dataDir, "compiled", `${index.latest}.json`),
-        "utf8",
-      ))
-      : null;
     const site = JSON.parse(await readFile(path.join(publication.configDir, "site.json"), "utf8"));
+    let issue = null;
+    for (const date of index.dates) {
+      const issuePath = path.join(publication.dataDir, "issues", `${date}.json`);
+      const sourceIssue = await validateIssue(issuePath, undefined, rootDir);
+      const compiledPath = path.join(publication.dataDir, "compiled", `${date}.json`);
+      const compiled = JSON.parse(await readFile(compiledPath, "utf8"));
+      validateCompiled(sourceIssue, compiled, compiledPath, site.priorityLimits);
+      if (date === index.latest) issue = compiled;
+    }
     publicationBuilds.push({ publication, activeTheme, issue, site });
   }
   const overview = home.enabled

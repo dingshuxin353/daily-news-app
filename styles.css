@@ -280,6 +280,13 @@ main:focus-visible {
   padding-top: 28px;
 }
 
+.home-highlight--media {
+  display: grid;
+  max-width: none;
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+  gap: 36px;
+}
+
 .home-highlight h3 {
   margin: 0;
   font-family: var(--font-headline);
@@ -449,6 +456,7 @@ main:focus-visible {
   min-width: 0;
   flex-direction: column;
   padding: 0 var(--story-gap);
+  scroll-margin-top: 88px;
 }
 
 .story:first-child {
@@ -488,6 +496,30 @@ main:focus-visible {
   color: color-mix(in srgb, var(--color-text) 84%, var(--color-muted));
   line-height: 1.58;
   -webkit-box-orient: vertical;
+}
+
+.story__media {
+  min-width: 0;
+  margin: 0;
+}
+
+.story__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+
+.story__credit {
+  margin-top: 8px;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.story__credit a {
+  color: inherit;
 }
 
 .story__source {
@@ -575,6 +607,57 @@ main:focus-visible {
 
 .story--large .story__source {
   grid-area: source;
+}
+
+.story--large[data-media-variant="lead-split"] {
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  grid-template-areas:
+    "header media"
+    "summary media"
+    "source media";
+  align-items: start;
+}
+
+.story--large[data-media-variant="lead-split"] .story__header {
+  padding-top: 0;
+}
+
+.story--large[data-media-variant="lead-split"] .story__media {
+  grid-area: media;
+}
+
+.story--large[data-media-variant="lead-split"] .story__summary {
+  align-self: start;
+  margin-top: 18px;
+}
+
+.story--medium[data-media-variant="medium-split"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "header header"
+    "media summary"
+    "media source";
+  align-content: start;
+  gap: 18px 22px;
+}
+
+.story--medium[data-media-variant="medium-split"] .story__header {
+  grid-area: header;
+}
+
+.story--medium[data-media-variant="medium-split"] .story__media {
+  grid-area: media;
+}
+
+.story--medium[data-media-variant="medium-split"] .story__summary {
+  grid-area: summary;
+  margin-top: 0;
+}
+
+.story--medium[data-media-variant="medium-split"] .story__source {
+  grid-area: source;
+  margin-top: auto;
 }
 
 .story--medium .story__title {
@@ -880,7 +963,7 @@ main:focus-visible {
   }
 
   .brand__name {
-    max-width: 108px;
+    max-width: 72px;
     font-size: 16px;
   }
 
@@ -911,11 +994,19 @@ main:focus-visible {
   }
 
   .publication-select {
-    width: 112px;
+    width: 80px;
     padding: 7px 18px 7px 6px;
     border-left: 0;
     color: var(--color-muted);
     font-size: 11px;
+  }
+
+  .publication-select-label {
+    white-space: nowrap;
+  }
+
+  .home-mobile-nav .publication-select {
+    width: 112px;
   }
 
   .home-shell {
@@ -942,6 +1033,33 @@ main:focus-visible {
 
   .home-highlight {
     padding-top: 24px;
+  }
+
+  .home-highlight--media {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .home-highlight--media .home-highlight__text {
+    display: contents;
+  }
+
+  .home-highlight--media .story__category {
+    order: 1;
+  }
+
+  .home-highlight--media h3 {
+    order: 2;
+  }
+
+  .home-highlight--media .story__media {
+    order: 3;
+    margin-top: 18px;
+  }
+
+  .home-highlight--media .home-highlight__text > p:not(.story__category) {
+    order: 4;
   }
 
   .home-highlight h3 {
@@ -1007,6 +1125,28 @@ main:focus-visible {
     display: flex;
     padding: 25px 0 27px;
     border-bottom: var(--rule-width) var(--rule-style) var(--color-rule);
+  }
+
+  .story--large[data-media-variant="lead-split"],
+  .story--medium[data-media-variant="medium-split"] {
+    display: flex;
+  }
+
+  .story[data-media-variant]:not([data-media-variant="none"]) .story__media {
+    order: 2;
+    margin-top: 18px;
+  }
+
+  .story[data-media-variant]:not([data-media-variant="none"]) .story__header {
+    order: 1;
+  }
+
+  .story[data-media-variant]:not([data-media-variant="none"]) .story__summary {
+    order: 3;
+  }
+
+  .story[data-media-variant]:not([data-media-variant="none"]) .story__source {
+    order: 4;
   }
 
   .story + .story {

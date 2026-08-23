@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -7,7 +7,8 @@ const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const ISO_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const PRIORITIES = new Set(["lead", "important", "normal"]);
 const CANDIDATE_FIELDS = new Set(["schemaVersion", "date", "generatedAt", "coverage", "items"]);
-const ITEM_FIELDS = new Set(["id", "title", "brief", "summary", "category", "editorial", "sources"]);
+const ITEM_FIELDS_V2 = new Set(["id", "title", "brief", "summary", "category", "editorial", "sources", "image"]);
+const IMAGE_FIELDS = new Set(["src", "alt", "width", "height", "credit", "sourceUrl"]);
 const EDITORIAL_FIELDS = new Set(["priority", "selectionReason"]);
 const SOURCE_FIELDS = new Set(["originalTitle", "name", "url", "publishedAt", "discoveredAt", "via"]);
 const VIA_FIELDS = new Set(["name", "url"]);
@@ -75,7 +76,15 @@ function requireHttpUrl(value, filePath, field) {
 
 function requireAssetPath(value, filePath, field) {
   requireString(value, filePath, field);
-  if (value.startsWith("https://")) return;
+  if (value.startsWith("https://")) {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || !url.hostname) throw new Error();
+      return;
+    } catch {
+      fail(filePath, field, "必须是合法 https:// 地址");
+    }
+  }
   if (!value.startsWith("/") || value.startsWith("//")) {
     fail(filePath, field, "必须是以 / 开头的本地路径或 https:// 地址");
   }
@@ -84,14 +93,44 @@ function requireAssetPath(value, filePath, field) {
 async function requireLocalAsset(rootDir, value, filePath, field) {
   if (!value || value.startsWith("https://")) return;
   const publicRoot = path.resolve(rootDir, "public");
+  const resolvedPublicRoot = await realpath(publicRoot).catch(() => publicRoot);
   const assetPath = path.resolve(publicRoot, `.${value}`);
   if (!assetPath.startsWith(`${publicRoot}${path.sep}`)) {
     fail(filePath, field, "不能指向 public 目录之外");
   }
   try {
-    if (!(await stat(assetPath)).isFile()) throw new Error();
+    const resolvedAsset = await realpath(assetPath);
+    if (
+      !(await stat(assetPath)).isFile()
+      || !resolvedAsset.startsWith(`${resolvedPublicRoot}${path.sep}`)
+    ) throw new Error();
   } catch {
-    fail(filePath, field, `对应的本地文件不存在（${value}）`);
+    fail(filePath, field, `对应的本地文件不存在或越过 public 边界（${value}）`);
+  }
+}
+
+function requireMaxLength(value, max, filePath, field) {
+  requireString(value, filePath, field);
+  if ([...value].length > max) fail(filePath, field, `最多 ${max} 个 Unicode 字符`);
+}
+
+async function validateImage(rootDir, image, filePath, field) {
+  requireObject(image, filePath, field);
+  requireAllowedFields(image, IMAGE_FIELDS, filePath, field);
+  for (const key of ["src", "alt", "width", "height", "credit"]) {
+    if (!(key in image)) fail(filePath, `${field}.${key}`, "不能为空");
+  }
+  requireAssetPath(image.src, filePath, `${field}.src`);
+  await requireLocalAsset(rootDir, image.src, filePath, `${field}.src`);
+  requireMaxLength(image.alt, 160, filePath, `${field}.alt`);
+  requireMaxLength(image.credit, 120, filePath, `${field}.credit`);
+  for (const dimension of ["width", "height"]) {
+    if (!Number.isInteger(image[dimension]) || image[dimension] < 1 || image[dimension] > 10000) {
+      fail(filePath, `${field}.${dimension}`, "必须是 1–10000 的整数");
+    }
+  }
+  if (image.sourceUrl !== undefined) {
+    requireHttpUrl(image.sourceUrl, filePath, `${field}.sourceUrl`);
   }
 }
 
@@ -109,6 +148,20 @@ async function readJson(filePath) {
   }
 }
 
+async function inferRootDir(filePath) {
+  let current = path.dirname(filePath);
+  while (true) {
+    try {
+      if ((await stat(path.join(current, "public"))).isDirectory()) return current;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) fail(filePath, "$", "无法定位项目 public 目录");
+    current = parent;
+  }
+}
+
 function validateCoverage(coverage, filePath) {
   requireObject(coverage, filePath, "coverage");
   requireAllowedFields(coverage, new Set(["start", "end"]), filePath, "coverage");
@@ -119,7 +172,7 @@ function validateCoverage(coverage, filePath) {
   }
 }
 
-function validateItems(items, filePath, strictCandidate = false) {
+async function validateItems(rootDir, items, filePath, schemaVersion, strictCandidate = false) {
   if (!Array.isArray(items) || items.length === 0) {
     fail(filePath, "items", "必须是非空数组");
   }
@@ -128,7 +181,9 @@ function validateItems(items, filePath, strictCandidate = false) {
   for (const [index, item] of items.entries()) {
     const field = `items[${index}]`;
     requireObject(item, filePath, field);
-    if (strictCandidate) requireAllowedFields(item, ITEM_FIELDS, filePath, field);
+    if (strictCandidate) {
+      requireAllowedFields(item, ITEM_FIELDS_V2, filePath, field);
+    }
     requireString(item.id, filePath, `${field}.id`);
     if (!ITEM_ID_PATTERN.test(item.id)) {
       fail(filePath, `${field}.id`, "只能包含小写字母、数字和连字符，且不能以连字符开头或结尾");
@@ -146,6 +201,10 @@ function validateItems(items, filePath, strictCandidate = false) {
     }
     requireString(item.editorial.selectionReason, filePath, `${field}.editorial.selectionReason（内容 ${item.id}）`);
     if (item.category !== undefined) requireString(item.category, filePath, `${field}.category`);
+    if (item.image !== undefined) {
+      if (schemaVersion !== 2) fail(filePath, `${field}.image`, "只允许出现在 Schema 2 内容中");
+      await validateImage(rootDir, item.image, filePath, `${field}.image`);
+    }
     if (item.score !== undefined || item.selected !== undefined) {
       fail(filePath, `${field}（内容 ${item.id}）`, "不能包含 AIHot 的 score 或 selected 字段");
     }
@@ -209,7 +268,7 @@ export async function validateSite(rootDir, storageRoot = rootDir) {
   return site;
 }
 
-export async function validateIssue(filePath, expectedDateOverride) {
+export async function validateIssue(filePath, expectedDateOverride, rootDirOverride) {
   const fileName = path.basename(filePath);
   const expectedDate = expectedDateOverride ?? fileName.replace(/\.json$/, "");
   if (expectedDateOverride !== undefined && !isValidDate(expectedDateOverride)) {
@@ -221,18 +280,21 @@ export async function validateIssue(filePath, expectedDateOverride) {
 
   const issue = await readJson(filePath);
   requireObject(issue, filePath, "$");
-  if (issue.schemaVersion !== 1) fail(filePath, "schemaVersion", "必须等于 1");
+  if (issue.schemaVersion !== 1 && issue.schemaVersion !== 2) {
+    fail(filePath, "schemaVersion", "必须等于 1 或 2");
+  }
   if (issue.date !== expectedDate) fail(filePath, "date", "必须与文件名一致");
   requireIsoTime(issue.generatedAt, filePath, "generatedAt");
   validateCoverage(issue.coverage, filePath);
   if (!Number.isInteger(issue.revision) || issue.revision < 1) {
     fail(filePath, "revision", "必须是大于等于 1 的整数");
   }
-  validateItems(issue.items, filePath);
+  const rootDir = rootDirOverride ?? await inferRootDir(filePath);
+  await validateItems(rootDir, issue.items, filePath, issue.schemaVersion);
   return issue;
 }
 
-export async function validateCandidate(filePath) {
+export async function validateCandidate(filePath, rootDirOverride) {
   const fileName = path.basename(filePath);
   const expectedDate = fileName.replace(/\.json$/, "");
   if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(fileName) || !isValidDate(expectedDate)) {
@@ -242,11 +304,14 @@ export async function validateCandidate(filePath) {
   const candidate = await readJson(filePath);
   requireObject(candidate, filePath, "$");
   requireAllowedFields(candidate, CANDIDATE_FIELDS, filePath, "$");
-  if (candidate.schemaVersion !== 1) fail(filePath, "schemaVersion", "必须等于 1");
+  if (candidate.schemaVersion !== 1 && candidate.schemaVersion !== 2) {
+    fail(filePath, "schemaVersion", "必须等于 1 或 2");
+  }
   if (candidate.date !== expectedDate) fail(filePath, "date", "必须与文件名一致");
   requireIsoTime(candidate.generatedAt, filePath, "generatedAt");
   validateCoverage(candidate.coverage, filePath);
-  validateItems(candidate.items, filePath, true);
+  const rootDir = rootDirOverride ?? await inferRootDir(filePath);
+  await validateItems(rootDir, candidate.items, filePath, candidate.schemaVersion, true);
   return candidate;
 }
 
@@ -262,7 +327,7 @@ export async function validateSources(rootDir, storageRoot = rootDir) {
   const issues = [];
   for (const fileName of fileNames) {
     const filePath = path.join(issuesDir, fileName);
-    issues.push({ issue: await validateIssue(filePath), filePath });
+    issues.push({ issue: await validateIssue(filePath, undefined, rootDir), filePath });
   }
   issues.sort((a, b) => b.issue.date.localeCompare(a.issue.date));
   const dates = issues.map(({ issue }) => issue.date);
