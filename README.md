@@ -4,7 +4,7 @@
 
 ![DailyNews 默认报纸主题](./docs/assets/dailynews-v0.9.0-newspaper.png)
 
-当前已发布版本是 `v0.9.0`。`v0.10.0` 已通过独立验收并集成到 `version/v0.10.0`，支持显式 Publication 上下文、多日报静态入口、独立主题、Candidate 宿主闭环和显式 v0.9 迁移；尚未合入 `main` 或发布。
+当前版本是 `v0.10.0`。它支持显式 Publication 上下文、多日报静态入口、独立主题、Candidate 宿主闭环和显式 v0.9 迁移。
 
 ## 主要能力
 
@@ -179,7 +179,7 @@ node --check src/app.js
 git diff --check
 ```
 
-v0.9.0 已通过桌面、移动端、三个官方主题、压力日报、键盘焦点和无 JavaScript 退化检查。v0.10.0 已通过双日报视觉确认、独立验收和版本分支集成；合入 `main`、创建 Tag 和正式发布仍需单独通过发布闸门。临时测试产物不保存在源码仓库。
+v0.10.0 已通过双日报隔离、独立主题、Candidate 闭环、迁移、桌面、移动端、键盘焦点和无 JavaScript 退化检查。临时测试产物不保存在源码仓库。
 
 ## 开源许可
 
