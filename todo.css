@@ -1,0 +1,243 @@
+.home-todo {
+  padding: 34px 0 38px;
+  border-bottom: calc(var(--rule-width) * 2) var(--rule-style) var(--color-text);
+}
+
+.home-todo__header,
+.todo-group__header,
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.home-todo__eyebrow,
+.todo-page__eyebrow,
+.todo-group__meta {
+  margin: 0 0 9px;
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.home-todo h2,
+.todo-page h1,
+.todo-group h2,
+.todo-item h3 {
+  font-family: var(--font-headline);
+}
+
+.home-todo h2 {
+  margin: 0;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.home-todo__all {
+  flex: 0 0 auto;
+  color: var(--color-text);
+  font-size: 12px;
+  text-underline-offset: 4px;
+}
+
+.home-todo__list {
+  display: grid;
+  margin: 26px 0 0;
+  padding: 0;
+  border-top: var(--rule-width) var(--rule-style) var(--color-rule);
+  list-style: none;
+}
+
+.home-todo__list li {
+  display: grid;
+  padding: 14px 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  border-bottom: var(--rule-width) var(--rule-style) var(--color-rule);
+}
+
+.home-todo__list a {
+  color: var(--color-text);
+  font-family: var(--font-headline);
+  font-size: 19px;
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+.home-todo__due,
+.todo-item__date {
+  color: var(--color-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.home-todo__empty,
+.home-todo__hint,
+.todo-page__hint,
+.todo-group__empty,
+.todo-anchor-status {
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.home-todo__empty {
+  margin: 24px 0 4px;
+}
+
+.home-todo__hint {
+  margin: 4px 0 0;
+}
+
+.todo-page {
+  width: min(calc(100% - var(--page-gutter)), 920px);
+  margin: 0 auto;
+  padding: 54px 0 84px;
+}
+
+.todo-page__header {
+  padding-bottom: 38px;
+  border-bottom: calc(var(--rule-width) * 2) var(--rule-style) var(--color-text);
+}
+
+.todo-page h1 {
+  max-width: 720px;
+  margin: 0;
+  font-size: clamp(48px, 7vw, 78px);
+  line-height: 0.96;
+  letter-spacing: -0.045em;
+}
+
+.todo-page__hint {
+  max-width: 620px;
+  margin: 22px 0 0;
+}
+
+.todo-anchor-status {
+  margin: 24px 0 0;
+  padding: 14px 0;
+  border-top: var(--rule-width) var(--rule-style) var(--color-rule);
+  border-bottom: var(--rule-width) var(--rule-style) var(--color-rule);
+}
+
+.todo-group {
+  padding: 36px 0 16px;
+  border-bottom: var(--rule-width) var(--rule-style) var(--color-rule);
+}
+
+.todo-group__header {
+  align-items: baseline;
+}
+
+.todo-group h2 {
+  margin: 0;
+  font-size: clamp(25px, 3vw, 36px);
+  letter-spacing: -0.025em;
+}
+
+.todo-group__meta {
+  margin: 0;
+}
+
+.todo-group__list {
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-item {
+  padding: 19px 0;
+  border-top: var(--rule-width) var(--rule-style) var(--color-rule);
+  scroll-margin-top: 90px;
+}
+
+.todo-item:focus,
+.todo-item[data-anchor-target="true"] {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 5px;
+}
+
+.todo-item__body {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.todo-item__state {
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.todo-item h3 {
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.todo-item__note {
+  max-width: 620px;
+  margin: 9px 0 0;
+  color: color-mix(in srgb, var(--color-text) 76%, var(--color-muted));
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.todo-item--completed h3 {
+  color: var(--color-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.todo-group__empty {
+  margin: 22px 0 8px;
+}
+
+@media (max-width: 899px) {
+  .home-todo {
+    padding: 28px 0 32px;
+  }
+
+  .home-todo__list li {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .home-todo__due {
+    white-space: normal;
+  }
+
+  .todo-page {
+    width: calc(100% - min(var(--page-gutter), 40px));
+    padding: 38px 0 60px;
+  }
+
+  .todo-page h1 {
+    font-size: clamp(42px, 13vw, 58px);
+  }
+
+  .todo-group {
+    padding-top: 30px;
+  }
+
+  .todo-item {
+    display: block;
+  }
+
+  .todo-item__body {
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .todo-item__date {
+    display: block;
+    margin: 10px 0 0 86px;
+    white-space: normal;
+  }
+}

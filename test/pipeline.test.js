@@ -29,6 +29,7 @@ async function fixture() {
     publicationIds: [publicationId],
   }), "utf8");
   await cp(path.join(rootDir, "config", "home.json"), path.join(target, "config", "home.json"));
+  await cp(path.join(rootDir, "config", "todo.json"), path.join(target, "config", "todo.json"));
   const targetPublication = publicationDir(target);
   await mkdir(path.join(targetPublication, "config"), { recursive: true });
   await mkdir(path.join(targetPublication, "themes"), { recursive: true });

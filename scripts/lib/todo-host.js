@@ -22,8 +22,8 @@ export async function startTodoHost(rootDir, options = {}) {
   const enqueue = (candidatePath) => {
     queue = queue.then(async () => {
       const status = await processTodoCandidate(rootDir, candidatePath, options);
-      reportStatus(status);
       await options.rebuild?.(status);
+      reportStatus(status);
       return status;
     }).catch(reportError);
     return queue;

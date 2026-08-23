@@ -18,6 +18,7 @@ import {
   validateTodoConfig,
   validateTodoState,
 } from "../scripts/lib/todo-validation.js";
+import { buildTodoProjection } from "../scripts/lib/todo-view.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
@@ -71,6 +72,58 @@ test("Todo 配置严格校验，首次初始化 revision 0 空状态", async () 
   const target = await fixture(false);
   const state = await readTodoState(target);
   assert.deepEqual(state, { schemaVersion: 1, revision: 0, updatedAt: null, items: [] });
+});
+
+test("Todo Projection 按上海日期生成固定五分组和最多五条 Home 顺序", () => {
+  const makeItem = (id, title, change = {}) => ({
+    id,
+    title,
+    status: "open",
+    createdAt: "2026-08-20T10:00:00+08:00",
+    updatedAt: "2026-08-23T10:00:00+08:00",
+    completedAt: null,
+    archivedAt: null,
+    ...change,
+  });
+  const state = {
+    schemaVersion: 1,
+    revision: 1,
+    updatedAt: "2026-08-23T18:30:00+08:00",
+    items: [
+      makeItem("todo-00000001", "未来", { dueDate: "2026-08-25" }),
+      makeItem("todo-00000002", "今天无时间", { dueDate: "2026-08-23" }),
+      makeItem("todo-00000003", "逾期较晚", { dueDate: "2026-08-22", dueTime: "18:00" }),
+      makeItem("todo-00000004", "逾期较早", { dueDate: "2026-08-21" }),
+      makeItem("todo-00000005", "今天有时间", { dueDate: "2026-08-23", dueTime: "09:00" }),
+      makeItem("todo-00000006", "无日期"),
+      makeItem("todo-00000007", "今天完成", {
+        status: "completed",
+        completedAt: "2026-08-23T17:00:00+08:00",
+      }),
+      makeItem("todo-00000008", "昨日完成", {
+        status: "completed",
+        completedAt: "2026-08-22T23:59:00+08:00",
+      }),
+      makeItem("todo-00000009", "已归档", {
+        status: "archived",
+        archivedAt: "2026-08-23T12:00:00+08:00",
+      }),
+    ],
+  };
+  const projection = buildTodoProjection(state, { asOfDate: "2026-08-23" });
+  assert.deepEqual(projection.groups.overdue.map(({ id }) => id), ["todo-00000004", "todo-00000003"]);
+  assert.deepEqual(projection.groups.today.map(({ id }) => id), ["todo-00000005", "todo-00000002"]);
+  assert.deepEqual(projection.groups.upcoming.map(({ id }) => id), ["todo-00000001"]);
+  assert.deepEqual(projection.groups.undated.map(({ id }) => id), ["todo-00000006"]);
+  assert.deepEqual(projection.groups.completedToday.map(({ id }) => id), ["todo-00000007"]);
+  assert.deepEqual(projection.homeItems.map(({ id }) => id), [
+    "todo-00000004",
+    "todo-00000003",
+    "todo-00000005",
+    "todo-00000002",
+    "todo-00000001",
+  ]);
+  assert.equal(projection.sourceRevision, 1);
 });
 
 test("add 原子新增同名任务，由 Writer 生成不冲突 ID 并只增加一次 revision", async () => {

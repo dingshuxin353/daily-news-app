@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" href="data:,">
+    <title>DailyNews</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/todo.css">
+  </head>
+  <body class="todo-body">
+    <header class="masthead">
+      <nav class="masthead__inner" aria-label="个人待办导航">
+        <div class="publication-nav">
+          <a class="brand" href="/">
+            <span class="brand__name">DailyNews</span>
+          </a>
+          <div class="publication-menu" aria-label="页面目录">
+            <!-- build:todo-menu -->
+          </div>
+          <label class="publication-select-label" for="publication-select">页面</label>
+          <select class="publication-select" id="publication-select" aria-label="切换页面">
+            <!-- build:todo-options -->
+          </select>
+        </div>
+      </nav>
+    </header>
+
+    <!-- build:todo-content -->
+
+    <script>
+      const selector = document.querySelector("#publication-select");
+      selector?.addEventListener("change", () => location.assign(selector.value));
+
+      const notice = document.querySelector("#todo-anchor-status");
+      function focusRequestedTask() {
+        if (!location.hash) {
+          notice.hidden = true;
+          return;
+        }
+        let id;
+        try {
+          id = decodeURIComponent(location.hash.slice(1));
+        } catch {
+          id = "";
+        }
+        const task = /^todo-[a-f0-9]{8}$/.test(id) ? document.getElementById(id) : null;
+        if (!task) {
+          notice.hidden = false;
+          notice.focus({ preventScroll: true });
+          return;
+        }
+        notice.hidden = true;
+        task.dataset.anchorTarget = "true";
+        task.addEventListener("blur", () => delete task.dataset.anchorTarget, { once: true });
+        task.focus({ preventScroll: true });
+        task.scrollIntoView({ block: "center" });
+      }
+      window.addEventListener("hashchange", focusRequestedTask);
+      focusRequestedTask();
+    </script>
+  </body>
+</html>
