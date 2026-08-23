@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" href="data:,">
+    <title>DailyNews</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="home-body">
+    <header class="masthead home-masthead">
+      <nav class="masthead__inner" aria-label="主页导航">
+        <a class="brand" href="/" aria-current="page">
+          <span class="brand__name">DailyNews</span>
+        </a>
+        <div class="home-mobile-nav">
+          <label class="publication-select-label" for="publication-select">当前页面</label>
+          <select class="publication-select" id="publication-select" aria-label="切换页面">
+            <!-- build:publication-options -->
+          </select>
+        </div>
+      </nav>
+    </header>
+    <div class="home-shell">
+      <aside class="home-directory" aria-label="编辑目录">
+        <p class="home-directory__label">目录</p>
+        <nav class="home-directory__nav">
+          <!-- build:home-directory -->
+        </nav>
+      </aside>
+      <!-- build:home-content -->
+    </div>
+    <script type="module" src="/src/home.js"></script>
+  </body>
+</html>
