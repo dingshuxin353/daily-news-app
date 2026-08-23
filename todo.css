@@ -179,6 +179,7 @@
   font-size: clamp(20px, 2.4vw, 28px);
   line-height: 1.15;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .todo-item__note {
