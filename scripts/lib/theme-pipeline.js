@@ -236,8 +236,8 @@ async function loadStoredTheme(rootDir, themeId, revision) {
   };
 }
 
-async function validateThemeConfig(rootDir) {
-  const configPath = path.join(rootDir, "config", "theme.json");
+async function validateThemeConfig(rootDir, storageRoot = rootDir) {
+  const configPath = path.join(storageRoot, "config", "theme.json");
   const config = await readJson(configPath);
   if (!config) throw new ThemePipelineError("config/theme.json", "不存在");
   requireExactFields(config, ["schemaVersion", "activeTheme"], "config/theme.json");
@@ -282,8 +282,9 @@ export async function activateTheme(rootDir, themeId, options = {}) {
 
   const releaseLock = await acquireLock(rootDir);
   try {
-    const activePath = path.join(rootDir, "themes", "active.json");
-    const active = await validateConfiguredTheme(rootDir);
+    const storageRoot = options.storageRoot ?? rootDir;
+    const activePath = path.join(storageRoot, "themes", "active.json");
+    const active = await validateConfiguredTheme(rootDir, storageRoot);
     const activeDefinitionPath = active
       ? path.join(rootDir, "themes", "definitions", active.themeId, `${active.revision}.json`)
       : null;
@@ -302,7 +303,7 @@ export async function activateTheme(rootDir, themeId, options = {}) {
     const css = compileThemeCss(resolved, revision, { usesSiteAccent });
     const definitionPath = path.join(rootDir, "themes", "definitions", themeId, `${revision}.json`);
     const compiledPath = path.join(rootDir, "themes", "compiled", themeId, `${revision}.css`);
-    const configPath = path.join(rootDir, "config", "theme.json");
+    const configPath = path.join(storageRoot, "config", "theme.json");
     const nextActive = {
       ...createThemeManifest(definition, relativeCssPath, candidateHash),
       previous: active ? { themeId: active.themeId, revision: active.revision } : null,
@@ -320,8 +321,8 @@ export async function activateTheme(rootDir, themeId, options = {}) {
   }
 }
 
-export async function listThemes(rootDir) {
-  const active = await validateConfiguredTheme(rootDir);
+export async function listThemes(rootDir, storageRoot = rootDir) {
+  const active = await validateConfiguredTheme(rootDir, storageRoot);
   const definitionsDir = path.join(rootDir, "themes", "definitions");
   const entries = await readdir(definitionsDir, { withFileTypes: true }).catch((error) => {
     if (error.code === "ENOENT") return [];
@@ -357,7 +358,8 @@ export async function switchTheme(rootDir, themeId, options = {}) {
   }
   const releaseLock = await acquireLock(rootDir);
   try {
-    const active = await validateConfiguredTheme(rootDir);
+    const storageRoot = options.storageRoot ?? rootDir;
+    const active = await validateConfiguredTheme(rootDir, storageRoot);
     const revisions = await storedRevisions(rootDir, themeId);
     const revision = options.revision ?? revisions.at(-1);
     if (revision === undefined) {
@@ -372,8 +374,8 @@ export async function switchTheme(rootDir, themeId, options = {}) {
       previous: { themeId: active.themeId, revision: active.revision },
     };
     const stages = [
-      await stageFile(path.join(rootDir, "config", "theme.json"), themeConfigSource(themeId, revision)),
-      await stageFile(path.join(rootDir, "themes", "active.json"), stableJson(nextActive)),
+      await stageFile(path.join(storageRoot, "config", "theme.json"), themeConfigSource(themeId, revision)),
+      await stageFile(path.join(storageRoot, "themes", "active.json"), stableJson(nextActive)),
     ];
     await commitStages(stages);
     return {
@@ -393,8 +395,9 @@ export async function rollbackTheme(rootDir, options = {}) {
   }
   const releaseLock = await acquireLock(rootDir);
   try {
-    const activePath = path.join(rootDir, "themes", "active.json");
-    const active = await validateConfiguredTheme(rootDir);
+    const storageRoot = options.storageRoot ?? rootDir;
+    const activePath = path.join(storageRoot, "themes", "active.json");
+    const active = await validateConfiguredTheme(rootDir, storageRoot);
     if (!active?.previous) throw new ThemePipelineError("rollback", "当前主题没有可回滚版本");
     const target = active.previous;
     const { definition, relativeCssPath } = await loadStoredTheme(rootDir, target.themeId, target.revision);
@@ -408,7 +411,7 @@ export async function rollbackTheme(rootDir, options = {}) {
     };
     const stages = [
       await stageFile(
-        path.join(rootDir, "config", "theme.json"),
+        path.join(storageRoot, "config", "theme.json"),
         themeConfigSource(target.themeId, target.revision),
       ),
       await stageFile(activePath, stableJson(nextActive)),
@@ -425,8 +428,8 @@ export async function rollbackTheme(rootDir, options = {}) {
   }
 }
 
-export async function validateActiveTheme(rootDir) {
-  const activePath = path.join(rootDir, "themes", "active.json");
+export async function validateActiveTheme(rootDir, storageRoot = rootDir) {
+  const activePath = path.join(storageRoot, "themes", "active.json");
   const active = await readJson(activePath);
   if (!active) return null;
   if (
@@ -463,9 +466,9 @@ export async function validateActiveTheme(rootDir) {
   return active;
 }
 
-export async function validateConfiguredTheme(rootDir) {
-  const config = await validateThemeConfig(rootDir);
-  const active = await validateActiveTheme(rootDir);
+export async function validateConfiguredTheme(rootDir, storageRoot = rootDir) {
+  const config = await validateThemeConfig(rootDir, storageRoot);
+  const active = await validateActiveTheme(rootDir, storageRoot);
   if (!active) throw new ThemePipelineError("active", "不存在，无法应用 config/theme.json");
   if (
     active.themeId !== config.activeTheme.id
