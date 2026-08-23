@@ -1,7 +1,9 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { renderBuiltHtml } from "./build-html.js";
+import { renderBuiltHtml, renderHomeHtml } from "./build-html.js";
+import { buildHomeOverview, resolveHomeTheme, validateHomeProfile } from "./home.js";
 import { loadPublicationRegistry } from "./publications.js";
 import { validateConfiguredTheme } from "./theme-pipeline.js";
 
@@ -58,9 +60,35 @@ async function copyPublicationAssets(publication, outputDir) {
   return publicationOutput;
 }
 
-export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist")) {
+async function pathExists(target) {
+  try {
+    await stat(target);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function replaceOutput(stagingDir, outputDir) {
+  const backupDir = `${outputDir}.${randomUUID()}.backup`;
+  const hadOutput = await pathExists(outputDir);
+  if (hadOutput) await rename(outputDir, backupDir);
+  try {
+    await rename(stagingDir, outputDir);
+  } catch (error) {
+    if (hadOutput) await rename(backupDir, outputDir);
+    throw error;
+  }
+  if (hadOutput) await rm(backupDir, { recursive: true, force: true });
+}
+
+export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"), options = {}) {
   const registry = await loadPublicationRegistry(rootDir);
+  const home = await validateHomeProfile(rootDir);
+  const homeTheme = await resolveHomeTheme(rootDir, home);
   const template = await readFile(path.join(rootDir, "index.html"), "utf8");
+  const homeTemplate = await readFile(path.join(rootDir, "home.html"), "utf8");
   const publications = [];
   for (const publication of registry.publications) {
     const site = JSON.parse(await readFile(path.join(publication.configDir, "site.json"), "utf8"));
@@ -71,26 +99,7 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"))
     });
   }
 
-  await rm(outputDir, { recursive: true, force: true });
-  await mkdir(outputDir, { recursive: true });
-  for (const entry of ["styles.css", "src"]) {
-    await cp(path.join(rootDir, entry), path.join(outputDir, entry), { recursive: true });
-  }
-  await cp(path.join(rootDir, "public"), outputDir, { recursive: true });
-  await mkdir(path.join(outputDir, "config"), { recursive: true });
-  await cp(
-    path.join(rootDir, "config", "publications.json"),
-    path.join(outputDir, "config", "publications.json"),
-  );
-  await mkdir(path.join(outputDir, "themes"), { recursive: true });
-  for (const entry of ["compiled", "previews"]) {
-    await cp(
-      path.join(rootDir, "themes", entry),
-      path.join(outputDir, "themes", entry),
-      { recursive: true },
-    );
-  }
-
+  const publicationBuilds = [];
   for (const publication of registry.publications) {
     const activeTheme = await validateConfiguredTheme(rootDir, publication.publicationDir);
     const index = JSON.parse(await readFile(path.join(publication.dataDir, "index.json"), "utf8"));
@@ -101,7 +110,39 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"))
       ))
       : null;
     const site = JSON.parse(await readFile(path.join(publication.configDir, "site.json"), "utf8"));
-    const publicationOutput = await copyPublicationAssets(publication, outputDir);
+    publicationBuilds.push({ publication, activeTheme, issue, site });
+  }
+  const overview = home.enabled
+    ? await buildHomeOverview(rootDir, registry, { asOfDate: options.asOfDate })
+    : null;
+
+  const resolvedOutput = path.resolve(outputDir);
+  const stagingDir = path.join(
+    path.dirname(resolvedOutput),
+    `.${path.basename(resolvedOutput)}.${randomUUID()}.tmp`,
+  );
+  await mkdir(stagingDir, { recursive: false });
+  try {
+  for (const entry of ["styles.css", "src"]) {
+    await cp(path.join(rootDir, entry), path.join(stagingDir, entry), { recursive: true });
+  }
+  await cp(path.join(rootDir, "public"), stagingDir, { recursive: true });
+  await mkdir(path.join(stagingDir, "config"), { recursive: true });
+  await cp(
+    path.join(rootDir, "config", "publications.json"),
+    path.join(stagingDir, "config", "publications.json"),
+  );
+  await mkdir(path.join(stagingDir, "themes"), { recursive: true });
+  for (const entry of ["compiled", "previews"]) {
+    await cp(
+      path.join(rootDir, "themes", entry),
+      path.join(stagingDir, "themes", entry),
+      { recursive: true },
+    );
+  }
+
+  for (const { publication, activeTheme, issue, site } of publicationBuilds) {
+    const publicationOutput = await copyPublicationAssets(publication, stagingDir);
     await writeFile(
       path.join(publicationOutput, "index.html"),
       renderBuiltHtml(template, {
@@ -115,6 +156,35 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"))
     );
   }
 
-  await writeFile(path.join(outputDir, "index.html"), redirectHtml(registry.defaultPublicationId), "utf8");
-  return { outputDir, registry, publications };
+  if (home.enabled) {
+    await mkdir(path.join(stagingDir, "home", "data"), { recursive: true });
+    await mkdir(path.join(stagingDir, "home", "themes"), { recursive: true });
+    await writeFile(
+      path.join(stagingDir, "home", "data", "overview.json"),
+      `${JSON.stringify(overview, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(stagingDir, "home", "themes", "active.json"),
+      `${JSON.stringify(homeTheme, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(stagingDir, "index.html"),
+      renderHomeHtml(homeTemplate, { activeTheme: homeTheme, home, overview, publications }),
+      "utf8",
+    );
+  } else {
+    await writeFile(
+      path.join(stagingDir, "index.html"),
+      redirectHtml(registry.defaultPublicationId),
+      "utf8",
+    );
+  }
+  await replaceOutput(stagingDir, resolvedOutput);
+  } catch (error) {
+    await rm(stagingDir, { recursive: true, force: true });
+    throw error;
+  }
+  return { outputDir: resolvedOutput, registry, publications, home, overview };
 }

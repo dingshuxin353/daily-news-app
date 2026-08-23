@@ -19,7 +19,7 @@ function publicationDir(target) {
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-pipeline-"));
-  for (const entry of ["index.html", "styles.css", "src", "public", "themes"]) {
+  for (const entry of ["index.html", "home.html", "styles.css", "src", "public", "themes"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
   await mkdir(path.join(target, "config"), { recursive: true });
@@ -28,6 +28,7 @@ async function fixture() {
     defaultPublicationId: publicationId,
     publicationIds: [publicationId],
   }), "utf8");
+  await cp(path.join(rootDir, "config", "home.json"), path.join(target, "config", "home.json"));
   const targetPublication = publicationDir(target);
   await mkdir(path.join(targetPublication, "config"), { recursive: true });
   await mkdir(path.join(targetPublication, "themes"), { recursive: true });

@@ -305,6 +305,7 @@ function updateNavigation(date, dates) {
 function updateDateUrl(date, method) {
   const url = new URL(location.href);
   url.searchParams.set("date", date);
+  url.hash = "";
   history[method]({ date }, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
@@ -316,8 +317,31 @@ function focusLoadedIssue() {
   target.focus({ preventScroll: true });
 }
 
+function focusRequestedItem() {
+  if (!location.hash) return;
+  let itemId;
+  try {
+    itemId = decodeURIComponent(location.hash.slice(1));
+  } catch {
+    itemId = "";
+  }
+  const target = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(itemId)
+    ? document.getElementById(itemId)
+    : null;
+  if (!target?.classList.contains("story")) {
+    document.querySelector("#edition-status").textContent = "未找到指定内容";
+    return;
+  }
+  target.tabIndex = -1;
+  target.dataset.focusOrigin = "programmatic";
+  target.addEventListener("blur", () => delete target.dataset.focusOrigin, { once: true });
+  target.scrollIntoView({ block: "start", behavior: "auto" });
+  target.focus({ preventScroll: true });
+  document.querySelector("#edition-status").textContent = `${itemId} 内容已定位`;
+}
+
 async function loadIssue(date, dates, options = {}) {
-  const { historyMethod = null, focusAfterLoad = false } = options;
+  const { historyMethod = null, focusAfterLoad = false, focusHash = false } = options;
   closeSourcePanel();
   window.scrollTo({ top: 0, behavior: "auto" });
   renderStatus("正在加载日报…");
@@ -329,7 +353,8 @@ async function loadIssue(date, dates, options = {}) {
     if (historyMethod) updateDateUrl(date, historyMethod);
     document.title = `${date} · ${currentSiteName}`;
     document.querySelector("#edition-status").textContent = `${date} 内容已加载`;
-    if (focusAfterLoad) focusLoadedIssue();
+    if (focusHash) focusRequestedItem();
+    else if (focusAfterLoad) focusLoadedIssue();
   } catch (error) {
     console.error(error);
     renderStatus("这期日报暂时无法加载");
@@ -399,10 +424,10 @@ async function start() {
       renderStatus("这期日报不存在");
       return;
     }
-    loadIssue(selected, index.dates, { focusAfterLoad: true });
+    loadIssue(selected, index.dates, { focusAfterLoad: true, focusHash: true });
   });
 
-  await loadIssue(date, index.dates);
+  await loadIssue(date, index.dates, { focusHash: true });
 }
 
 if (typeof document !== "undefined") start();

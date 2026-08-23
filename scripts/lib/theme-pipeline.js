@@ -204,7 +204,7 @@ async function storedRevisions(rootDir, themeId) {
     .sort((first, second) => first - second);
 }
 
-async function loadStoredTheme(rootDir, themeId, revision) {
+export async function loadStoredTheme(rootDir, themeId, revision) {
   if (!THEME_ID_PATTERN.test(themeId)) {
     throw new ThemePipelineError("themeId", "只能包含小写字母、数字和连字符");
   }

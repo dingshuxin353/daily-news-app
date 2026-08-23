@@ -34,7 +34,7 @@ async function createPublication(target, publicationId, name) {
 
 async function fixture() {
   const target = await mkdtemp(path.join(os.tmpdir(), "daily-news-build-"));
-  for (const entry of ["index.html", "styles.css", "src", "public", "themes"]) {
+  for (const entry of ["index.html", "home.html", "styles.css", "src", "public", "themes"]) {
     await cp(path.join(rootDir, entry), path.join(target, entry), { recursive: true });
   }
   await mkdir(path.join(target, "config"), { recursive: true });
@@ -43,6 +43,8 @@ async function fixture() {
     defaultPublicationId: "ai-daily",
     publicationIds: ["ai-daily", "finance-daily"],
   });
+  const home = JSON.parse(await readFile(path.join(rootDir, "config", "home.json"), "utf8"));
+  await writeJson(path.join(target, "config", "home.json"), { ...home, enabled: false });
   await createPublication(target, "ai-daily", "AI 日报");
   const finance = await createPublication(target, "finance-daily", "财经日报");
   await switchTheme(target, "midnight-tech", {
@@ -65,6 +67,9 @@ test("构建为每个 Publication 生成独立入口、数据和首帧主题，�
   assert.match(aiHtml, /data-theme="newspaper-default"/);
   assert.match(financeHtml, /<span class="brand__name">财经日报<\/span>/);
   assert.match(financeHtml, /data-theme="midnight-tech"/);
+  assert.match(financeHtml, /<a href="\/">总览<\/a>/);
+  assert.match(financeHtml, /<a href="\/p\/finance-daily\/" aria-current="page">财经日报<\/a>/);
+  assert.match(financeHtml, /<option value="\/">总览<\/option>/);
   assert.match(financeHtml, /<option value="\/p\/ai-daily\/">AI 日报<\/option>/);
   assert.match(financeHtml, /<option value="\/p\/finance-daily\/" selected>财经日报<\/option>/);
   assert.match(financeHtml, /2026-08-19 最新一期来源清单/);
@@ -80,4 +85,43 @@ test("构建为每个 Publication 生成独立入口、数据和首帧主题，�
     () => stat(path.join(outputDir, "p", "ai-daily", "data", "candidates", "2026-08-20.json")),
     /ENOENT/,
   );
+});
+
+test("Home 开启时根路径生成总览、真实深链、目录和独立主题 Manifest", async () => {
+  const target = await fixture();
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, enabled: true, name: "我的日报" });
+
+  const { outputDir, overview } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  const homeHtml = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const overviewOutput = JSON.parse(await readFile(
+    path.join(outputDir, "home", "data", "overview.json"),
+    "utf8",
+  ));
+  const active = JSON.parse(await readFile(
+    path.join(outputDir, "home", "themes", "active.json"),
+    "utf8",
+  ));
+
+  assert.equal(overview.asOfDate, "2026-08-23");
+  assert.deepEqual(overviewOutput, overview);
+  assert.equal(active.themeId, "newspaper-default");
+  assert.match(homeHtml, /<h1>我的日报<\/h1>/);
+  assert.match(homeHtml, /<a href="\/" aria-current="page">总览<\/a>/);
+  assert.match(homeHtml, /<option value="\/" selected>总览<\/option>/);
+  assert.match(homeHtml, /\/p\/ai-daily\/\?date=2026-08-19#test-item-1/);
+  assert.ok(homeHtml.indexOf("AI 日报") < homeHtml.indexOf("财经日报"));
+});
+
+test("构建失败保留上一份正式 dist", async () => {
+  const target = await fixture();
+  const { outputDir } = await buildSite(target);
+  const previous = await readFile(path.join(outputDir, "index.html"), "utf8");
+  const homePath = path.join(target, "config", "home.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  await writeJson(homePath, { ...home, accentColor: "invalid" });
+
+  await assert.rejects(() => buildSite(target), /accentColor/);
+  assert.equal(await readFile(path.join(outputDir, "index.html"), "utf8"), previous);
 });
