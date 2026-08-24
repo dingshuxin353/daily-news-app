@@ -272,7 +272,7 @@ export async function processCandidate(rootDir, publicationId, candidatePath, op
     );
   }
 
-  const candidate = await validateCandidate(resolvedCandidate);
+  const candidate = await validateCandidate(resolvedCandidate, context.rootDir);
   const site = await validateSite(context.rootDir, context.publicationDir);
   const { priorityLimits } = site;
   const today = options.today ?? shanghaiDate();
@@ -307,7 +307,14 @@ export async function processCandidate(rootDir, publicationId, candidatePath, op
     const compiledPath = path.join(context.dataDir, "compiled", `${candidate.date}.json`);
     const indexPath = path.join(context.dataDir, "index.json");
     const existingIssue = await readJsonIfPresent(issuePath);
-    if (existingIssue) await validateIssue(issuePath);
+    if (existingIssue) await validateIssue(issuePath, undefined, context.rootDir);
+    if (existingIssue?.schemaVersion === 2 && candidate.schemaVersion === 1) {
+      throw new PipelineError(
+        candidate.date,
+        "schemaVersion",
+        "Schema 1 Candidate 不能更新 Schema 2 Issue",
+      );
+    }
     const plan = planIssue(candidate, existingIssue, mode);
     const nextIndex = await issueIndex(context.dataDir, candidate.date);
     const currentIndex = await readJsonIfPresent(indexPath, true);
@@ -341,7 +348,7 @@ export async function processCandidate(rootDir, publicationId, candidatePath, op
     const issueStage = await stageJson(issuePath, plan.issue);
     stages.push(issueStage);
     try {
-      await validateIssue(issueStage.temporaryPath, candidate.date);
+      await validateIssue(issueStage.temporaryPath, candidate.date, context.rootDir);
       ({ compiled, warnings } = compileIssue(plan.issue, issuePath, priorityLimits));
       stages.push(await stageJson(compiledPath, compiled));
       stages.push(await stageJson(indexPath, nextIndex));

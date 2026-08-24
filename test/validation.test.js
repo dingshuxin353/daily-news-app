@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -111,12 +111,12 @@ test("同一期日报的内容 ID 不能重复", async () => {
   await assert.rejects(() => validateAll(target), /items\[1\]\.id.*不能重复/);
 });
 
-test("schemaVersion 必须为 1，内容 ID 必须使用小写连字符格式", async () => {
+test("schemaVersion 必须为 1 或 2，内容 ID 必须使用小写连字符格式", async () => {
   const target = await fixture();
   await editIssue(target, "2026-08-19", (issue) => {
-    issue.schemaVersion = 2;
+    issue.schemaVersion = 3;
   });
-  await assert.rejects(() => validateAll(target), /schemaVersion 必须等于 1/);
+  await assert.rejects(() => validateAll(target), /schemaVersion 必须等于 1 或 2/);
 
   await editIssue(target, "2026-08-19", (issue) => {
     issue.schemaVersion = 1;
@@ -193,7 +193,7 @@ test("候选要求固定 coverage 且禁止 revision 和布局字段", async () 
   await assert.rejects(() => validateCandidate(candidatePath), /coverage.*start 必须早于 end/);
 });
 
-test("Candidate Schema 保持 1，不能通过 publicationId 自行指定写入目标", async () => {
+test("Candidate Schema 1 和 2 都不能通过 publicationId 自行指定写入目标", async () => {
   const target = await fixture();
   const source = JSON.parse(await readFile(path.join(target, "data", "issues", "2026-08-19.json"), "utf8"));
   delete source.revision;
@@ -205,6 +205,65 @@ test("Candidate Schema 保持 1，不能通过 publicationId 自行指定写入�
     () => validateCandidate(candidatePath),
     /publicationId.*不允许出现在候选中/,
   );
+});
+
+test("Schema 1 禁止图片，Schema 2 严格校验外部与本地图片", async () => {
+  const target = await fixture();
+  const source = JSON.parse(await readFile(
+    path.join(target, "data", "issues", "2026-08-19.json"),
+    "utf8",
+  ));
+  delete source.revision;
+  const candidatePath = path.join(target, "data", "candidates", "2026-08-19.json");
+  const image = {
+    src: "https://cdn.example.com/image.jpg",
+    alt: "研究人员检查屏幕上的任务结果",
+    width: 1600,
+    height: 1067,
+    credit: "Example News",
+    sourceUrl: "https://example.com/image",
+  };
+  source.items[0].image = image;
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  await assert.rejects(
+    () => validateCandidate(candidatePath, target),
+    /image.*只允许出现在 Schema 2/,
+  );
+
+  source.schemaVersion = 2;
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  assert.deepEqual((await validateCandidate(candidatePath, target)).items[0].image, image);
+
+  const invalidCases = [
+    [{ src: "http://cdn.example.com/image.jpg" }, /src.*本地路径或 https/],
+    [{ src: "//cdn.example.com/image.jpg" }, /src.*本地路径或 https/],
+    [{ alt: "" }, /alt.*非空字符串/],
+    [{ alt: "图".repeat(161) }, /alt.*最多 160/],
+    [{ width: 0 }, /width.*1–10000/],
+    [{ height: 10001 }, /height.*1–10000/],
+    [{ credit: "" }, /credit.*非空字符串/],
+    [{ unknown: true }, /unknown.*不允许出现在候选中/],
+    [{ sourceUrl: "javascript:alert(1)" }, /sourceUrl.*http:\/\/ 或 https:\/\//],
+  ];
+  for (const [change, pattern] of invalidCases) {
+    source.items[0].image = { ...image, ...change };
+    await writeFile(candidatePath, JSON.stringify(source), "utf8");
+    await assert.rejects(() => validateCandidate(candidatePath, target), pattern);
+  }
+
+  await writeFile(path.join(target, "public", "local-image.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+  source.items[0].image = { ...image, src: "/local-image.svg" };
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  assert.equal((await validateCandidate(candidatePath, target)).items[0].image.src, "/local-image.svg");
+  source.items[0].image.src = "/missing.svg";
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  await assert.rejects(() => validateCandidate(candidatePath, target), /本地文件不存在/);
+  const outside = path.join(target, "outside.svg");
+  await writeFile(outside, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+  await symlink(outside, path.join(target, "public", "escape.svg"));
+  source.items[0].image.src = "/escape.svg";
+  await writeFile(candidatePath, JSON.stringify(source), "utf8");
+  await assert.rejects(() => validateCandidate(candidatePath, target), /本地文件不存在/);
 });
 
 test("无日期使用最新一期，无效或不存在日期明确失败", () => {

@@ -169,6 +169,7 @@ function createArticle(item, module, isFirst) {
   article.id = item.id;
   article.dataset.size = module.size;
   article.dataset.span = String(module.span);
+  article.dataset.mediaVariant = module.mediaVariant ?? "none";
   if (module.size === "large") article.dataset.titleLength = classifyTitleLength(item.title);
   article.style.gridColumn = `span ${module.span}`;
 
@@ -179,6 +180,34 @@ function createArticle(item, module, isFirst) {
   heading.append(element(isFirst ? "h1" : "h2", "story__title", item.title));
 
   const summary = element("p", "story__summary", module.size === "large" ? item.summary : item.brief);
+  let media = null;
+  if (item.image && module.mediaVariant && module.mediaVariant !== "none") {
+    media = element("figure", "story__media");
+    const image = element("img", "story__image");
+    image.src = item.image.src;
+    image.alt = item.image.alt;
+    image.width = item.image.width;
+    image.height = item.image.height;
+    image.decoding = "async";
+    image.loading = isFirst ? "eager" : "lazy";
+    if (isFirst) image.fetchPriority = "high";
+    if (item.image.src.startsWith("https://")) image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => {
+      media.remove();
+      article.dataset.mediaVariant = "none";
+    }, { once: true });
+    const caption = element("figcaption", "story__credit");
+    if (item.image.sourceUrl) {
+      const credit = element("a", "", item.image.credit);
+      credit.href = item.image.sourceUrl;
+      credit.target = "_blank";
+      credit.rel = "noopener noreferrer";
+      caption.append(credit);
+    } else {
+      caption.textContent = item.image.credit;
+    }
+    media.append(image, caption);
+  }
   const source = element("footer", "story__source");
   const primarySource = item.sources[0];
   const link = element("a", "story__primary-source", `${primarySource.name} ↗`);
@@ -192,7 +221,7 @@ function createArticle(item, module, isFirst) {
     sourceCount.dataset.itemId = item.id;
     source.append(sourceCount);
   }
-  article.append(heading, summary, source);
+  article.append(heading, ...(media ? [media] : []), summary, source);
   return article;
 }
 
@@ -305,6 +334,7 @@ function updateNavigation(date, dates) {
 function updateDateUrl(date, method) {
   const url = new URL(location.href);
   url.searchParams.set("date", date);
+  url.hash = "";
   history[method]({ date }, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
@@ -316,8 +346,31 @@ function focusLoadedIssue() {
   target.focus({ preventScroll: true });
 }
 
+function focusRequestedItem() {
+  if (!location.hash) return;
+  let itemId;
+  try {
+    itemId = decodeURIComponent(location.hash.slice(1));
+  } catch {
+    itemId = "";
+  }
+  const target = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(itemId)
+    ? document.getElementById(itemId)
+    : null;
+  if (!target?.classList.contains("story")) {
+    document.querySelector("#edition-status").textContent = "未找到指定内容";
+    return;
+  }
+  target.tabIndex = -1;
+  target.dataset.focusOrigin = "programmatic";
+  target.addEventListener("blur", () => delete target.dataset.focusOrigin, { once: true });
+  target.scrollIntoView({ block: "start", behavior: "auto" });
+  target.focus({ preventScroll: true });
+  document.querySelector("#edition-status").textContent = `${itemId} 内容已定位`;
+}
+
 async function loadIssue(date, dates, options = {}) {
-  const { historyMethod = null, focusAfterLoad = false } = options;
+  const { historyMethod = null, focusAfterLoad = false, focusHash = false } = options;
   closeSourcePanel();
   window.scrollTo({ top: 0, behavior: "auto" });
   renderStatus("正在加载日报…");
@@ -329,7 +382,8 @@ async function loadIssue(date, dates, options = {}) {
     if (historyMethod) updateDateUrl(date, historyMethod);
     document.title = `${date} · ${currentSiteName}`;
     document.querySelector("#edition-status").textContent = `${date} 内容已加载`;
-    if (focusAfterLoad) focusLoadedIssue();
+    if (focusHash) focusRequestedItem();
+    else if (focusAfterLoad) focusLoadedIssue();
   } catch (error) {
     console.error(error);
     renderStatus("这期日报暂时无法加载");
@@ -399,10 +453,11 @@ async function start() {
       renderStatus("这期日报不存在");
       return;
     }
-    loadIssue(selected, index.dates, { focusAfterLoad: true });
+    loadIssue(selected, index.dates, { focusAfterLoad: true, focusHash: true });
   });
+  window.addEventListener("hashchange", focusRequestedItem);
 
-  await loadIssue(date, index.dates);
+  await loadIssue(date, index.dates, { focusHash: true });
 }
 
 if (typeof document !== "undefined") start();

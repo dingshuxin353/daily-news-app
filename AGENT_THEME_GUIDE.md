@@ -1,9 +1,9 @@
 # DailyNews AI Agent 主题使用指南
 
-指南版本：1.2
-适用产品版本：0.10.0
+指南版本：1.3
+适用产品版本：0.12.1
 Theme Schema：1
-更新日期：2026-08-23
+更新日期：2026-08-24
 
 这份指南告诉外部 AI Agent 如何查看、切换、新增和修改 DailyNews 主题。它只规定 Agent 需要读取的信息、需要生成的文件和主题边界，不要求 Agent 运行主题处理命令或操作浏览器。
 
@@ -20,15 +20,31 @@ Theme Schema：1
 | 新增一个主题 | 使用新 ID 生成 Candidate | 由后续流程创建 |
 | 修改已有主题 | 使用原 ID 生成 Candidate | 由后续流程增加 |
 | 回到上一次选择 | 确定上一次主题 ID 与 revision | 否 |
+| 参考图片调整风格 | 先拆解视觉意图并判断现有主题能力 | 视是否需要 Candidate 而定 |
 
 切换不是覆盖：所有正式主题都保存在 `themes/definitions/<theme-id>/<revision>.json`，旧主题和旧 revision 不会因为切换而删除。
+
+### 从用户语言解析主题意图
+
+Agent 能读取主题库时，应自己解析主题 ID 和 revision，不要求普通用户提供技术值：
+
+| 用户表达 | 目标行为 |
+| --- | --- |
+| “跟首页一样”“恢复跟随首页” | 目标 Publication 显式切换为 `inherit` |
+| “这份日报单独用深色科技” | 从主题库选择合适的深色主题，并把目标 Publication 切换为 `override` |
+| “首页换成简洁风格” | 选择匹配的已有主题并切换 Home；所有 `inherit` Publications 随之变化 |
+| “换回上一个主题” | 只对用户明确的 Home 或 Publication 执行受控回滚 |
+| “做一个新的蓝色财经风格” | 生成 Theme Candidate，后续先预览，再由用户确认是否激活 |
+
+如果同一句话无法唯一判断目标是 Home 还是某份日报，先用人类名称确认目标。Agent 可以在确认摘要中补充解析出的主题 ID 和 revision，但不能反过来要求用户先选择它们。
 
 ## 2. 开始前读取当前状态
 
 开始前只读查看：
 
 - 用户或宿主明确给出的唯一目标 Publication ID。
-- `publications/<publication-id>/config/theme.json`：目标日报当前选择的主题 ID 和 revision。
+- `config/home.json`：Home 当前固定的主题 ID 和 revision。
+- `publications/<publication-id>/config/theme.json`：目标日报是继承 Home，还是独立覆盖固定主题。
 - `themes/presets/*.json`：Agent 创建 Candidate 时可继承的官方 Preset。
 - `themes/definitions/<theme-id>/<revision>.json`：已保存主题的只读定义。
 - `themes/candidates/<theme-id>.json`：尚在编辑的候选，如果存在。
@@ -37,7 +53,30 @@ Theme Schema：1
 
 如果 Agent 所在环境支持项目命令，可以使用 `npm run list-themes -- --publication <publication-id>` 辅助读取主题库；这不是完成任务的必要条件。
 
-## 3. 权限边界
+## 3. 参考图处理与源码边界
+
+用户提供参考图、截图、设计稿、配色样例或“照这个风格做”时，只代表视觉意图，不代表允许修改源码。Agent 按以下顺序处理：
+
+1. 读取目标 Home 或唯一 Publication 当前的主题选择和继承关系。
+2. 把参考特征拆解为 Theme Schema 已支持的颜色、字体预设、字号尺度、密度、分隔方式、纸张质感、动效和内置 recipes。
+3. 先判断现有主题能否满足；不能满足时才创建或修改 Theme Candidate。
+4. Candidate 校验后先形成预览，不直接激活。
+5. 向用户说明已经实现的参考特征，以及受固定产品骨架限制、无法通过主题改变的部分。
+6. 只有用户确认预览后，宿主才可通过受控流程激活主题。
+
+参考图不能授权主题 Agent 修改：
+
+- `src/` 中的页面实现。
+- `styles.css`、`index.html`、`home.html`、`todo.html` 或其他共享页面与公共样式。
+- 页面 DOM、导航、组件结构、四格布局、内容顺序或 Todo 页面结构。
+- Validator、Writer、Compiler、构建脚本、Schema、测试或 CI。
+- 正式主题目录、Active Manifest 或编译产物。
+
+如果用户要求的布局、组件或交互超出上述主题能力，停止源码写入。先用普通人语言说明可能影响哪些页面、其他主题和手机端，以及为什么可能影响以后更新 DailyNews 新版本和使用新功能；提供不改源码的接近版本，并建议把完整效果作为功能需求提交给项目开发者评估。只有用户听完影响并明确确认修改源码后，才能结束主题配置流程，转入 [`CONTRIBUTING.md`](./CONTRIBUTING.md) 规定的开发流程。
+
+“确认激活这个主题”只授权受控激活已校验和预览的主题；“确认修改源码”只授权进入已经说明范围内的最小源码开发。任何一种确认都不授权另一种操作，也不授权推送、PR、合并、Tag、Release、部署或数据迁移。
+
+## 4. 权限边界
 
 Agent 可以直接写入的主题文件只有：
 
@@ -58,9 +97,9 @@ Agent 不得直接写入或覆盖：
 
 切换和回滚都会改变正式页面。只有用户在当前任务中明确要求相应操作时，Agent 才能提交对应目标或调用受控入口。
 
-## 4. 查看与表达切换目标
+## 5. 查看与表达切换目标
 
-当前主题来自目标 Publication 的 `config/theme.json`，可用主题来自全局 `themes/definitions/`。Agent 应先确认目标 ID 和 revision 已存在。
+Effective Theme 来自 Home 固定主题和目标 Publication 的 `inherit` / `override` 选择，可用主题来自全局 `themes/definitions/`。Agent 应先确认唯一目标是 Home 还是某个 Publication，并确认目标 ID 和 revision 已存在。
 
 如果所在环境支持项目命令，可以使用：
 
@@ -80,6 +119,13 @@ npm run switch-theme -- --publication <publication-id> --theme <theme-id> --conf
 npm run switch-theme -- --publication <publication-id> --theme <theme-id> --revision <revision> --confirm <theme-id>
 ```
 
+显式恢复 Publication 继承，或切换 Home 固定主题：
+
+```bash
+npm run inherit-theme -- --publication <publication-id> --confirm
+npm run switch-theme -- --home --theme <theme-id> --revision <revision> --confirm <theme-id>
+```
+
 命令返回：
 
 - `switched`：配置和 Active Theme 已一起切换。
@@ -88,7 +134,7 @@ npm run switch-theme -- --publication <publication-id> --theme <theme-id> --revi
 
 不支持项目命令时，Agent 向宿主环境交付目标主题 ID 和 revision 即可。切换不需要 Candidate，也不创建新 revision。
 
-## 5. 新增或修改主题
+## 6. 新增或修改主题
 
 新增主题时使用新的稳定 ID；修改主题时沿用原主题 ID。两种情况都只写一个 Candidate：
 
@@ -154,7 +200,7 @@ themes/candidates/<theme-id>.json
 - `important`：`ruled`、`minimal`、`contrast`
 - `normal`：`compact`、`minimal`、`accent`
 
-## 6. Agent 与宿主环境的分工
+## 7. Agent 与宿主环境的分工
 
 Agent 新增或修改主题时，只负责把完整 Candidate 保存到 `themes/candidates/<theme-id>.json`，并向用户或宿主环境报告：
 
@@ -167,7 +213,7 @@ Candidate 的后续处理、正式 revision 写入和当前主题更新由宿主
 
 这种分工不依赖 Agent 是否具备终端、浏览器或本地服务能力。
 
-## 7. 禁止内容
+## 8. 禁止内容
 
 Candidate 不得包含 HTML、CSS、CSS 选择器、JavaScript、`style`、`@import`、`url()`、远程资源、字体地址、DOM、网格坐标、总栏数、模块所占栏数、断点、隐藏内容规则、负间距、绝对定位、`z-index`、revision、激活或回滚指令。
 
@@ -178,8 +224,9 @@ Candidate 不得包含 HTML、CSS、CSS 选择器、JavaScript、`style`、`@imp
 - 大、中、小模块映射
 - Layout Compiler 输出
 - `publications/*/data/issues/`、`publications/*/data/compiled/` 或 `publications/*/data/index.json`
+- 页面源码、共享样式、组件结构、构建逻辑、Schema、测试或 CI
 
-## 8. Agent 完成条件
+## 9. Agent 完成条件
 
 按任务类型判断 Agent 是否完成：
 

@@ -1,8 +1,8 @@
 # DailyNews AI Agent 内容使用指南
 
-指南版本：1.2
-适用产品版本：0.10.0
-更新日期：2026-08-23
+指南版本：1.3
+适用产品版本：0.12.1
+更新日期：2026-08-24
 
 这份指南告诉外部 AI Agent 如何为 DailyNews 搜集、整理和生成一期日报候选。它只规定 Agent 需要读取的信息、需要生成的文件和内容边界，不要求 Agent 运行项目命令或操作浏览器。
 
@@ -22,6 +22,17 @@
 不能因为注册表存在默认 Publication，就替一个目标不明确的写入任务自行选择目标。
 
 站点配置字段见 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md)。
+
+### 首次生成日报时的最少信息
+
+如果任务来自 [`AGENT_USER_GUIDE.md`](./AGENT_USER_GUIDE.md) 的首次使用流程，先由用户语言确认：
+
+- 要为哪一份人类可读名称的日报生成内容；Agent 再从 Registry 解析唯一目标 ID。
+- 关注方向、用户指定的内容源或允许 Agent 搜集的来源范围。
+- 目标日期和采集时间窗口；用户未另行指定时可以推荐今天和一个明确窗口。
+- 本次采用重点新闻配图、尽量配图、纯文字，还是只给指定新闻配图。
+
+能从站点配置、已有正式日报或当前日期读取的信息不要重复询问。用户没有要求 Logo、颜色、主题或版面参数时，内容任务不处理这些设置。
 
 ## 1. 完成一次日报候选
 
@@ -61,7 +72,7 @@ Agent 不得直接修改：
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "date": "2026-08-20",
   "generatedAt": "2026-08-20T08:00:00+08:00",
   "coverage": {
@@ -78,6 +89,14 @@ Agent 不得直接修改：
       "editorial": {
         "priority": "important",
         "selectionReason": "说明内容价值及当前优先级的具体依据。"
+      },
+      "image": {
+        "src": "https://cdn.example.com/example.jpg",
+        "alt": "研究人员在多屏工作站前检查任务结果",
+        "width": 1600,
+        "height": 1067,
+        "credit": "Example News",
+        "sourceUrl": "https://example.com/original-image"
       },
       "sources": [
         {
@@ -103,7 +122,7 @@ Agent 不得直接修改：
 
 | 字段 | 必填 | 规则 |
 | --- | --- | --- |
-| `schemaVersion` | 是 | 固定为整数 `1` |
+| `schemaVersion` | 是 | 新候选固定为整数 `2`；历史 Schema `1` 只用于无图兼容读取 |
 | `date` | 是 | `YYYY-MM-DD`，按 `Asia/Shanghai` 归属 |
 | `generatedAt` | 是 | 本轮内容生成时间，带时区的 ISO 8601 |
 | `coverage.start` | 是 | 采集窗口开始时间，带时区的 ISO 8601 |
@@ -124,6 +143,7 @@ Agent 不得直接修改：
 | `editorial.priority` | 是 | `lead`、`important` 或 `normal` |
 | `editorial.selectionReason` | 是 | 具体说明内容价值和优先级依据 |
 | `sources` | 是 | 至少一个来源 |
+| `image` | 否 | 最多一张严格图片对象；没有可靠图片时省略 |
 
 标题建议上限：
 
@@ -142,6 +162,27 @@ Agent 不得直接修改：
 - `publishedAt` 是来源发布时间，不能用发现时间替代。
 - 聚合、RSS、翻译或发现平台写入 `via`，原始内容链接仍写入 `url`。
 - 同一事件的多个来源合并为一条内容，并按可信度和事实贡献排序。
+
+### 可选图片
+
+- `src` 只能是合法 `https://` 地址，或项目 `public/` 内真实存在且以 `/` 开头的本地资源。
+- `alt` 必须非空并描述图片内容，最多 160 个 Unicode 字符，不能重复堆砌新闻标题。
+- `width`、`height` 必须是图片固有尺寸，均为 `1–10000` 的整数。
+- `credit` 必须是非空署名或来源说明，最多 120 个 Unicode 字符。
+- `sourceUrl` 可选；提供时必须是图片原始出处的 HTTP(S) 地址。
+- Agent 不下载、缓存或探测远程图片，不把可访问 URL 当成版权授权。无法确认图片、尺寸、署名或使用权时省略 `image`。
+- `image` 不参与内容匹配、优先级、顺序和版面尺寸决定。
+
+用户的配图表达只映射为本次 Candidate 的编辑要求：
+
+| 用户表达 | Candidate 行为 |
+| --- | --- |
+| 重点新闻配图 | 优先为 `lead` 和 `important` 中图片信息可靠的内容添加 `image` |
+| 尽量配图 | 每条适合且图片信息完整的内容都可以添加 `image` |
+| 纯文字 | 所有 Item 省略 `image`，不写 `null`、空对象或占位图 |
+| 只给指定新闻配图 | 只处理用户指定内容，其余 Item 省略 `image` |
+
+该选择不写入站点配置，也不会自动作用于以后日报。用户要求长期保持时，说明 DailyNews `v0.12.1` 没有产品级 `imagePolicy`；只有其 Agent 软件支持固定任务模板且用户明确要求时，才在该 Agent 的工作流中保存偏好，不能在本仓库发明字段或配置文件。
 
 ## 7. 选择、去重和顺序
 
@@ -170,7 +211,7 @@ Agent 不得直接修改：
 - 行号、栏位、模块所占栏数、容量和坐标
 - HTML、CSS、组件或动画参数
 - 外部平台的 `score`、`selected`
-- 图片字段
+- 第二张图片、相册、裁切坐标、焦点、滤镜、叠字、水印和图片布局字段
 
 `revision`、合并、删除和布局都由代码决定，不由 Agent 数据决定。
 
@@ -182,6 +223,8 @@ Agent 不得直接修改：
 - `replace` 必须由用户或受信任自动化显式指定，候选不能自我授权。
 - 先按 ID 匹配，再按任一来源 URL 匹配。
 - 匹配项复用正式 ID，内容使用候选值，来源按候选顺序并入旧来源。
+- Schema `2` 匹配项提供 `image` 时替换旧图片，省略时移除旧图片；未匹配而保留的旧条目保留自己的图片。
+- Schema `1` Candidate 不能更新 Schema `2` Issue；Schema `2` 可以在有效更新时升级历史 Schema `1` Issue。
 - 新候选加入；`update` 中未匹配旧条目继续保留。
 - 最终顺序为候选处理结果在前，未匹配旧条目按原相对顺序在后。
 - 匹配歧义、coverage 变化和未授权历史日期整次拒绝。

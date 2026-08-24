@@ -4,9 +4,11 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCandidateHost } from "./lib/candidate-host.js";
+import { buildLocalSite } from "./lib/site-builder.js";
+import { startTodoHost } from "./lib/todo-host.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const staticRoot = path.join(projectRoot, "dist");
+const staticRoot = path.join(projectRoot, "local-dist");
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -23,7 +25,15 @@ function resolveRequestPath(urlPath) {
   return decoded.endsWith("/") ? path.join(requested, "index.html") : requested;
 }
 
-await startCandidateHost(projectRoot);
+let rebuildQueue = Promise.resolve();
+const rebuild = () => {
+  rebuildQueue = rebuildQueue.then(() => buildLocalSite(projectRoot));
+  return rebuildQueue;
+};
+
+await rebuild();
+await startCandidateHost(projectRoot, { rebuild });
+await startTodoHost(projectRoot, { rebuild });
 
 createServer(async (request, response) => {
   let filePath;

@@ -1,4 +1,5 @@
 dist/
+local-dist/
 node_modules/
 .DS_Store
 data/.locks/
@@ -18,3 +19,7 @@ themes/candidates/*.json
 themes/.theme.lock
 themes/previews/*.css
 themes/previews/*.json
+todo/data/state.json
+todo/data/candidates/*.json
+todo/data/submissions/*.json
+todo/data/.locks/
