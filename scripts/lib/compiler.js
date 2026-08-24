@@ -29,7 +29,7 @@ function textLength(value) {
   return [...value].length;
 }
 
-function copyCompiledItem(item) {
+function copyCompiledItem(item, includeImage = true) {
   const compiled = {
     id: item.id,
     title: item.title,
@@ -42,6 +42,7 @@ function copyCompiledItem(item) {
     })),
   };
   if (item.category !== undefined) compiled.category = item.category;
+  if (includeImage && item.image !== undefined) compiled.image = structuredClone(item.image);
   return compiled;
 }
 
@@ -100,16 +101,16 @@ export function normalizePriorities(issue, priorityLimits = DEFAULT_PRIORITY_LIM
     if (reasonLength > 120) {
       warnings.push({ type: "length", date: issue.date, itemId: item.id, field: "editorial.selectionReason", length: reasonLength, limit: 120 });
     }
-    if (item.image !== undefined) {
+    if (issue.schemaVersion === 1 && item.image !== undefined) {
       warnings.push({ type: "image", date: issue.date, itemId: item.id });
     }
 
-    return { itemId: item.id, resolvedPriority };
+    return { itemId: item.id, resolvedPriority, hasImage: issue.schemaVersion === 2 && item.image !== undefined };
   });
   return { resolvedPriorities, warnings };
 }
 
-export function compileRows(resolvedPriorities, date = "unknown") {
+export function compileRows(resolvedPriorities, date = "unknown", schemaVersion = 1) {
   const rows = [];
   const warnings = [];
   let current = { usedCapacity: 0, modules: [] };
@@ -132,7 +133,18 @@ export function compileRows(resolvedPriorities, date = "unknown") {
       current = { usedCapacity: 0, modules: [] };
     }
 
-    current.modules.push({ itemId: item.itemId, resolvedPriority: item.resolvedPriority, size: module.size, span: module.span });
+    const mediaVariant = item.hasImage && module.size === "large"
+      ? "lead-split"
+      : item.hasImage && module.size === "medium"
+        ? "medium-split"
+        : "none";
+    current.modules.push({
+      itemId: item.itemId,
+      resolvedPriority: item.resolvedPriority,
+      size: module.size,
+      span: module.span,
+      ...(schemaVersion === 2 ? { mediaVariant } : {}),
+    });
     current.usedCapacity += module.span;
   }
 
@@ -146,8 +158,8 @@ export function validateCompiled(
   filePath = sourceIssue.date,
   priorityLimits = DEFAULT_PRIORITY_LIMITS,
 ) {
-  if (compiled.schemaVersion !== 1) {
-    throw new CompilationError(filePath, "schemaVersion", "必须等于 1");
+  if (compiled.schemaVersion !== sourceIssue.schemaVersion) {
+    throw new CompilationError(filePath, "schemaVersion", "必须与正式日报一致");
   }
   if (
     compiled.date !== sourceIssue.date
@@ -191,6 +203,24 @@ export function validateCompiled(
       ) {
         throw new CompilationError(filePath, `layout.rows[${rowIndex}].modules.${module.itemId}`, "size 与 span 映射无效");
       }
+      const expectedMediaVariant = sourceIssue.schemaVersion === 2 && item.image
+        ? expected.size === "large"
+          ? "lead-split"
+          : expected.size === "medium"
+            ? "medium-split"
+            : "none"
+        : "none";
+      if (
+        sourceIssue.schemaVersion === 2
+          ? module.mediaVariant !== expectedMediaVariant
+          : module.mediaVariant !== undefined
+      ) {
+        throw new CompilationError(
+          filePath,
+          `layout.rows[${rowIndex}].modules.${module.itemId}.mediaVariant`,
+          "与模块尺寸和图片状态不一致",
+        );
+      }
       layoutIds.push(module.itemId);
     }
   }
@@ -204,7 +234,7 @@ export function validateCompiled(
 
   for (const sourceItem of sourceIssue.items) {
     const item = compiledItems.get(sourceItem.id);
-    if (JSON.stringify(item) !== JSON.stringify(copyCompiledItem(sourceItem))) {
+    if (JSON.stringify(item) !== JSON.stringify(copyCompiledItem(sourceItem, sourceIssue.schemaVersion === 2))) {
       throw new CompilationError(filePath, `items.${sourceItem.id}`, "内容与正式日报不一致");
     }
   }
@@ -216,14 +246,16 @@ export function compileIssue(
   priorityLimits = DEFAULT_PRIORITY_LIMITS,
 ) {
   const normalized = normalizePriorities(issue, priorityLimits);
-  const layout = compileRows(normalized.resolvedPriorities, issue.date);
+  const layout = compileRows(normalized.resolvedPriorities, issue.date, issue.schemaVersion);
   const compiled = {
     schemaVersion: issue.schemaVersion,
     date: issue.date,
     generatedAt: issue.generatedAt,
     coverage: { ...issue.coverage },
     revision: issue.revision,
-    items: issue.items.map(copyCompiledItem),
+    items: issue.items.map((item) => {
+      return copyCompiledItem(item, issue.schemaVersion === 2);
+    }),
     layout: { rows: layout.rows },
   };
   validateCompiled(issue, compiled, filePath, priorityLimits);
