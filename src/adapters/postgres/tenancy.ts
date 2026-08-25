@@ -167,13 +167,13 @@ function createPublicationContext(tenant: TenantContext, publicationId: string):
   });
 }
 
-function requireTenantContext(context: TenantContext): void {
+export function requireTenantContext(context: TenantContext): void {
   if (!context || context[tenantContextBrand] !== true) {
     throw new TenancyError("TENANCY_INPUT_INVALID", "resolved tenant context is required");
   }
 }
 
-function requirePublicationContext(context: PublicationContext): void {
+export function requirePublicationContext(context: PublicationContext): void {
   if (!context || context[publicationContextBrand] !== true) {
     throw new TenancyError("TENANCY_INPUT_INVALID", "resolved publication context is required");
   }

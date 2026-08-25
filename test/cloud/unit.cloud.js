@@ -9,6 +9,11 @@ import { createCloudApp } from "../../.cloud-dist/src/cloud/app.js";
 import { CloudConfigError, loadCloudConfig } from "../../.cloud-dist/src/cloud/config.js";
 import { startCloudServer } from "../../.cloud-dist/src/cloud/server.js";
 import { MigrationError, discoverMigrations } from "../../.cloud-dist/src/adapters/postgres/migrations.js";
+import {
+  CanonicalJsonError,
+  canonicalJson,
+  jsonSha256,
+} from "../../.cloud-dist/src/modules/shared/canonical-json.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -241,4 +246,20 @@ test("migration discovery rejects malformed names and duplicate sequences", asyn
       (error) => error instanceof MigrationError && error.code === "MIGRATION_SET_INVALID",
     );
   });
+});
+
+test("canonical JSON hashes equivalent inputs identically and rejects unsupported values", () => {
+  const first = { mode: "update", candidate: { date: "2026-08-25", items: [1, true, null] } };
+  const second = { candidate: { items: [1, true, null], date: "2026-08-25" }, mode: "update" };
+  assert.equal(canonicalJson(first), canonicalJson(second));
+  assert.equal(jsonSha256(first), jsonSha256(second));
+  assert.match(jsonSha256(first), /^[0-9a-f]{64}$/);
+
+  assert.throws(
+    () => canonicalJson({ candidate: undefined }),
+    (error) => error instanceof CanonicalJsonError && error.code === "CANONICAL_JSON_INVALID",
+  );
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.throws(() => canonicalJson(cyclic), CanonicalJsonError);
 });

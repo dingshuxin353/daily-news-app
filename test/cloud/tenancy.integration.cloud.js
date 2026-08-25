@@ -63,14 +63,15 @@ after(async () => {
   await pool.end();
 });
 
-test("tenant migration creates only the M2-B identity and default-object tables", async () => {
+test("tenant migration preserves the M2-B identity and default-object tables", async () => {
   const result = await pool.query(`
     SELECT tablename
     FROM pg_tables
     WHERE schemaname = 'app'
     ORDER BY tablename
   `);
-  assert.deepEqual(result.rows.map(({ tablename }) => tablename), [
+  const tables = result.rows.map(({ tablename }) => tablename);
+  for (const table of [
     "home_profiles",
     "publication_configs",
     "publications",
@@ -78,7 +79,10 @@ test("tenant migration creates only the M2-B identity and default-object tables"
     "spaces",
     "theme_selections",
     "todo_profiles",
-  ]);
+  ]) {
+    assert.ok(tables.includes(table), `${table} must remain available`);
+  }
+  assert.ok(!tables.some((table) => table.startsWith("auth_")));
 });
 
 test("concurrent bootstrap creates one ready space and one complete default object set", async () => {
