@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2-A 研发能力，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2-A / M2-B 研发能力，不代表云端产品已经发布或部署。
 
-本文只说明 Node.js / Hono 进程、PostgreSQL 连接和数据库 Migration。它不包含登录、用户、Space、日报、Todo、主题业务表、JSON API 或 MCP。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration，以及 M2-B 的 Space 身份与默认对象地基。它不包含 Better Auth、登录、Session、日报/Todo/主题领域数据、JSON API 或 MCP。
 
 ## 环境要求
 
@@ -11,7 +11,7 @@
 - 从仓库根目录运行命令。
 - 真实配置由进程环境注入；程序不会自动读取 `.env` 文件。
 
-先参考 [`.env.example`](../.env.example) 准备以下 M2-A 配置：
+先参考 [`.env.example`](../.env.example) 准备以下云端配置：
 
 - `CLOUD_ORIGIN`：显式公开 Origin；非回环地址必须使用 HTTPS。
 - `CLOUD_BASE_PATH`：可留空，或设置为无尾部斜杠的绝对路径。
@@ -38,6 +38,13 @@ npm run start:cloud
 
 Migration Runner 先持有固定的 PostgreSQL 会话级 advisory lock，再在显式 Migration 命令内建立自身的 `app.schema_migrations` 元数据表。编号 SQL 按四位数字前缀顺序逐个执行，每个文件拥有独立事务；表中记录文件名、原始内容的 SHA-256 摘要和执行时间。重复运行会跳过已记录文件；摘要变化、数据库存在本地未知记录、历史不连续或仍有待执行文件时，结构兼容检查失败关闭。项目不提供自动 Down Migration。
 
+当前 Migration 集合只追加以下结构：
+
+- `0001_initialize_app_schema.sql`：初始化 `app` Schema 的版本入口。
+- `0002_create_tenant_foundation.sql`：建立 `spaces`、`home_profiles`、`publications`、`publication_configs`、`theme_selections` 与 `todo_profiles`。它不建立 Better Auth 表或 Daily/Todo/Theme 正文表。
+
+`PostgresTenancyStore` 只接受服务端认证得到的用户 ID 来解析或幂等建立唯一 Space。初始化在单一事务中建立 Home、默认 Publication、Publication Config、Home 主题、Publication 继承选择和默认关闭的 Todo Profile；失败会整体回滚，后续调用可以安全重试。面向业务读取的 Repository 必须绑定已解析的 `TenantContext` 或 `PublicationContext`，不提供按任意 `space_id` 进行全表查询的入口。
+
 云端编译产物位于 `.cloud-dist/`，已被 Git 忽略，不进入现有静态 `dist/` 或 `local-dist/`。现有本地文件版仍使用 `npm start`，行为不变。
 
 健康检查路径相对于 `CLOUD_BASE_PATH`：
@@ -56,3 +63,5 @@ npm run build:cloud
 ```
 
 PostgreSQL 集成测试会删除并重建 `app` Schema，因此 `TEST_DATABASE_URL` 必须指向专用、可丢弃且库名包含 `test` 或 `ci` 的数据库。不得指向认证探针、用户测试库或未来生产数据库。
+
+M2-B 集成测试额外覆盖并发首次初始化、事务故障回滚、部分初始化补偿、两用户隔离、Publication 归属和 Todo Space 隔离。
