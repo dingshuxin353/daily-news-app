@@ -1,43 +1,85 @@
-import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
-import { serve } from "@hono/node-server";
+import { createAdaptorServer, type ServerType } from "@hono/node-server";
 import { checkMigrationCompatibility } from "../adapters/postgres/migrations.js";
 import { createPostgresPool, verifyPostgresConnection } from "../adapters/postgres/pool.js";
 import { createCloudApp } from "./app.js";
-import { loadCloudConfig } from "./config.js";
+import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
 import { defaultMigrationsDirectory } from "./paths.js";
 
-export async function startCloudServer(): Promise<{
+export interface CloudServerRuntime {
+  address: AddressInfo;
   close: () => Promise<void>;
-}> {
-  const config = await loadCloudConfig();
+}
+
+function listen(server: ServerType, host: string, port: number): Promise<AddressInfo> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("cloud server did not expose a TCP address"));
+        return;
+      }
+      resolve(address);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, host);
+  });
+}
+
+function closeServer(server: ServerType): Promise<void> {
+  if (!server.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+export async function startCloudServer(options: {
+  config?: CloudRuntimeConfig;
+  migrationsDirectory?: string;
+} = {}): Promise<CloudServerRuntime> {
+  const config = options.config ?? await loadCloudConfig();
+  const migrationsDirectory = options.migrationsDirectory ?? defaultMigrationsDirectory;
   const pool = createPostgresPool(config.database);
   const app = createCloudApp({
     basePath: config.basePath,
     readinessCheck: async () => {
       await verifyPostgresConnection(pool);
-      await checkMigrationCompatibility(pool, { migrationsDirectory: defaultMigrationsDirectory });
+      await checkMigrationCompatibility(pool, { migrationsDirectory });
     },
   });
-  const server = serve({
+  const server = createAdaptorServer({
     fetch: app.fetch,
     hostname: config.host,
-    port: config.port,
   });
+  let address: AddressInfo;
+  try {
+    address = await listen(server, config.host, config.port);
+  } catch (error) {
+    await closeServer(server).catch(() => {});
+    await pool.end();
+    throw error;
+  }
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
     if (closing) return closing;
     closing = (async () => {
-      if (server.listening) {
-        server.close();
-        await once(server, "close");
-      }
+      await closeServer(server);
       await pool.end();
     })();
     return closing;
   };
-  console.log(`DailyNews cloud runtime listening on ${config.host}:${config.port}`);
-  return { close };
+  console.log(`DailyNews cloud runtime listening on ${address.address}:${address.port}`);
+  return { address, close };
 }
 
 async function main(): Promise<void> {

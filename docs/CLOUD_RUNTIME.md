@@ -23,6 +23,8 @@
 
 不要提交 `.env`、数据库密码、真实主机配置或用户数据。
 
+`PG_SSL_MODE` 是 PostgreSQL TLS 的唯一配置来源。`DATABASE_URL` 不得携带 `sslmode`、`sslcert`、`sslkey`、`sslrootcert` 或其他 `ssl*` 查询参数；发现这类参数时进程会失败关闭，避免连接字符串覆盖显式 TLS 策略。
+
 ## 构建、Migration 与启动
 
 ```bash

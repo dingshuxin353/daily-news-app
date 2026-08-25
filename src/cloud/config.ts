@@ -172,6 +172,10 @@ function parseDatabaseUrl(raw: string | undefined): string {
   if (!url.hostname || !url.pathname || url.pathname === "/") {
     throw new CloudConfigError("DATABASE_URL must name a host and database");
   }
+  const sslParameter = [...url.searchParams.keys()].find((name) => name.toLowerCase().startsWith("ssl"));
+  if (sslParameter) {
+    throw new CloudConfigError("DATABASE_URL must not contain SSL parameters; use PG_SSL_MODE");
+  }
   return raw;
 }
 
