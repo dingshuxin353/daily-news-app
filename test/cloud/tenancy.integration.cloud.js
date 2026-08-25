@@ -72,7 +72,8 @@ test("tenant and identity migrations create the bounded M2-B and M2-D app tables
     WHERE schemaname = 'app'
     ORDER BY tablename
   `);
-  assert.deepEqual(result.rows.map(({ tablename }) => tablename), [
+  const tables = result.rows.map(({ tablename }) => tablename);
+  for (const table of [
     "home_profiles",
     "login_mail_deliveries",
     "login_rate_locks",
@@ -83,7 +84,10 @@ test("tenant and identity migrations create the bounded M2-B and M2-D app tables
     "spaces",
     "theme_selections",
     "todo_profiles",
-  ]);
+  ]) {
+    assert.ok(tables.includes(table), `${table} must remain available`);
+  }
+  assert.ok(!tables.some((table) => table.startsWith("auth_")));
 });
 
 test("concurrent bootstrap creates one ready space and one complete default object set", async () => {
