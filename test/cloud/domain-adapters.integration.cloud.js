@@ -65,6 +65,7 @@ function singleCandidate(date, suffix) {
 }
 
 async function resetAndMigrate() {
+  await pool.query("DROP SCHEMA IF EXISTS auth CASCADE");
   await pool.query("DROP SCHEMA IF EXISTS app CASCADE");
   await runMigrations(pool, { migrationsDirectory });
 }
@@ -151,6 +152,7 @@ async function themeFileFixture() {
 beforeEach(resetAndMigrate);
 
 after(async () => {
+  await pool.query("DROP SCHEMA IF EXISTS auth CASCADE");
   await pool.query("DROP SCHEMA IF EXISTS app CASCADE");
   await pool.end();
   await Promise.all([...temporaryDirectories].map((directory) => rm(directory, { recursive: true, force: true })));

@@ -14,7 +14,8 @@
   },
   "include": [
     "src/cloud/**/*.ts",
-    "src/adapters/postgres/**/*.ts",
-    "src/modules/**/*.ts"
+    "src/adapters/**/*.ts",
+    "src/modules/**/*.ts",
+    "src/web/**/*.ts"
   ]
 }

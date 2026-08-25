@@ -27,7 +27,25 @@ export interface CloudFileConfig {
     publicationsPerSpace: number;
     activeTokensPerUser: number;
     testDailyEmailHardLimit: number;
+    emailCooldownSeconds: number;
+    emailHourlyLimit: number;
+    ipHourlyLimit: number;
   };
+  identity: {
+    otpLength: number;
+    otpExpiresInSeconds: number;
+    otpAllowedAttempts: number;
+    sessionExpiresInDays: number;
+  };
+}
+
+export interface TencentSesRuntimeConfig {
+  secretId: string;
+  secretKey: string;
+  region: string;
+  fromEmailAddress: string;
+  templateId: number;
+  subject: string;
 }
 
 export interface CloudRuntimeConfig {
@@ -41,6 +59,12 @@ export interface CloudRuntimeConfig {
     max: number;
     idleTimeoutMillis: number;
     connectionTimeoutMillis: number;
+  };
+  identity: {
+    authSecret: string;
+    digestSecret: string;
+    mailMode: "fake" | "ses";
+    ses?: TencentSesRuntimeConfig;
   };
   product: CloudFileConfig;
 }
@@ -85,6 +109,7 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
   const theme = requireRecord(defaults.theme, "defaults.theme");
   const priorityLimits = requireRecord(defaults.priorityLimits, "defaults.priorityLimits");
   const limits = requireRecord(root.limits, "limits");
+  const identity = requireRecord(root.identity, "identity");
   const normal = priorityLimits.normal;
   if (normal !== null && (!Number.isInteger(normal) || (normal as number) < 0)) {
     throw new CloudConfigError("defaults.priorityLimits.normal must be null or a non-negative integer");
@@ -112,8 +137,48 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
       publicationsPerSpace: requireInteger(limits.publicationsPerSpace, "limits.publicationsPerSpace", 1, 100),
       activeTokensPerUser: requireInteger(limits.activeTokensPerUser, "limits.activeTokensPerUser", 1, 100),
       testDailyEmailHardLimit: requireInteger(limits.testDailyEmailHardLimit, "limits.testDailyEmailHardLimit", 1, 10000),
+      emailCooldownSeconds: requireInteger(limits.emailCooldownSeconds, "limits.emailCooldownSeconds", 1, 3600),
+      emailHourlyLimit: requireInteger(limits.emailHourlyLimit, "limits.emailHourlyLimit", 1, 1000),
+      ipHourlyLimit: requireInteger(limits.ipHourlyLimit, "limits.ipHourlyLimit", 1, 10000),
+    },
+    identity: {
+      otpLength: requireInteger(identity.otpLength, "identity.otpLength", 6, 6),
+      otpExpiresInSeconds: requireInteger(identity.otpExpiresInSeconds, "identity.otpExpiresInSeconds", 60, 1800),
+      otpAllowedAttempts: requireInteger(identity.otpAllowedAttempts, "identity.otpAllowedAttempts", 1, 10),
+      sessionExpiresInDays: requireInteger(identity.sessionExpiresInDays, "identity.sessionExpiresInDays", 1, 90),
     },
   };
+}
+
+function requireSecret(env: NodeJS.ProcessEnv, name: string): string {
+  const value = requireString(env[name], name);
+  if (value.length < 32) {
+    throw new CloudConfigError(`${name} must contain at least 32 characters`);
+  }
+  return value;
+}
+
+function parseMailConfiguration(env: NodeJS.ProcessEnv): CloudRuntimeConfig["identity"] {
+  const mailMode = requireString(env.MAIL_MODE, "MAIL_MODE");
+  if (mailMode !== "fake" && mailMode !== "ses") {
+    throw new CloudConfigError("MAIL_MODE must be fake or ses");
+  }
+  const identity: CloudRuntimeConfig["identity"] = {
+    authSecret: requireSecret(env, "BETTER_AUTH_SECRET"),
+    digestSecret: requireSecret(env, "IDENTITY_DIGEST_SECRET"),
+    mailMode,
+  };
+  if (mailMode === "ses") {
+    identity.ses = {
+      secretId: requireString(env.TENCENTCLOUD_SECRET_ID, "TENCENTCLOUD_SECRET_ID"),
+      secretKey: requireString(env.TENCENTCLOUD_SECRET_KEY, "TENCENTCLOUD_SECRET_KEY"),
+      region: requireString(env.TENCENT_SES_REGION, "TENCENT_SES_REGION"),
+      fromEmailAddress: requireString(env.TENCENT_SES_FROM_EMAIL, "TENCENT_SES_FROM_EMAIL"),
+      templateId: parseIntegerEnvironment(env, "TENCENT_SES_TEMPLATE_ID", 0, 1, Number.MAX_SAFE_INTEGER),
+      subject: requireString(env.TENCENT_SES_SUBJECT, "TENCENT_SES_SUBJECT"),
+    };
+  }
+  return identity;
 }
 
 function parseIntegerEnvironment(
@@ -217,6 +282,7 @@ export async function loadCloudConfig(options: {
       idleTimeoutMillis: parseIntegerEnvironment(env, "PG_IDLE_TIMEOUT_MS", 30000, 1000, 600000),
       connectionTimeoutMillis: parseIntegerEnvironment(env, "PG_CONNECTION_TIMEOUT_MS", 5000, 100, 60000),
     },
+    identity: parseMailConfiguration(env),
     product: validateCloudFileConfig(parsed),
   };
 }
