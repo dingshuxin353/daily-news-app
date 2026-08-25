@@ -36,6 +36,7 @@ jobs:
 
     env:
       TEST_DATABASE_URL: postgresql://dailynews_ci:dailynews_ci_password@127.0.0.1:5432/dailynews_ci
+      MAIL_MODE: fake
 
     steps:
       - name: Check out repository

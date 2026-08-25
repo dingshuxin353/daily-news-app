@@ -159,7 +159,7 @@ function requireSecret(env: NodeJS.ProcessEnv, name: string): string {
 }
 
 function parseMailConfiguration(env: NodeJS.ProcessEnv): CloudRuntimeConfig["identity"] {
-  const mailMode = env.MAIL_MODE || "fake";
+  const mailMode = requireString(env.MAIL_MODE, "MAIL_MODE");
   if (mailMode !== "fake" && mailMode !== "ses") {
     throw new CloudConfigError("MAIL_MODE must be fake or ses");
   }

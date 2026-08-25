@@ -21,7 +21,7 @@
 - `PG_SSL_MODE`：`disable` 或 `require`。
 - `PG_POOL_MAX`、`PG_IDLE_TIMEOUT_MS`、`PG_CONNECTION_TIMEOUT_MS`：连接池边界。
 - `BETTER_AUTH_SECRET`、`IDENTITY_DIGEST_SECRET`：至少 32 字符的独立随机 Secret。
-- `MAIL_MODE`：本地与 CI 使用 `fake`；腾讯云投递使用 `ses`。
+- `MAIL_MODE`：必须显式配置；本地与 CI 使用 `fake`，腾讯云投递使用 `ses`。缺失或空值时云端配置失败，不会降级到 Fake。
 - `TENCENTCLOUD_SECRET_ID`、`TENCENTCLOUD_SECRET_KEY`、`TENCENT_SES_REGION`、`TENCENT_SES_FROM_EMAIL`、`TENCENT_SES_TEMPLATE_ID`、`TENCENT_SES_SUBJECT`：只在 `ses` 模式需要。
 
 不要提交 `.env`、数据库密码、真实主机配置或用户数据。

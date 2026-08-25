@@ -126,6 +126,7 @@ test("identity configuration fails closed for missing secrets and incomplete SES
         env: {
           CLOUD_ORIGIN: "https://example.com",
           DATABASE_URL: "postgresql://u:p@db:5432/name",
+          MAIL_MODE: "fake",
         },
       }),
       (error) => error instanceof CloudConfigError && /BETTER_AUTH_SECRET/.test(error.message),
@@ -139,6 +140,19 @@ test("identity configuration fails closed for missing secrets and incomplete SES
     }),
     (error) => error instanceof CloudConfigError && /TENCENTCLOUD_SECRET_ID/.test(error.message),
   );
+});
+
+test("identity configuration requires an explicit non-empty mail mode even when secrets are complete", async () => {
+  const baseEnvironment = {
+    CLOUD_ORIGIN: "https://example.com",
+    DATABASE_URL: "postgresql://u:p@db:5432/name",
+  };
+  for (const MAIL_MODE of [undefined, ""]) {
+    await assert.rejects(
+      () => loadWithEnvironment({ ...baseEnvironment, MAIL_MODE }),
+      (error) => error instanceof CloudConfigError && /MAIL_MODE/.test(error.message),
+    );
+  }
 });
 
 test("identity security normalizes accounts, digests identifiers, and trusts only a loopback proxy", () => {

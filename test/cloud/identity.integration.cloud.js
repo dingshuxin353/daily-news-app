@@ -339,6 +339,28 @@ test("Fake mail reader exists only when explicitly injected into a test app", as
   assert.match(await css.text(), /macrostructure: Workbench/);
 });
 
+test("cross-origin first sign-in with a valid OTP is rejected without consuming it or creating identity state", async () => {
+  const harness = createHarness();
+  const email = "login-csrf@example.com";
+  assert.equal((await sendOtp(harness, email)).status, 200);
+  const otp = await latestOtp(harness, email);
+
+  const rejected = await verifyOtp(harness, email, otp, { origin: "https://attacker.example" });
+  assert.equal(rejected.status, 403);
+  assert.deepEqual(await rejected.json(), { error: { code: "request_failed" } });
+  const identityState = await controlPool.query(`
+    SELECT
+      (SELECT count(*)::integer FROM auth."user") AS users,
+      (SELECT count(*)::integer FROM auth."session") AS sessions,
+      (SELECT count(*)::integer FROM auth."verification") AS verifications
+  `);
+  assert.deepEqual(identityState.rows[0], { users: 0, sessions: 0, verifications: 1 });
+
+  const accepted = await verifyOtp(harness, email, otp);
+  assert.equal(accepted.status, 200);
+  assert.ok(sessionCookie(accepted));
+});
+
 test("cross-origin requests and provider failures stop before any successful delivery", async () => {
   const harness = createHarness();
   const crossOrigin = await post(

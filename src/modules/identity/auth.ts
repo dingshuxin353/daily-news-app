@@ -37,6 +37,10 @@ function sanitizeAuthResponse(response: Response): Response {
   return Response.json({ error: { code } }, { status });
 }
 
+function isStateChangingRequest(method: string): boolean {
+  return method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+}
+
 export function createIdentityService(options: {
   config: CloudRuntimeConfig;
   authPool: PostgresPool;
@@ -120,6 +124,9 @@ export function createIdentityService(options: {
   async function handle(request: Request, clientIp: string): Promise<Response> {
     const headers = new Headers(request.headers);
     headers.set("x-dailynews-client-ip", clientIp);
+    if (isStateChangingRequest(request.method) && request.headers.get("origin") !== config.origin) {
+      return Response.json({ error: { code: "request_failed" } }, { status: 403 });
+    }
     if (request.method !== "POST" || new URL(request.url).pathname !== sendOtpPath) {
       return auth.handler(new Request(request, { headers }));
     }
@@ -127,9 +134,6 @@ export function createIdentityService(options: {
     let reservation: LoginDeliveryReservation | undefined;
     let context: DeliveryContext | undefined;
     try {
-      if (request.headers.get("origin") !== config.origin) {
-        throw new IdentityPublicError(403, "request_failed");
-      }
       const body = await request.clone().json() as { email?: unknown; type?: unknown };
       if (body.type !== "sign-in") throw new IdentityPublicError(400, "request_failed");
       const email = normalizeEmail(body.email);
