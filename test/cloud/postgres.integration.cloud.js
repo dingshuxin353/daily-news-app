@@ -67,14 +67,15 @@ test("empty database migrates fully and a repeated run has no side effects", asy
   assert.deepEqual(first.applied, [
     "0001_initialize_app_schema.sql",
     "0002_create_tenant_foundation.sql",
+    "0003_create_domain_storage.sql",
   ]);
-  assert.equal(first.total, 2);
+  assert.equal(first.total, 3);
   assert.deepEqual(second.applied, []);
   const history = await pool.query(`
     SELECT filename, checksum_sha256, executed_at
     FROM app.schema_migrations
   `);
-  assert.equal(history.rowCount, 2);
+  assert.equal(history.rowCount, 3);
   assert.match(history.rows[0].checksum_sha256, /^[0-9a-f]{64}$/);
   assert.ok(history.rows[0].executed_at instanceof Date);
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
