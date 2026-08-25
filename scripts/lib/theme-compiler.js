@@ -4,7 +4,7 @@ import {
   contrastRatio,
   relativeLuminance,
   THEME_COMPILER_VERSION,
-} from "./theme-validation.js";
+} from "./domain/theme.js";
 
 const FONT_STACKS = Object.freeze({
   "serif-cn": 'ui-serif, "Songti SC", "Noto Serif CJK SC", STSong, serif',
