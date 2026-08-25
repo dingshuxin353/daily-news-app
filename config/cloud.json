@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "spaceName": "我的日报",
+    "timeZone": "Asia/Shanghai",
+    "publicationId": "daily-news",
+    "publicationName": "DailyNews",
+    "theme": {
+      "id": "newspaper-default",
+      "revision": 1
+    },
+    "todoEnabled": false,
+    "priorityLimits": {
+      "lead": 1,
+      "important": 2,
+      "normal": null
+    }
+  },
+  "limits": {
+    "publicationsPerSpace": 8,
+    "activeTokensPerUser": 10,
+    "testDailyEmailHardLimit": 100
+  }
+}
