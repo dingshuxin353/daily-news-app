@@ -1,6 +1,11 @@
 dist/
 local-dist/
+.cloud-dist/
+*.tsbuildinfo
 node_modules/
+.env
+.env.*
+!.env.example
 .DS_Store
 data/.locks/
 data/candidates/*.json

@@ -56,6 +56,8 @@ git diff --check
 
 如果改动引入了更具体的验证脚本，也要运行并在 Pull Request 中记录。不得通过删除、跳过或弱化既有测试来获得绿灯，除非改动明确改变了对应契约。
 
+云端运行与 PostgreSQL Migration 的独立命令、配置和测试数据库隔离规则见 [`docs/CLOUD_RUNTIME.md`](./docs/CLOUD_RUNTIME.md)。
+
 ## Pull Request
 
 - 所有改动通过 Pull Request 合入，禁止直接推送 `main` 和当前 `version/*`。
