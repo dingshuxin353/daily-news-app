@@ -1,0 +1,12 @@
+{
+  "date": "2026-08-25",
+  "framework": "Hono plus server-rendered HTML and vanilla JavaScript",
+  "fontStack": "system serif display plus system sans body",
+  "palette": "warm paper, dark ink, sparse ochre accent",
+  "motion": "static Newsprint with functional state feedback only",
+  "spacing": "4pt scale",
+  "preservedSources": [
+    "docs/design.md",
+    "styles.css"
+  ]
+}

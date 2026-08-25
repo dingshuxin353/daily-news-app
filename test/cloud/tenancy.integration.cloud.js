@@ -32,6 +32,7 @@ const pool = new Pool({ connectionString, max: 20, connectionTimeoutMillis: 5000
 const store = new PostgresTenancyStore(pool);
 
 async function resetAndMigrate() {
+  await pool.query("DROP SCHEMA IF EXISTS auth CASCADE");
   await pool.query("DROP SCHEMA IF EXISTS app CASCADE");
   await runMigrations(pool, { migrationsDirectory: new URL("../../db/migrations", import.meta.url).pathname });
 }
@@ -59,11 +60,12 @@ async function addPublication(spaceId, publicationId, displayName, timeZone = "U
 beforeEach(resetAndMigrate);
 
 after(async () => {
+  await pool.query("DROP SCHEMA IF EXISTS auth CASCADE");
   await pool.query("DROP SCHEMA IF EXISTS app CASCADE");
   await pool.end();
 });
 
-test("tenant migration creates only the M2-B identity and default-object tables", async () => {
+test("tenant and identity migrations create the bounded M2-B and M2-D app tables", async () => {
   const result = await pool.query(`
     SELECT tablename
     FROM pg_tables
@@ -72,6 +74,9 @@ test("tenant migration creates only the M2-B identity and default-object tables"
   `);
   assert.deepEqual(result.rows.map(({ tablename }) => tablename), [
     "home_profiles",
+    "login_mail_deliveries",
+    "login_rate_locks",
+    "login_send_attempts",
     "publication_configs",
     "publications",
     "schema_migrations",

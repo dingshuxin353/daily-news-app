@@ -2,7 +2,13 @@ import type { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 import { createAdaptorServer, type ServerType } from "@hono/node-server";
 import { checkMigrationCompatibility } from "../adapters/postgres/migrations.js";
-import { createPostgresPool, verifyPostgresConnection } from "../adapters/postgres/pool.js";
+import {
+  createAuthPostgresPool,
+  createPostgresPool,
+  verifyPostgresConnection,
+} from "../adapters/postgres/pool.js";
+import { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
+import { createIdentityService } from "../modules/identity/auth.js";
 import { createCloudApp } from "./app.js";
 import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
 import { defaultMigrationsDirectory } from "./paths.js";
@@ -50,13 +56,24 @@ export async function startCloudServer(options: {
   const config = options.config ?? await loadCloudConfig();
   const migrationsDirectory = options.migrationsDirectory ?? defaultMigrationsDirectory;
   const pool = createPostgresPool(config.database);
-  const app = createCloudApp({
-    basePath: config.basePath,
-    readinessCheck: async () => {
-      await verifyPostgresConnection(pool);
-      await checkMigrationCompatibility(pool, { migrationsDirectory });
-    },
-  });
+  const authPool = createAuthPostgresPool(config.database);
+  let app;
+  try {
+    const identity = createIdentityService({ config, authPool, appPool: pool });
+    app = createCloudApp({
+      basePath: config.basePath,
+      identity,
+      tenancy: new PostgresTenancyStore(pool),
+      defaults: config.product.defaults,
+      readinessCheck: async () => {
+        await verifyPostgresConnection(pool);
+        await checkMigrationCompatibility(pool, { migrationsDirectory });
+      },
+    });
+  } catch (error) {
+    await Promise.allSettled([pool.end(), authPool.end()]);
+    throw error;
+  }
   const server = createAdaptorServer({
     fetch: app.fetch,
     hostname: config.host,
@@ -66,7 +83,7 @@ export async function startCloudServer(options: {
     address = await listen(server, config.host, config.port);
   } catch (error) {
     await closeServer(server).catch(() => {});
-    await pool.end();
+    await Promise.allSettled([pool.end(), authPool.end()]);
     throw error;
   }
   let closing: Promise<void> | undefined;
@@ -74,7 +91,7 @@ export async function startCloudServer(options: {
     if (closing) return closing;
     closing = (async () => {
       await closeServer(server);
-      await pool.end();
+      await Promise.all([pool.end(), authPool.end()]);
     })();
     return closing;
   };

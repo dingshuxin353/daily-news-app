@@ -19,6 +19,15 @@
   "limits": {
     "publicationsPerSpace": 8,
     "activeTokensPerUser": 10,
-    "testDailyEmailHardLimit": 100
+    "testDailyEmailHardLimit": 100,
+    "emailCooldownSeconds": 60,
+    "emailHourlyLimit": 5,
+    "ipHourlyLimit": 20
+  },
+  "identity": {
+    "otpLength": 6,
+    "otpExpiresInSeconds": 300,
+    "otpAllowedAttempts": 3,
+    "sessionExpiresInDays": 30
   }
 }

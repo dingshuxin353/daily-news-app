@@ -1,0 +1,41 @@
+/* Hallmark · tokens: Newsprint · anchor hue: warm ochre */
+:root {
+  --color-paper: oklch(96% 0.012 80);
+  --color-paper-2: oklch(92% 0.014 80);
+  --color-ink: oklch(18% 0.012 65);
+  --color-ink-soft: oklch(29% 0.01 65);
+  --color-muted: oklch(39% 0.012 72);
+  --color-rule: oklch(64% 0.012 75);
+  --color-accent: oklch(78% 0.13 82);
+  --color-accent-ink: oklch(22% 0.025 70);
+  --color-focus: oklch(43% 0.11 76);
+  --color-error: oklch(47% 0.18 28);
+  --color-success: oklch(42% 0.12 145);
+  --color-transparent: oklch(0% 0 0 / 0);
+  --font-display: "Songti SC", "Noto Serif CJK SC", STSong, serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.25rem;
+  --text-lg: 1.5625rem;
+  --text-xl: 1.9531rem;
+  --text-2xl: 2.4414rem;
+  --text-display: clamp(2.5rem, 7vw, 4.5rem);
+  --rule-hair: 1px;
+  --radius-control: 0.125rem;
+  --dur-micro: 120ms;
+  --dur-short: 180ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}

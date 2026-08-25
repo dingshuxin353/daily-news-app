@@ -9,6 +9,17 @@ import { createCloudApp } from "../../.cloud-dist/src/cloud/app.js";
 import { CloudConfigError, loadCloudConfig } from "../../.cloud-dist/src/cloud/config.js";
 import { startCloudServer } from "../../.cloud-dist/src/cloud/server.js";
 import { MigrationError, discoverMigrations } from "../../.cloud-dist/src/adapters/postgres/migrations.js";
+import {
+  FakeMailAdapter,
+  TencentSesMailAdapter,
+} from "../../.cloud-dist/src/adapters/mail/mail.js";
+import {
+  IdentityPublicError,
+  keyedDigest,
+  normalizeEmail,
+  resolveTrustedClientIp,
+} from "../../.cloud-dist/src/modules/identity/security.js";
+import { renderLoginPage } from "../../.cloud-dist/src/web/cloud-pages.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -25,7 +36,22 @@ const validProductConfig = {
     publicationsPerSpace: 8,
     activeTokensPerUser: 10,
     testDailyEmailHardLimit: 100,
+    emailCooldownSeconds: 60,
+    emailHourlyLimit: 5,
+    ipHourlyLimit: 20,
   },
+  identity: {
+    otpLength: 6,
+    otpExpiresInSeconds: 300,
+    otpAllowedAttempts: 3,
+    sessionExpiresInDays: 30,
+  },
+};
+
+const requiredIdentityEnvironment = {
+  BETTER_AUTH_SECRET: "unit-test-auth-secret-at-least-32-characters",
+  IDENTITY_DIGEST_SECRET: "unit-test-digest-secret-at-least-32-characters",
+  MAIL_MODE: "fake",
 };
 
 async function withTempDirectory(run) {
@@ -41,7 +67,7 @@ async function loadWithEnvironment(env) {
   return withTempDirectory(async (directory) => {
     const configPath = path.join(directory, "cloud.json");
     await writeFile(configPath, JSON.stringify(validProductConfig));
-    return loadCloudConfig({ configPath, env });
+    return loadCloudConfig({ configPath, env: { ...requiredIdentityEnvironment, ...env } });
   });
 }
 
@@ -55,6 +81,7 @@ test("cloud config loads explicit runtime values and loopback defaults", async (
   assert.equal(config.host, "127.0.0.1");
   assert.equal(config.port, 3000);
   assert.equal(config.database.sslMode, "disable");
+  assert.equal(config.identity.mailMode, "fake");
   assert.equal(config.product.defaults.publicationId, "daily-news");
 });
 
@@ -87,6 +114,95 @@ test("cloud config fails closed for missing or unsafe environment", async () => 
     }),
     (error) => error instanceof CloudConfigError && /SSL parameters/.test(error.message),
   );
+});
+
+test("identity configuration fails closed for missing secrets and incomplete SES mode", async () => {
+  await withTempDirectory(async (directory) => {
+    const configPath = path.join(directory, "cloud.json");
+    await writeFile(configPath, JSON.stringify(validProductConfig));
+    await assert.rejects(
+      () => loadCloudConfig({
+        configPath,
+        env: {
+          CLOUD_ORIGIN: "https://example.com",
+          DATABASE_URL: "postgresql://u:p@db:5432/name",
+        },
+      }),
+      (error) => error instanceof CloudConfigError && /BETTER_AUTH_SECRET/.test(error.message),
+    );
+  });
+  await assert.rejects(
+    () => loadWithEnvironment({
+      CLOUD_ORIGIN: "https://example.com",
+      DATABASE_URL: "postgresql://u:p@db:5432/name",
+      MAIL_MODE: "ses",
+    }),
+    (error) => error instanceof CloudConfigError && /TENCENTCLOUD_SECRET_ID/.test(error.message),
+  );
+});
+
+test("identity security normalizes accounts, digests identifiers, and trusts only a loopback proxy", () => {
+  assert.equal(normalizeEmail("  USER@Example.COM "), "user@example.com");
+  assert.throws(
+    () => normalizeEmail("not-an-email"),
+    (error) => error instanceof IdentityPublicError && error.status === 400,
+  );
+  assert.match(keyedDigest("digest-secret", "user@example.com"), /^[0-9a-f]{64}$/);
+  assert.equal(resolveTrustedClientIp({
+    remoteAddress: "127.0.0.1",
+    forwardedAddress: "203.0.113.8",
+  }), "203.0.113.8");
+  assert.equal(resolveTrustedClientIp({
+    remoteAddress: "198.51.100.3",
+    forwardedAddress: "203.0.113.8",
+  }), "198.51.100.3");
+  assert.equal(resolveTrustedClientIp({
+    remoteAddress: "127.0.0.1",
+    forwardedAddress: "203.0.113.8, 198.51.100.3",
+  }), "127.0.0.1");
+});
+
+test("mail adapters keep Fake delivery in memory and require both SES identifiers", async () => {
+  const fake = new FakeMailAdapter();
+  await fake.send({ email: "user@example.com", otp: "123456", expiresInMinutes: 5 });
+  assert.equal(fake.latestFor("user@example.com")?.otp, "123456");
+
+  let captured;
+  const config = {
+    secretId: "placeholder-id",
+    secretKey: "placeholder-key",
+    region: "ap-guangzhou",
+    fromEmailAddress: "sender@example.com",
+    templateId: 123,
+    subject: "DailyNews 登录验证码",
+  };
+  const ses = new TencentSesMailAdapter(config, {
+    async SendEmail(input) {
+      captured = input;
+      return { RequestId: "request-id", MessageId: "message-id" };
+    },
+  });
+  assert.deepEqual(await ses.send({ email: "user@example.com", otp: "654321", expiresInMinutes: 5 }), {
+    requestId: "request-id",
+    messageId: "message-id",
+  });
+  assert.equal(captured.TriggerType, 1);
+  assert.deepEqual(captured.Destination, ["user@example.com"]);
+  assert.equal(JSON.parse(captured.Template.TemplateData).code, "654321");
+
+  const invalidSes = new TencentSesMailAdapter(config, {
+    async SendEmail() {
+      return { RequestId: "request-only" };
+    },
+  });
+  await assert.rejects(() => invalidSes.send({ email: "user@example.com", otp: "000000", expiresInMinutes: 5 }));
+});
+
+test("login page contains no account-discovery copy or persistent email storage", () => {
+  const html = renderLoginPage("/cloud");
+  assert.match(html, /\/cloud\/assets\/cloud-auth\.js/);
+  assert.match(html, /autocomplete="email"/);
+  assert.doesNotMatch(html, /localStorage|sessionStorage|邮箱不存在|已注册/);
 });
 
 test("PG_SSL_MODE is the authoritative pg Pool TLS setting", async () => {
@@ -123,7 +239,11 @@ test("cloud config rejects malformed committed defaults", async () => {
     await assert.rejects(
       () => loadCloudConfig({
         configPath,
-        env: { CLOUD_ORIGIN: "https://example.com", DATABASE_URL: "postgresql://u:p@db:5432/name" },
+        env: {
+          ...requiredIdentityEnvironment,
+          CLOUD_ORIGIN: "https://example.com",
+          DATABASE_URL: "postgresql://u:p@db:5432/name",
+        },
       }),
       (error) => error instanceof CloudConfigError && /schemaVersion/.test(error.message),
     );
@@ -176,6 +296,11 @@ function runtimeConfig(port) {
       max: 1,
       idleTimeoutMillis: 1000,
       connectionTimeoutMillis: 100,
+    },
+    identity: {
+      authSecret: requiredIdentityEnvironment.BETTER_AUTH_SECRET,
+      digestSecret: requiredIdentityEnvironment.IDENTITY_DIGEST_SECRET,
+      mailMode: "fake",
     },
     product: validProductConfig,
   };
