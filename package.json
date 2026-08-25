@@ -22,7 +22,7 @@
     "start:cloud": "node .cloud-dist/src/cloud/server.js",
     "db:migrate": "npm run build:cloud --silent && node .cloud-dist/src/cloud/migrate.js",
     "test:cloud": "npm run build:cloud --silent && node --test test/cloud/unit.cloud.js",
-    "test:cloud:integration": "npm run build:cloud --silent && node --test --test-concurrency=1 test/cloud/postgres.integration.cloud.js"
+    "test:cloud:integration": "npm run build:cloud --silent && node --test --test-concurrency=1 test/cloud/*.integration.cloud.js"
   },
   "engines": {
     "node": ">=22"
