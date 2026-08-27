@@ -114,6 +114,7 @@ function createHarness(options = {}) {
   const mail = new FakeMailAdapter();
   const identity = createIdentityService({ config, appPool, authPool, mailAdapter: mail });
   const tenancy = new PostgresTenancyStore(appPool);
+  const privateReading = new PrivateReadingService(appPool, tenancy, () => new Date("2026-08-27T08:00:00+08:00"));
   const agentAccess = new AgentCredentialService(
     new PostgresAgentAccessRepository(appPool, {
       rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
@@ -141,7 +142,7 @@ function createHarness(options = {}) {
     readinessCheck: async () => {},
     identity,
     tenancy,
-    privateReading: new PrivateReadingService(appPool, tenancy, () => new Date("2026-08-27T08:00:00+08:00")),
+    privateReading,
     defaults: config.product.defaults,
     clientIpResolver: (context) => context.req.header("x-test-client-ip") || "127.0.0.1",
     testMailReader: mail,
@@ -162,6 +163,8 @@ function createHarness(options = {}) {
     authPool,
     mail,
     agentAccess,
+    tenancy,
+    privateReading,
     async close() {
       openHarnesses.delete(harness);
       await Promise.all([appPool.end(), authPool.end()]);
@@ -334,6 +337,11 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
      VALUES ($1, 'daily-news', $2::date, 1, $3::jsonb)`,
     [space.id, issue.date, JSON.stringify(compiled)],
   );
+
+  const tenant = await harness.tenancy.resolveTenantContextForSpace(space.id);
+  const formalReading = await harness.privateReading.readLatestDaily(tenant);
+  assert.equal(formalReading.date, issue.date);
+  assert.equal(formalReading.projection.rows[0].modules[0].item.id, "formal-lead");
 
   const formalHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
   assert.equal(formalHome.status, 200);
