@@ -10,6 +10,11 @@ const ISSUE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 export type DailyStorageErrorCode =
   | "DAILY_INPUT_INVALID"
   | "DAILY_IDEMPOTENCY_CONFLICT"
+  | "DAILY_FUTURE_DATE_NOT_ALLOWED"
+  | "DAILY_EXPLICIT_CONFIRMATION_REQUIRED"
+  | "DAILY_REVISION_CONFLICT"
+  | "DAILY_PUBLICATION_INACTIVE"
+  | "DAILY_INVALID_TOKEN"
   | "DAILY_STORAGE_FAILED";
 
 export class DailyStorageError extends Error {
@@ -59,6 +64,25 @@ interface SubmissionRow extends QueryResultRow {
 
 interface ConfigRow extends QueryResultRow {
   priority_limits: PriorityLimits;
+}
+
+interface RevisionRow extends QueryResultRow {
+  revision: number;
+}
+
+interface PublicationStatusRow extends QueryResultRow {
+  status: "active" | "inactive";
+}
+
+export interface DailyWritePolicy {
+  today: string;
+  activeCredentialId?: string;
+  historicalDate: string | null;
+  replace: {
+    publicationId: string;
+    date: string;
+    expectedRevision: number;
+  } | null;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -218,6 +242,7 @@ export class PostgresDailyStorage {
   constructor(
     private readonly pool: PostgresPool,
     private readonly context: PublicationContext,
+    private readonly retention?: { submissionDays: number },
   ) {
     requirePublicationContext(context);
   }
@@ -228,6 +253,7 @@ export class PostgresDailyStorage {
     mode?: "update" | "replace";
     payloadHash: string;
     candidate: unknown;
+    writePolicy: DailyWritePolicy;
   }, work: (storage: DailyApplicationStorage, priorityLimits: PriorityLimits) => Promise<T>): Promise<T> {
     if (!CLIENT_RUN_ID.test(input.clientRunId)) {
       throw new DailyStorageError("DAILY_INPUT_INVALID", "clientRunId is invalid");
@@ -238,6 +264,39 @@ export class PostgresDailyStorage {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      if (input.writePolicy.activeCredentialId) {
+        await client.query(
+          "SELECT id FROM app.spaces WHERE id = $1 FOR KEY SHARE",
+          [this.context.tenant.spaceId],
+        );
+        const credential = await client.query(
+          `SELECT id FROM app.agent_credentials
+           WHERE id = $1 AND space_id = $2 AND status = 'active' FOR KEY SHARE`,
+          [input.writePolicy.activeCredentialId, this.context.tenant.spaceId],
+        );
+        if (credential.rowCount !== 1) {
+          throw new DailyStorageError("DAILY_INVALID_TOKEN", "Agent credential is no longer active");
+        }
+      }
+      if (this.retention) {
+        await client.query(
+          `DELETE FROM app.daily_submission_runs
+           WHERE space_id = $1 AND publication_id = $2
+             AND processed_at < clock_timestamp() - ($3 * interval '1 day')`,
+          [this.context.tenant.spaceId, this.context.publicationId, this.retention.submissionDays],
+        );
+        await client.query(
+          `DELETE FROM app.daily_candidates c
+           WHERE c.space_id = $1 AND c.publication_id = $2
+             AND c.processed_at < clock_timestamp() - ($3 * interval '1 day')
+             AND NOT EXISTS (
+               SELECT 1 FROM app.daily_submission_runs r
+               WHERE r.space_id = c.space_id AND r.publication_id = c.publication_id
+                 AND r.candidate_id = c.id
+             )`,
+          [this.context.tenant.spaceId, this.context.publicationId, this.retention.submissionDays],
+        );
+      }
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
         `${this.context.tenant.spaceId}:${this.context.publicationId}:${input.clientRunId}`,
       ]);
@@ -257,6 +316,15 @@ export class PostgresDailyStorage {
         await client.query("COMMIT");
         return existing.rows[0].result_payload as T;
       }
+      const publication = await client.query<PublicationStatusRow>(
+        `SELECT status FROM app.publications
+         WHERE space_id = $1 AND publication_id = $2
+         FOR UPDATE`,
+        [this.context.tenant.spaceId, this.context.publicationId],
+      );
+      if (publication.rows[0]?.status !== "active") {
+        throw new DailyStorageError("DAILY_PUBLICATION_INACTIVE", "inactive Publications reject new submissions");
+      }
 
       await client.query(
         `INSERT INTO app.publication_date_locks (space_id, publication_id, issue_date)
@@ -271,6 +339,46 @@ export class PostgresDailyStorage {
          FOR UPDATE`,
         [this.context.tenant.spaceId, this.context.publicationId, date],
       );
+
+      const currentIssue = await client.query<RevisionRow>(
+        `SELECT revision FROM app.issues
+         WHERE space_id = $1 AND publication_id = $2 AND issue_date = $3::date`,
+        [this.context.tenant.spaceId, this.context.publicationId, date],
+      );
+      const today = requireDate(input.writePolicy.today);
+      if (date > today) {
+        throw new DailyStorageError("DAILY_FUTURE_DATE_NOT_ALLOWED", "future Daily dates are not allowed");
+      }
+      if (date < today && input.writePolicy.historicalDate !== date) {
+        throw new DailyStorageError(
+          "DAILY_EXPLICIT_CONFIRMATION_REQUIRED",
+          "historical Daily writes require confirmation",
+        );
+      }
+      if (date === today && input.writePolicy.historicalDate !== null) {
+        throw new DailyStorageError("DAILY_INPUT_INVALID", "historical confirmation does not match the target date");
+      }
+      if (mode === "update" && input.writePolicy.replace !== null) {
+        throw new DailyStorageError("DAILY_INPUT_INVALID", "replace confirmation requires replace mode");
+      }
+      if (mode === "replace") {
+        const confirmation = input.writePolicy.replace;
+        const revision = currentIssue.rows[0]?.revision;
+        if (
+          !confirmation
+          || confirmation.publicationId !== this.context.publicationId
+          || confirmation.date !== date
+          || revision === undefined
+        ) {
+          throw new DailyStorageError(
+            "DAILY_EXPLICIT_CONFIRMATION_REQUIRED",
+            "replace requires confirmation for an existing Daily issue",
+          );
+        }
+        if (confirmation.expectedRevision !== revision) {
+          throw new DailyStorageError("DAILY_REVISION_CONFLICT", "Daily issue revision changed after confirmation");
+        }
+      }
 
       const candidateId = randomUUID();
       await client.query(
@@ -351,6 +459,7 @@ export class PostgresDailyStorage {
 export function createPostgresDailyStorage(
   pool: PostgresPool,
   context: PublicationContext,
+  retention?: { submissionDays: number },
 ): PostgresDailyStorage {
-  return new PostgresDailyStorage(pool, context);
+  return new PostgresDailyStorage(pool, context, retention);
 }

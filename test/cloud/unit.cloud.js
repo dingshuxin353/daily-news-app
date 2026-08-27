@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest } from "node:http";
 import { createAdaptorServer } from "@hono/node-server";
 import os from "node:os";
@@ -42,6 +42,9 @@ import {
   resolveTrustedExternalOrigin,
   verifySettingsCsrfToken,
 } from "../../.cloud-dist/src/web/settings-security.js";
+import { AgentRequestError } from "../../.cloud-dist/src/modules/agent-access/request-policy.js";
+import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
+import { AGENT_API_ROUTE_CONTRACT } from "../../.cloud-dist/src/protocols/http-api/routes.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -76,6 +79,17 @@ const validProductConfig = {
     requestBodyLimitBytes: 16384,
     rateLimitRetentionHours: 24,
     auditRetentionDays: 90,
+    apiRequestBodyLimitBytes: 262144,
+    readTokenHourlyLimit: 600,
+    writeTokenHourlyLimit: 120,
+    readIpHourlyLimit: 1200,
+    writeIpHourlyLimit: 240,
+    dailyItemLimit: 100,
+    todoOperationLimit: 100,
+    concurrentWriteLimitPerSpace: 2,
+    writeLeaseTtlSeconds: 300,
+    credentialLastUsedTouchSeconds: 300,
+    submissionRetentionDays: 90,
   },
 };
 
@@ -476,6 +490,44 @@ test("PAT format locks a 128-bit selector, 256-bit secret, and digest-only verif
   assert.equal(new Set(Array.from({ length: 100 }, () => issueAgentToken(digestSecret).token)).size, 100);
 });
 
+test("active PAT authentication treats the Bearer scheme case-insensitively and rejects provisioning credentials", async () => {
+  const tokenDigestSecret = "active-token-unit-secret-with-at-least-32-characters";
+  const issued = issueAgentToken(tokenDigestSecret);
+  const credential = {
+    id: "00000000-0000-4000-8000-000000000001",
+    spaceId: "00000000-0000-4000-8000-000000000002",
+    name: "Unit Agent",
+    selector: issued.selector,
+    secretDigest: issued.secretDigest,
+    tokenHint: issued.hint,
+    status: "active",
+    rotatedFromId: null,
+    expiresAt: null,
+    createdAt: new Date(),
+    lastUsedAt: null,
+    revokedAt: null,
+  };
+  const service = new AgentCredentialService({
+    async findCredentialBySelector(selector) {
+      return selector === issued.selector ? credential : null;
+    },
+  }, {
+    tokenDigestSecret,
+    pairingCodeDigestSecret: "pairing-unit-secret-with-at-least-32-characters",
+    activeCredentialLimit: 10,
+    pairingCodeTtlSeconds: 600,
+    provisioningTtlSeconds: 600,
+    claimIpHourlyLimit: 20,
+    verifyIpHourlyLimit: 40,
+    apiBaseUrl: "https://example.com/api/v1",
+    mcpUrl: "https://example.com/mcp",
+    pairingVerifyUrl: "https://example.com/agent-pairing/v1/verify",
+  });
+  assert.equal((await service.authenticateActiveToken(`bearer ${issued.token}`)).id, credential.id);
+  credential.status = "provisioning";
+  await assert.rejects(() => service.authenticateActiveToken(`Bearer ${issued.token}`), (error) => error.status === 401);
+});
+
 test("pairing codes are stable per generation, refreshable, normalized, and digest-only", () => {
   const secret = "pairing-code-unit-secret-with-at-least-32-characters";
   const pairingId = "f4dc55ba-5555-4555-8555-555555555555";
@@ -734,4 +786,190 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
   } finally {
     await closeHttpServer(server);
   }
+});
+
+function agentApiTestApp(overrides = {}) {
+  const calls = [];
+  const access = {
+    requestId: "req_test",
+    credentialId: "credential-test",
+    credentialName: "测试 Agent",
+    tenant: { spaceId: "space-test", userId: "user-test" },
+  };
+  const operations = {
+    async listPublications() {
+      return { publications: [{ publicationId: "daily-news", name: "DailyNews", isDefault: true, status: "active", writable: true }] };
+    },
+    async getDailyContext(_access, publicationId, date) {
+      return { publicationId, resolvedDate: date ?? "2026-08-27" };
+    },
+    async submitDailyCandidate(_access, input) {
+      calls.push({ type: "daily", input });
+      return { result: "created", revision: 1 };
+    },
+    async getDailyIssue(_access, publicationId, date) {
+      return { publicationId, date, revision: 1 };
+    },
+    async getTodoContext() {
+      return { enabled: false, settingsUrl: "https://dailynews.test/settings/todo" };
+    },
+    async getTodo() {
+      return { enabled: false, settingsUrl: "https://dailynews.test/settings/todo" };
+    },
+    async getTodoState() {
+      throw new Error("disabled Todo must not be read");
+    },
+    async submitTodoCandidate(_access, input) {
+      calls.push({ type: "todo", input });
+      return { result: "published", revision: 1 };
+    },
+    ...overrides.operations,
+  };
+  const app = createCloudApp({
+    basePath: "/cloud",
+    readinessCheck: async () => {},
+    clientIpResolver: () => "203.0.113.10",
+    agentApi: {
+      requestBodyLimitBytes: overrides.requestBodyLimitBytes ?? 1024,
+      authenticator: {
+        async authenticate(input) {
+          calls.push({ type: "authenticate", input });
+          if (input.authorization !== "Bearer valid-token") {
+            throw new AgentRequestError(401, "invalid_token", "连接密钥无效或已失效。");
+          }
+          return { ...access, requestId: input.requestId };
+        },
+      },
+      operations,
+    },
+  });
+  return { app, calls };
+}
+
+test("JSON API authenticates Bearer PATs, keeps GET bodyless, and returns private structured responses", async () => {
+  const { app, calls } = agentApiTestApp();
+  const response = await app.request("https://dailynews.test/cloud/api/v1/publications", {
+    headers: { authorization: "Bearer valid-token" },
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("x-request-id"), /^req_[0-9a-f]{32}$/);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(response.headers.get("access-control-allow-origin"), null);
+  const body = await response.json();
+  assert.equal(body.publications[0].publicationId, "daily-news");
+  assert.equal(calls[0].input.action, "read");
+  assert.equal(calls[0].input.clientIp, "203.0.113.10");
+});
+
+test("JSON API requires PAT independently from browser Cookie and returns the stable error envelope", async () => {
+  const { app } = agentApiTestApp();
+  const response = await app.request("https://dailynews.test/cloud/api/v1/publications", {
+    headers: { cookie: "better-auth.session_token=browser-only" },
+  });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("www-authenticate"), "Bearer");
+  const body = await response.json();
+  assert.equal(body.error.code, "invalid_token");
+  assert.match(body.error.requestId, /^req_[0-9a-f]{32}$/);
+});
+
+test("JSON API validates POST media type, idempotency key, strict envelopes, and streamed size", async () => {
+  const { app, calls } = agentApiTestApp({ requestBodyLimitBytes: 256 });
+  const url = "https://dailynews.test/cloud/api/v1/publications/daily-news/daily-candidates";
+  const body = JSON.stringify({
+    mode: "update",
+    confirmation: { historicalDate: null, replace: null },
+    candidate: { schemaVersion: 2 },
+  });
+  const success = await app.request(url, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer valid-token",
+      "content-type": "application/json; charset=utf-8",
+      "idempotency-key": "daily-run-0001",
+    },
+    body,
+  });
+  assert.equal(success.status, 200);
+  assert.equal(calls.find(({ type }) => type === "daily").input.clientRunId, "daily-run-0001");
+
+  const missingKey = await app.request(url, {
+    method: "POST",
+    headers: { authorization: "Bearer valid-token", "content-type": "application/json" },
+    body,
+  });
+  assert.equal(missingKey.status, 400);
+  assert.equal((await missingKey.json()).error.code, "invalid_request");
+
+  const unsupported = await app.request(url, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer valid-token",
+      "content-type": "text/plain",
+      "idempotency-key": "daily-run-0002",
+    },
+    body,
+  });
+  assert.equal(unsupported.status, 400);
+
+  const oversized = await app.request(url, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer valid-token",
+      "content-type": "application/json",
+      "idempotency-key": "daily-run-0003",
+    },
+    body: JSON.stringify({ candidate: { text: "x".repeat(1000) } }),
+  });
+  assert.equal(oversized.status, 413);
+  assert.equal((await oversized.json()).error.code, "payload_too_large");
+});
+
+test("JSON API omits retained Todo state when Personal Todo is disabled", async () => {
+  const { app } = agentApiTestApp();
+  const response = await app.request("https://dailynews.test/cloud/api/v1/todo", {
+    headers: { authorization: "Bearer valid-token" },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(Object.keys(await response.json()).sort(), ["enabled", "requestId", "settingsUrl"]);
+});
+
+test("OpenAPI 3.1 stays aligned with the real routes, auth, idempotency, errors, and fake examples", async () => {
+  const specification = JSON.parse(await readFile(path.join(process.cwd(), "docs", "openapi-v1.yaml"), "utf8"));
+  assert.equal(specification.openapi, "3.1.0");
+  assert.deepEqual(specification.security, [{ bearerAuth: [] }]);
+  const documented = Object.entries(specification.paths)
+    .flatMap(([routePath, methods]) => Object.keys(methods).map((method) => ({ method, path: routePath })))
+    .sort((left, right) => `${left.path}:${left.method}`.localeCompare(`${right.path}:${right.method}`));
+  const { app } = agentApiTestApp();
+  const registered = app.routes
+    .filter(({ path: routePath }) => routePath.startsWith("/cloud/api/v1"))
+    .map(({ method, path: routePath }) => ({
+      method: method.toLowerCase(),
+      path: routePath
+        .slice("/cloud/api/v1".length)
+        .replace(/:([A-Za-z][A-Za-z0-9]*)/g, "{$1}"),
+    }))
+    .sort((left, right) => `${left.path}:${left.method}`.localeCompare(`${right.path}:${right.method}`));
+  const implemented = [...AGENT_API_ROUTE_CONTRACT]
+    .sort((left, right) => `${left.path}:${left.method}`.localeCompare(`${right.path}:${right.method}`));
+  assert.deepEqual(documented, implemented);
+  assert.deepEqual(registered, implemented);
+  for (const { path: routePath, method } of AGENT_API_ROUTE_CONTRACT.filter(({ method }) => method === "post")) {
+    const operation = specification.paths[routePath][method];
+    assert.ok(operation.parameters.some(({ $ref }) => $ref === "#/components/parameters/IdempotencyKey"));
+    assert.ok(operation.requestBody.content["application/json"].example);
+    assert.ok(operation.responses["413"]);
+  }
+  const errorCodes = specification.components.schemas.Error.properties.error.properties.code.enum;
+  for (const code of [
+    "invalid_token", "idempotency_conflict", "revision_conflict", "explicit_confirmation_required",
+    "publication_inactive", "todo_disabled", "payload_too_large", "rate_limited", "service_unavailable",
+  ]) assert.ok(errorCodes.includes(code));
+
+  const guide = await readFile(path.join(process.cwd(), "docs", "CLOUD_AGENT_ACCESS.md"), "utf8");
+  assert.match(guide, /daily-candidates/);
+  assert.match(guide, /todo\/candidates/);
+  assert.match(guide, /Idempotency-Key/);
+  assert.doesNotMatch(guide, /dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/);
 });

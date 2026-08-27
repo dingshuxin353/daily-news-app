@@ -4,12 +4,14 @@ import { requireTenantContext } from "./tenancy.js";
 import type { PostgresPool } from "./pool.js";
 
 const CANDIDATE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const CLIENT_RUN_ID = /^[A-Za-z0-9._-]{8,80}$/;
 const EMPTY_STATE = Object.freeze({ schemaVersion: 1, revision: 0, updatedAt: null, items: [] });
 
 export type TodoStorageErrorCode =
   | "TODO_INPUT_INVALID"
   | "TODO_DISABLED"
   | "TODO_IDEMPOTENCY_CONFLICT"
+  | "TODO_INVALID_TOKEN"
   | "TODO_STORAGE_FAILED";
 
 export class TodoStorageError extends Error {
@@ -40,11 +42,17 @@ interface TodoProfileRow extends QueryResultRow {
   enabled: boolean;
 }
 
+interface TodoSnapshotRow extends QueryResultRow {
+  enabled: boolean;
+  payload: unknown | null;
+}
+
 interface JsonRow extends QueryResultRow {
   payload: unknown;
 }
 
 interface SubmissionRow extends QueryResultRow {
+  candidate_id: string;
   payload_hash: string;
   result_payload: unknown;
 }
@@ -59,6 +67,13 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 function requireCandidateId(value: unknown): string {
   if (typeof value !== "string" || !CANDIDATE_ID.test(value)) {
     throw new TodoStorageError("TODO_INPUT_INVALID", "candidateId is invalid");
+  }
+  return value;
+}
+
+function requireClientRunId(value: unknown): string {
+  if (typeof value !== "string" || !CLIENT_RUN_ID.test(value)) {
+    throw new TodoStorageError("TODO_INPUT_INVALID", "clientRunId is invalid");
   }
   return value;
 }
@@ -84,6 +99,7 @@ function createApplicationStorage(
   client: PoolClient,
   context: TenantContext,
   candidateId: string,
+  clientRunId: string,
   payloadHash: string,
   candidate: Record<string, unknown>,
 ): TodoApplicationStorage {
@@ -132,10 +148,11 @@ function createApplicationStorage(
           const submission = requireRecord(changes.submission, "Todo submission result");
           await client.query(
             `INSERT INTO app.todo_submission_runs
-               (space_id, candidate_id, payload_hash, candidate_payload, result_payload)
-             VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+               (space_id, client_run_id, candidate_id, payload_hash, candidate_payload, result_payload)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)`,
             [
               context.spaceId,
+              clientRunId,
               candidateId,
               payloadHash,
               JSON.stringify(candidate),
@@ -154,20 +171,41 @@ export class PostgresTodoStorage {
   constructor(
     private readonly pool: PostgresPool,
     private readonly context: TenantContext,
+    private readonly retention?: { submissionDays: number },
   ) {
     requireTenantContext(context);
   }
 
   async runSubmission<T>(input: {
+    clientRunId: string;
+    activeCredentialId?: string;
     candidateId: string;
     payloadHash: string;
     candidate: unknown;
   }, work: (storage: TodoApplicationStorage) => Promise<T>): Promise<T> {
+    const clientRunId = requireClientRunId(input.clientRunId);
     const candidateId = requireCandidateId(input.candidateId);
     const candidate = requireRecord(input.candidate, "Todo Candidate");
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      if (input.activeCredentialId) {
+        await client.query(
+          "SELECT id FROM app.spaces WHERE id = $1 FOR KEY SHARE",
+          [this.context.spaceId],
+        );
+        const credential = await client.query(
+          `SELECT id FROM app.agent_credentials
+           WHERE id = $1 AND space_id = $2 AND status = 'active' FOR KEY SHARE`,
+          [input.activeCredentialId, this.context.spaceId],
+        );
+        if (credential.rowCount !== 1) {
+          throw new TodoStorageError("TODO_INVALID_TOKEN", "Agent credential is no longer active");
+        }
+      }
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        `${this.context.spaceId}:todo:${clientRunId}`,
+      ]);
       const profile = await client.query<TodoProfileRow>(
         `SELECT enabled
          FROM app.todo_profiles
@@ -178,12 +216,20 @@ export class PostgresTodoStorage {
       if (!profile.rows[0]?.enabled) {
         throw new TodoStorageError("TODO_DISABLED", "Personal Todo is disabled");
       }
+      if (this.retention) {
+        await client.query(
+          `DELETE FROM app.todo_submission_runs
+           WHERE space_id = $1
+             AND processed_at < clock_timestamp() - ($2 * interval '1 day')`,
+          [this.context.spaceId, this.retention.submissionDays],
+        );
+      }
 
       const existing = await client.query<SubmissionRow>(
-        `SELECT payload_hash, result_payload
+        `SELECT candidate_id, payload_hash, result_payload
          FROM app.todo_submission_runs
-         WHERE space_id = $1 AND candidate_id = $2`,
-        [this.context.spaceId, candidateId],
+         WHERE space_id = $1 AND client_run_id = $2`,
+        [this.context.spaceId, clientRunId],
       );
       if (existing.rows[0]) {
         if (existing.rows[0].payload_hash !== input.payloadHash) {
@@ -196,14 +242,23 @@ export class PostgresTodoStorage {
         return existing.rows[0].result_payload as T;
       }
 
+      const duplicateCandidate = await client.query(
+        `SELECT 1 FROM app.todo_submission_runs
+         WHERE space_id = $1 AND candidate_id = $2`,
+        [this.context.spaceId, candidateId],
+      );
+      if (duplicateCandidate.rowCount) {
+        throw new TodoStorageError("TODO_INPUT_INVALID", "candidateId was already used by another clientRunId");
+      }
+
       const result = await work(
-        createApplicationStorage(client, this.context, candidateId, input.payloadHash, candidate),
+        createApplicationStorage(client, this.context, candidateId, clientRunId, input.payloadHash, candidate),
       );
       const persisted = await client.query<JsonRow>(
         `SELECT result_payload AS payload
          FROM app.todo_submission_runs
-         WHERE space_id = $1 AND candidate_id = $2`,
-        [this.context.spaceId, candidateId],
+         WHERE space_id = $1 AND client_run_id = $2`,
+        [this.context.spaceId, clientRunId],
       );
       if (!persisted.rows[0]) {
         throw new TodoStorageError("TODO_STORAGE_FAILED", "Todo application did not persist a submission result");
@@ -227,11 +282,28 @@ export class PostgresTodoStorage {
       client.release();
     }
   }
+
+  async readSnapshot(): Promise<{ enabled: boolean; state: unknown | null }> {
+    const result = await this.pool.query<TodoSnapshotRow>(
+      `SELECT p.enabled, s.state_payload AS payload
+       FROM app.todo_profiles p
+       LEFT JOIN app.todo_states s ON s.space_id = p.space_id
+       WHERE p.space_id = $1`,
+      [this.context.spaceId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new TodoStorageError("TODO_STORAGE_FAILED", "Todo profile is unavailable");
+    return {
+      enabled: row.enabled,
+      state: row.enabled ? row.payload ?? structuredClone(EMPTY_STATE) : null,
+    };
+  }
 }
 
 export function createPostgresTodoStorage(
   pool: PostgresPool,
   context: TenantContext,
+  retention?: { submissionDays: number },
 ): PostgresTodoStorage {
-  return new PostgresTodoStorage(pool, context);
+  return new PostgresTodoStorage(pool, context, retention);
 }

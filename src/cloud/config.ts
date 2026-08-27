@@ -45,6 +45,17 @@ export interface CloudFileConfig {
     requestBodyLimitBytes: number;
     rateLimitRetentionHours: number;
     auditRetentionDays: number;
+    apiRequestBodyLimitBytes: number;
+    readTokenHourlyLimit: number;
+    writeTokenHourlyLimit: number;
+    readIpHourlyLimit: number;
+    writeIpHourlyLimit: number;
+    dailyItemLimit: number;
+    todoOperationLimit: number;
+    concurrentWriteLimitPerSpace: number;
+    writeLeaseTtlSeconds: number;
+    credentialLastUsedTouchSeconds: number;
+    submissionRetentionDays: number;
   };
 }
 
@@ -191,6 +202,67 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
         24 * 30,
       ),
       auditRetentionDays: requireInteger(agentAccess.auditRetentionDays, "agentAccess.auditRetentionDays", 1, 3650),
+      apiRequestBodyLimitBytes: requireInteger(
+        agentAccess.apiRequestBodyLimitBytes,
+        "agentAccess.apiRequestBodyLimitBytes",
+        1024,
+        4 * 1024 * 1024,
+      ),
+      readTokenHourlyLimit: requireInteger(
+        agentAccess.readTokenHourlyLimit,
+        "agentAccess.readTokenHourlyLimit",
+        1,
+        100000,
+      ),
+      writeTokenHourlyLimit: requireInteger(
+        agentAccess.writeTokenHourlyLimit,
+        "agentAccess.writeTokenHourlyLimit",
+        1,
+        100000,
+      ),
+      readIpHourlyLimit: requireInteger(
+        agentAccess.readIpHourlyLimit,
+        "agentAccess.readIpHourlyLimit",
+        1,
+        100000,
+      ),
+      writeIpHourlyLimit: requireInteger(
+        agentAccess.writeIpHourlyLimit,
+        "agentAccess.writeIpHourlyLimit",
+        1,
+        100000,
+      ),
+      dailyItemLimit: requireInteger(agentAccess.dailyItemLimit, "agentAccess.dailyItemLimit", 1, 1000),
+      todoOperationLimit: requireInteger(
+        agentAccess.todoOperationLimit,
+        "agentAccess.todoOperationLimit",
+        1,
+        1000,
+      ),
+      concurrentWriteLimitPerSpace: requireInteger(
+        agentAccess.concurrentWriteLimitPerSpace,
+        "agentAccess.concurrentWriteLimitPerSpace",
+        1,
+        100,
+      ),
+      writeLeaseTtlSeconds: requireInteger(
+        agentAccess.writeLeaseTtlSeconds,
+        "agentAccess.writeLeaseTtlSeconds",
+        30,
+        3600,
+      ),
+      credentialLastUsedTouchSeconds: requireInteger(
+        agentAccess.credentialLastUsedTouchSeconds,
+        "agentAccess.credentialLastUsedTouchSeconds",
+        1,
+        86400,
+      ),
+      submissionRetentionDays: requireInteger(
+        agentAccess.submissionRetentionDays,
+        "agentAccess.submissionRetentionDays",
+        1,
+        3650,
+      ),
     },
   };
 }

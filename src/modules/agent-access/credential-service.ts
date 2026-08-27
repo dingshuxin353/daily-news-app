@@ -511,7 +511,8 @@ export class AgentCredentialService {
   }
 
   private parseAuthorization(value: unknown) {
-    if (typeof value !== "string" || !value.startsWith("Bearer ")) return null;
-    return parseAgentToken(value.slice(7));
+    if (typeof value !== "string") return null;
+    const match = /^Bearer ([^\s]+)$/i.exec(value);
+    return match ? parseAgentToken(match[1]) : null;
   }
 }

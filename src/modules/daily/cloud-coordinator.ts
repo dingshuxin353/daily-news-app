@@ -1,4 +1,5 @@
 import type {
+  DailyWritePolicy,
   DailyApplicationStorage,
   PostgresDailyStorage,
   PriorityLimits,
@@ -27,6 +28,7 @@ export function createCloudDailyCoordinator(options: CloudDailyCoordinatorOption
       clientRunId: string;
       candidate: unknown;
       mode?: "update" | "replace";
+      writePolicy?: DailyWritePolicy;
     }): Promise<Record<string, unknown>> {
       const candidate = await options.validateCandidate(input.candidate);
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
@@ -35,7 +37,15 @@ export function createCloudDailyCoordinator(options: CloudDailyCoordinatorOption
       const date = (candidate as Record<string, unknown>).date;
       if (typeof date !== "string") throw new TypeError("validated Daily Candidate must contain a date");
       const mode = input.mode ?? "update";
-      const payloadHash = jsonSha256({ candidate, mode });
+      const writePolicy = input.writePolicy ?? {
+        today: date,
+        historicalDate: null,
+        replace: null,
+      };
+      const payloadHash = jsonSha256({ candidate, mode, confirmation: {
+        historicalDate: writePolicy.historicalDate,
+        replace: writePolicy.replace,
+      } });
       return options.storage.runSubmission(
         {
           clientRunId: input.clientRunId,
@@ -43,6 +53,7 @@ export function createCloudDailyCoordinator(options: CloudDailyCoordinatorOption
           mode,
           payloadHash,
           candidate,
+          writePolicy,
         },
         async (storage, priorityLimits) => options.createApplicationService(storage).submit({
           candidate,

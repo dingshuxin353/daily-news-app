@@ -7,10 +7,13 @@ import type { CloudFileConfig } from "./config.js";
 import type { IdentityService } from "../modules/identity/auth.js";
 import { normalizeEmail, resolveTrustedClientIp } from "../modules/identity/security.js";
 import type { AgentCredentialService } from "../modules/agent-access/credential-service.js";
+import type { AgentRequestAuthenticator } from "./agent-context.js";
+import type { AgentOperationsService } from "../modules/agent-access/operations.js";
 import type { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
 import { renderLoginPage, renderSpacePage } from "../web/cloud-pages.js";
 import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
 import { resolveTrustedExternalOrigin } from "../web/settings-security.js";
+import { registerAgentApiRoutes } from "../protocols/http-api/routes.js";
 
 export interface CloudAppDependencies {
   basePath: string;
@@ -28,6 +31,11 @@ export interface CloudAppDependencies {
     apiBaseUrl: string;
     mcpUrl: string;
     activeCredentialLimit: number;
+    requestBodyLimitBytes: number;
+  };
+  agentApi?: {
+    authenticator: AgentRequestAuthenticator;
+    operations: AgentOperationsService;
     requestBodyLimitBytes: number;
   };
 }
@@ -86,6 +94,7 @@ function privateResponseHeaders(context: Context): void {
 export function createCloudApp(dependencies: CloudAppDependencies): Hono {
   const app = new Hono();
   const route = (pathname: string) => `${dependencies.basePath}${pathname}`;
+  const clientIp = dependencies.clientIpResolver ?? resolveNodeClientIp;
 
   app.use("*", async (context, next) => {
     await next();
@@ -102,11 +111,20 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
     }
   });
 
+  if (dependencies.agentApi) {
+    registerAgentApiRoutes(app, {
+      basePath: dependencies.basePath,
+      authenticator: dependencies.agentApi.authenticator,
+      operations: dependencies.agentApi.operations,
+      clientIpResolver: clientIp,
+      requestBodyLimitBytes: dependencies.agentApi.requestBodyLimitBytes,
+    });
+  }
+
   if (dependencies.identity && dependencies.tenancy && dependencies.defaults) {
     const identity = dependencies.identity;
     const tenancy = dependencies.tenancy;
     const defaults = dependencies.defaults;
-    const clientIp = dependencies.clientIpResolver ?? resolveNodeClientIp;
 
     app.get(route("/assets/:name"), async (context) => {
       const name = context.req.param("name") as keyof typeof cloudAssets;

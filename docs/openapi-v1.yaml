@@ -1,0 +1,238 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DailyNews Agent JSON API",
+    "version": "1.0.0",
+    "description": "Private Content and Personal Todo read/write API. Browser sessions cannot replace an Agent PAT."
+  },
+  "servers": [{ "url": "https://dailynews.example/api/v1", "description": "Replace with the API Base URL shown in DailyNews settings." }],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/publications": {
+      "get": {
+        "operationId": "listPublications",
+        "responses": {
+          "200": { "description": "Publications in the authenticated Space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicationsResponse" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/publications/{publicationId}/daily-context": {
+      "get": {
+        "operationId": "getDailyContext",
+        "parameters": [
+          { "$ref": "#/components/parameters/PublicationId" },
+          { "name": "date", "in": "query", "required": false, "schema": { "$ref": "#/components/schemas/Date" } }
+        ],
+        "responses": {
+          "200": { "description": "Resolved Daily target and write boundaries", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DailyContextResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/publications/{publicationId}/daily-candidates": {
+      "post": {
+        "operationId": "submitDailyCandidate",
+        "parameters": [{ "$ref": "#/components/parameters/PublicationId" }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DailySubmission" },
+              "example": {
+                "mode": "update",
+                "confirmation": { "historicalDate": null, "replace": null },
+                "candidate": {
+                  "schemaVersion": 2,
+                  "date": "2026-08-27",
+                  "generatedAt": "2026-08-27T08:00:00+08:00",
+                  "coverage": { "start": "2026-08-26T08:00:00+08:00", "end": "2026-08-27T08:00:00+08:00" },
+                  "items": [{
+                    "id": "example-update",
+                    "title": "示例产品发布新版本",
+                    "brief": "这是只用于接口演示的虚构内容。",
+                    "summary": "示例团队发布了一个虚构版本，用于说明 DailyNews Content Candidate 的字段结构。",
+                    "editorial": { "priority": "lead", "selectionReason": "演示稳定字段与来源结构" },
+                    "sources": [{ "name": "Example Source", "url": "https://example.com/fake-dailynews-story" }]
+                  }]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Formal Issue and Compiled Edition were created, updated, or unchanged", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DailySubmissionResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/publications/{publicationId}/issues/{date}": {
+      "get": {
+        "operationId": "getDailyIssue",
+        "parameters": [{ "$ref": "#/components/parameters/PublicationId" }, { "$ref": "#/components/parameters/IssueDate" }],
+        "responses": {
+          "200": { "description": "Formal Issue and its Compiled Edition", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DailyIssueResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/todo": {
+      "get": {
+        "operationId": "getTodo",
+        "responses": {
+          "200": { "description": "Todo status and, only when enabled, formal state", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TodoResponse" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/todo/candidates": {
+      "post": {
+        "operationId": "submitTodoCandidate",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TodoSubmission" },
+              "example": {
+                "candidate": {
+                  "schemaVersion": 1,
+                  "candidateId": "example-todo-run",
+                  "generatedAt": "2026-08-27T09:00:00+08:00",
+                  "baseRevision": 0,
+                  "operations": [{ "type": "add", "clientId": "draft-one", "title": "提交示例周报", "dueDate": "2026-08-28" }]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Formal Todo State was updated or unchanged", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TodoSubmissionResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "DailyNews PAT" }
+    },
+    "parameters": {
+      "PublicationId": { "name": "publicationId", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" } },
+      "IssueDate": { "name": "date", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Date" } },
+      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,80}$" }, "description": "Reuse the same key and exact body only for a retry of the same intent." }
+    },
+    "schemas": {
+      "Date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+      "RequestId": { "type": "string", "pattern": "^req_[0-9a-f]{32}$" },
+      "Publication": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["publicationId", "name", "isDefault", "status", "writable"],
+        "properties": {
+          "publicationId": { "type": "string" }, "name": { "type": "string" }, "isDefault": { "type": "boolean" },
+          "status": { "type": "string", "enum": ["active", "inactive"] }, "writable": { "type": "boolean" }
+        }
+      },
+      "PublicationsResponse": {
+        "type": "object", "required": ["publications", "requestId"],
+        "properties": { "publications": { "type": "array", "items": { "$ref": "#/components/schemas/Publication" } }, "requestId": { "$ref": "#/components/schemas/RequestId" } }
+      },
+      "DailyContextResponse": {
+        "type": "object", "required": ["publication", "timeZone", "today", "resolvedDate", "issue", "writeRules", "requestId"],
+        "properties": {
+          "publication": { "$ref": "#/components/schemas/Publication" }, "timeZone": { "type": "string" },
+          "today": { "$ref": "#/components/schemas/Date" }, "resolvedDate": { "$ref": "#/components/schemas/Date" },
+          "issue": { "type": "object" }, "writeRules": { "type": "object" }, "requestId": { "$ref": "#/components/schemas/RequestId" }
+        }
+      },
+      "DailySubmission": {
+        "type": "object", "additionalProperties": false, "required": ["mode", "confirmation", "candidate"],
+        "properties": {
+          "mode": { "type": "string", "enum": ["update", "replace"] },
+          "confirmation": { "$ref": "#/components/schemas/DailyConfirmation" },
+          "candidate": { "$ref": "#/components/schemas/ContentCandidate" }
+        }
+      },
+      "DailyConfirmation": {
+        "type": "object", "additionalProperties": false, "required": ["historicalDate", "replace"],
+        "properties": {
+          "historicalDate": { "oneOf": [{ "$ref": "#/components/schemas/Date" }, { "type": "null" }] },
+          "replace": { "oneOf": [{ "$ref": "#/components/schemas/ReplaceConfirmation" }, { "type": "null" }] }
+        }
+      },
+      "ReplaceConfirmation": {
+        "type": "object", "additionalProperties": false, "required": ["publicationId", "date", "expectedRevision"],
+        "properties": { "publicationId": { "type": "string" }, "date": { "$ref": "#/components/schemas/Date" }, "expectedRevision": { "type": "integer", "minimum": 1 } }
+      },
+      "ContentCandidate": {
+        "type": "object", "additionalProperties": false, "required": ["schemaVersion", "date", "generatedAt", "coverage", "items"],
+        "properties": {
+          "schemaVersion": { "type": "integer", "enum": [1, 2] }, "date": { "$ref": "#/components/schemas/Date" },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "coverage": { "type": "object", "additionalProperties": false, "required": ["start", "end"], "properties": { "start": { "type": "string", "format": "date-time" }, "end": { "type": "string", "format": "date-time" } } },
+          "items": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/components/schemas/ContentItem" } }
+        }
+      },
+      "ContentItem": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "title", "brief", "summary", "editorial", "sources"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "title": { "type": "string", "minLength": 1 }, "brief": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 }, "category": { "type": "string", "minLength": 1 },
+          "editorial": { "$ref": "#/components/schemas/Editorial" },
+          "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/Source" } },
+          "image": { "$ref": "#/components/schemas/ContentImage" }
+        }
+      },
+      "Editorial": { "type": "object", "additionalProperties": false, "required": ["priority", "selectionReason"], "properties": { "priority": { "type": "string", "enum": ["lead", "important", "normal"] }, "selectionReason": { "type": "string", "minLength": 1 } } },
+      "Source": { "type": "object", "additionalProperties": false, "required": ["name", "url"], "properties": { "originalTitle": { "type": "string" }, "name": { "type": "string", "minLength": 1 }, "url": { "type": "string", "format": "uri", "pattern": "^https?://" }, "publishedAt": { "type": "string", "format": "date-time" }, "discoveredAt": { "type": "string", "format": "date-time" }, "via": { "$ref": "#/components/schemas/SourceVia" } } },
+      "SourceVia": { "type": "object", "additionalProperties": false, "required": ["name", "url"], "properties": { "name": { "type": "string", "minLength": 1 }, "url": { "type": "string", "format": "uri", "pattern": "^https?://" } } },
+      "ContentImage": { "type": "object", "additionalProperties": false, "required": ["src", "alt", "width", "height", "credit"], "properties": { "src": { "type": "string", "format": "uri", "pattern": "^https://" }, "alt": { "type": "string", "maxLength": 160 }, "width": { "type": "integer", "minimum": 1, "maximum": 10000 }, "height": { "type": "integer", "minimum": 1, "maximum": 10000 }, "credit": { "type": "string", "maxLength": 120 }, "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https?://" } } },
+      "DailySubmissionResponse": { "type": "object", "required": ["result", "publicationId", "date", "revision", "pageUrl", "requestId"], "properties": { "result": { "type": "string", "enum": ["created", "updated", "unchanged"] }, "publicationId": { "type": "string" }, "date": { "$ref": "#/components/schemas/Date" }, "revision": { "type": "integer", "minimum": 1 }, "pageUrl": { "type": "string", "format": "uri" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "DailyIssueResponse": { "type": "object", "required": ["publicationId", "date", "revision", "issue", "compiledEdition", "pageUrl", "requestId"], "properties": { "publicationId": { "type": "string" }, "date": { "$ref": "#/components/schemas/Date" }, "revision": { "type": "integer", "minimum": 1 }, "issue": { "type": "object" }, "compiledEdition": { "type": "object" }, "pageUrl": { "type": "string", "format": "uri" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "TodoResponse": { "type": "object", "required": ["enabled", "candidateRules", "settingsUrl", "requestId"], "properties": { "enabled": { "type": "boolean" }, "candidateRules": { "type": "object" }, "settingsUrl": { "type": "string", "format": "uri" }, "revision": { "type": "integer", "minimum": 0 }, "state": { "type": "object" }, "pageUrl": { "type": "string", "format": "uri" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "TodoSubmission": { "type": "object", "additionalProperties": false, "required": ["candidate"], "properties": { "candidate": { "$ref": "#/components/schemas/TodoCandidate" } } },
+      "TodoCandidate": { "type": "object", "additionalProperties": false, "required": ["schemaVersion", "candidateId", "generatedAt", "baseRevision", "operations"], "properties": { "schemaVersion": { "const": 1 }, "candidateId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "generatedAt": { "type": "string", "format": "date-time" }, "baseRevision": { "type": "integer", "minimum": 0 }, "operations": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "oneOf": [{ "$ref": "#/components/schemas/TodoAdd" }, { "$ref": "#/components/schemas/TodoUpdate" }, { "$ref": "#/components/schemas/TodoStateChange" }] } } } },
+      "TodoChanges": { "type": "object", "additionalProperties": false, "minProperties": 1, "properties": { "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "note": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 500 }, { "type": "null" }] }, "dueDate": { "oneOf": [{ "$ref": "#/components/schemas/Date" }, { "type": "null" }] }, "dueTime": { "oneOf": [{ "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" }, { "type": "null" }] } } },
+      "TodoAdd": { "type": "object", "additionalProperties": false, "required": ["type", "clientId", "title"], "properties": { "type": { "const": "add" }, "clientId": { "type": "string", "minLength": 1 }, "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "note": { "type": "string", "minLength": 1, "maxLength": 500 }, "dueDate": { "$ref": "#/components/schemas/Date" }, "dueTime": { "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" } } },
+      "TodoUpdate": { "type": "object", "additionalProperties": false, "required": ["type", "taskId", "changes"], "properties": { "type": { "const": "update" }, "taskId": { "type": "string", "pattern": "^todo-[a-f0-9]{8}$" }, "changes": { "$ref": "#/components/schemas/TodoChanges" } } },
+      "TodoStateChange": { "type": "object", "additionalProperties": false, "required": ["type", "taskId"], "properties": { "type": { "type": "string", "enum": ["complete", "reopen", "archive", "restore"] }, "taskId": { "type": "string", "pattern": "^todo-[a-f0-9]{8}$" } } },
+      "TodoSubmissionResponse": { "type": "object", "required": ["result", "revision", "pageUrl", "requestId"], "properties": { "result": { "type": "string", "enum": ["published", "unchanged"] }, "revision": { "type": "integer", "minimum": 0 }, "operations": { "type": "array" }, "pageUrl": { "type": "string", "format": "uri" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "Error": { "type": "object", "additionalProperties": false, "required": ["error"], "properties": { "error": { "type": "object", "additionalProperties": false, "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["invalid_request", "schema_invalid", "future_date_not_allowed", "invalid_token", "target_not_found", "idempotency_conflict", "revision_conflict", "explicit_confirmation_required", "publication_inactive", "todo_disabled", "payload_too_large", "rate_limited", "service_unavailable"] }, "message": { "type": "string" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } } } }
+    },
+    "responses": {
+      "BadRequest": { "description": "Invalid request, schema, or future date", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing, invalid, provisioning, rotated, or revoked PAT", "headers": { "WWW-Authenticate": { "schema": { "type": "string", "const": "Bearer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Target is missing or belongs to another Space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Conflict": { "description": "Idempotency, revision, confirmation, inactive Publication, or disabled Todo conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "PayloadTooLarge": { "description": "Request body exceeds the configured limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "RateLimited": { "description": "Persistent PAT or IP rate limit, or concurrent write limit", "headers": { "Retry-After": { "schema": { "type": "integer", "minimum": 1 } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unavailable": { "description": "Recoverable service failure; retry the exact request with the same idempotency key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    }
+  }
+}

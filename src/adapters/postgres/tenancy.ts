@@ -380,6 +380,19 @@ export class PostgresTenancyStore {
     return result.rows[0] ? createTenantContext(result.rows[0]) : null;
   }
 
+  async resolveTenantContextForSpace(resolvedSpaceId: string): Promise<TenantContext | null> {
+    if (typeof resolvedSpaceId !== "string" || resolvedSpaceId.trim() === "") {
+      throw new TenancyError("TENANCY_INPUT_INVALID", "resolved space id is invalid");
+    }
+    const result = await this.pool.query<SpaceRow>(
+      `SELECT id, user_id, status
+       FROM app.spaces
+       WHERE id = $1 AND status = 'ready'`,
+      [resolvedSpaceId],
+    );
+    return result.rows[0] ? createTenantContext(result.rows[0]) : null;
+  }
+
   async resolvePublicationContext(
     tenant: TenantContext,
     requestedPublicationId: string,
