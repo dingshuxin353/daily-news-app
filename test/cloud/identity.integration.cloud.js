@@ -236,7 +236,7 @@ test("Fake mode completes OTP sign-in, bootstraps one Space, persists the sessio
   assert.equal(signOut.status, 200);
   const afterSignOut = await secondRuntime.app.request("https://dailynews.test/home", { headers: { cookie } });
   assert.equal(afterSignOut.status, 303);
-  assert.equal(afterSignOut.headers.get("location"), "/login");
+  assert.equal(afterSignOut.headers.get("location"), "/login?returnTo=%2Fhome");
 });
 
 test("Better Auth retains server-side revocation of every session for the current user", async () => {
@@ -264,7 +264,7 @@ test("Better Auth retains server-side revocation of every session for the curren
   for (const cookie of [firstCookie, secondCookie]) {
     const privatePage = await harness.app.request("https://dailynews.test/home", { headers: { cookie } });
     assert.equal(privatePage.status, 303);
-    assert.equal(privatePage.headers.get("location"), "/login");
+    assert.equal(privatePage.headers.get("location"), "/login?returnTo=%2Fhome");
   }
 });
 
@@ -366,7 +366,7 @@ test("Fake mail reader exists only when explicitly injected into a test app", as
   const css = await hidden.app.request("https://dailynews.test/assets/cloud.css");
   assert.equal(css.status, 200);
   assert.match(css.headers.get("content-type"), /text\/css/);
-  assert.match(await css.text(), /macrostructure: Workbench/);
+  assert.match(await css.text(), /macrostructure: Split Studio \+ reading projection/);
 });
 
 test("cross-origin first sign-in with a valid OTP is rejected without consuming it or creating identity state", async () => {

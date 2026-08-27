@@ -529,7 +529,7 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
   assert.doesNotMatch(agentSettingsHtml, /Codex <script>/);
   assert.equal((await appRequest(harness.app, "https://dailynews.test/", {
     headers: { authorization: `Bearer ${claimed.token}` },
-  })).status, 303);
+  })).status, 200);
 
   const audits = await controlPool.query("SELECT event_type FROM app.audit_events ORDER BY created_at");
   assert.ok(audits.rows.some(({ event_type }) => event_type === "pairing_claimed"));
@@ -697,7 +697,7 @@ test("claim and browser bootstrap acquire the Space lock before the pairing row"
       pairingCode: pairing.code,
       clientName: "Concurrent claimant",
     });
-    homePromise = appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } });
+    homePromise = appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie } });
     await waitForBlockedTransactions(blockerPid, 2);
 
     const observer = await controlPool.connect();

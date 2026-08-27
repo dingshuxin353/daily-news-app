@@ -220,10 +220,10 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
       }
     });
 
-    app.get(route("/assets/themes/:themeId/:revision.css"), async (context) => {
+    app.get(route("/assets/themes/:themeId/:file"), async (context) => {
       const themeId = context.req.param("themeId") ?? "";
-      const revision = context.req.param("revision") ?? "";
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(themeId) || !/^[1-9]\d*$/.test(revision)) {
+      const revision = /^([1-9]\d*)\.css$/.exec(context.req.param("file") ?? "")?.[1];
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(themeId) || !revision) {
         return context.json({ error: "not_found" }, 404);
       }
       try {
