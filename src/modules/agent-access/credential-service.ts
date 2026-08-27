@@ -365,6 +365,7 @@ export class AgentCredentialService {
       payloadHash,
       expiresAt: addSeconds(this.now(), this.config.provisioningTtlSeconds),
       activeCredentialLimit: this.config.activeCredentialLimit,
+      ipDigest: input.ipDigest,
       requestId: input.requestId,
     });
     return {
@@ -393,7 +394,6 @@ export class AgentCredentialService {
       credentialId: credential?.id ?? "00000000-0000-4000-8000-000000000000",
       selector: parsed.selector,
       authorizationValid,
-      ipDigest: input.ipDigest,
       requestId: input.requestId,
       actorDigest: receivedDigest,
     });
