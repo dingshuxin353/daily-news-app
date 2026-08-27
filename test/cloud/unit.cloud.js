@@ -547,6 +547,8 @@ test("settings mutations reject cross-origin, invalid CSRF, unsupported media, a
 test("external origin trusts one loopback TLS proxy hop and rejects untrusted forwarding", () => {
   assert.equal(resolveTrustedExternalOrigin({
     requestUrl: "http://dailynews.test/settings/agent/connections",
+    requestHost: "dailynews.test",
+    transportProtocol: "http",
     configuredOrigin: "https://dailynews.test",
     remoteAddress: "127.0.0.1",
     forwardedProto: "https",
@@ -559,9 +561,39 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
   ]) {
     assert.equal(resolveTrustedExternalOrigin({
       requestUrl: "http://dailynews.test/settings/agent/connections",
+      requestHost: "dailynews.test",
+      transportProtocol: "http",
       configuredOrigin: "https://dailynews.test",
       ...input,
     }), "http://dailynews.test");
+  }
+  assert.equal(resolveTrustedExternalOrigin({
+    requestUrl: "https://dailynews.test/settings/agent/connections",
+    requestHost: "dailynews.test",
+    transportProtocol: "http",
+    configuredOrigin: "https://dailynews.test",
+    remoteAddress: "127.0.0.1",
+    forwardedProto: undefined,
+  }), "http://dailynews.test");
+  assert.equal(resolveTrustedExternalOrigin({
+    requestUrl: "https://dailynews.test/settings/agent/connections",
+    requestHost: "dailynews.test",
+    transportProtocol: "https",
+    configuredOrigin: "https://dailynews.test",
+    remoteAddress: "203.0.113.20",
+    forwardedProto: undefined,
+  }), "https://dailynews.test");
+  for (const mismatch of [
+    { requestUrl: "https://dailynews.test/settings/agent/connections", requestHost: "attacker.test" },
+    { requestUrl: "https://attacker.test/settings/agent/connections", requestHost: "dailynews.test" },
+  ]) {
+    assert.equal(resolveTrustedExternalOrigin({
+      ...mismatch,
+      transportProtocol: "http",
+      configuredOrigin: "https://dailynews.test",
+      remoteAddress: "127.0.0.1",
+      forwardedProto: "https",
+    }), null);
   }
 });
 
@@ -635,12 +667,12 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const csrf = createSettingsCsrfToken(csrfSecret, "session-a", "user-a");
-  const request = (headers = {}) => new Promise((resolve, reject) => {
+  const request = (headers = {}, requestTarget = "/settings/agent/connections/credential-a/name") => new Promise((resolve, reject) => {
     const body = JSON.stringify({ name: "代理后的 Agent", _csrf: csrf });
     const outgoing = httpRequest({
       hostname: "127.0.0.1",
       port: address.port,
-      path: "/settings/agent/connections/credential-a/name",
+      path: requestTarget,
       method: "POST",
       headers: {
         host: "dailynews.test",
@@ -674,6 +706,14 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
     assert.equal(await request(), 403);
     assert.equal(await request({ "x-forwarded-proto": "http" }), 403);
     assert.equal(await request({ "x-forwarded-proto": "https", origin: "https://attacker.test" }), 403);
+    assert.equal(await request(
+      {},
+      "https://dailynews.test/settings/agent/connections/credential-a/name",
+    ), 403);
+    assert.equal(await request(
+      { "x-forwarded-proto": "https", host: "attacker.test" },
+      "https://dailynews.test/settings/agent/connections/credential-a/name",
+    ), 403);
     assert.equal(await request({ "x-forwarded-proto": "https" }), 200);
     assert.equal(await verifyRequest(), 200);
     assert.deepEqual(renamed, [{ id: "credential-a", name: "代理后的 Agent" }]);

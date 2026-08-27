@@ -79,7 +79,7 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `GET /settings/agent` 与其连接 / 高级凭证子路由使用 Session、严格同源检查和绑定当前 Session 的 CSRF Token；M3-A 返回服务端 JSON 契约，M3-C 再接入确认后的可见页面。
 - `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
 
-所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用只在直接上游地址为回环、Host 与 `CLOUD_ORIGIN` 一致且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。来自非回环地址、缺失或多值的代理协议、Host 不匹配及浏览器 `Origin` 不匹配都会继续拒绝，不能用任意 Origin 绕过 CSRF。
+所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用独立核对实际 `Host`、HTTP 请求目标中的 Host、实际传输协议与 `CLOUD_ORIGIN`，只在两个 Host 都严格一致、直接上游地址为回环且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。来自非回环地址、缺失或多值的代理协议、absolute-form 请求目标与 `Host` 不一致、Host 不匹配及浏览器 `Origin` 不匹配都会继续拒绝，不能用任意 Origin 或伪造请求目标绕过 CSRF。
 
 ## 测试
 

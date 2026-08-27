@@ -20,7 +20,7 @@ export interface AgentSettingsDependencies {
   defaults: CloudFileConfig["defaults"];
   agentAccess: AgentCredentialService;
   clientIpResolver: (context: Context) => string;
-  requestOriginResolver: (context: Context) => string;
+  requestOriginResolver: (context: Context) => string | null;
   digestActor: (purpose: "session" | "ip", value: string) => string;
   apiBaseUrl: string;
   mcpUrl: string;

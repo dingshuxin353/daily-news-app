@@ -71,7 +71,7 @@ export async function readSettingsBody(request: Request, bodyLimitBytes: number)
 
 export function assertBrowserMutation(input: {
   request: Request;
-  requestOrigin: string;
+  requestOrigin: string | null;
   configuredOrigin: string;
   csrfSecret: string;
   sessionId: string;
@@ -94,26 +94,32 @@ export function assertBrowserMutation(input: {
 
 export function resolveTrustedExternalOrigin(input: {
   requestUrl: string;
+  requestHost: string | undefined;
+  transportProtocol: "http" | "https";
   configuredOrigin: string;
   remoteAddress: string | undefined;
   forwardedProto: string | undefined;
-}): string {
-  const requestOrigin = new URL(input.requestUrl).origin;
-  if (requestOrigin === input.configuredOrigin) return requestOrigin;
+}): string | null {
+  const requestUrl = new URL(input.requestUrl);
+  const configuredUrl = new URL(input.configuredOrigin);
+  const requestHost = input.requestHost?.trim().toLowerCase();
+  if (
+    !requestHost
+    || requestHost !== configuredUrl.host.toLowerCase()
+    || requestUrl.host.toLowerCase() !== requestHost
+  ) {
+    return null;
+  }
+
+  const transportOrigin = new URL(`${input.transportProtocol}://${requestHost}`).origin;
+  if (transportOrigin === configuredUrl.origin) return configuredUrl.origin;
 
   const remote = input.remoteAddress?.startsWith("::ffff:")
     ? input.remoteAddress.slice(7)
     : input.remoteAddress;
-  if (remote !== "127.0.0.1" && remote !== "::1") return requestOrigin;
-  if (!input.forwardedProto || input.forwardedProto.includes(",")) return requestOrigin;
+  if (remote !== "127.0.0.1" && remote !== "::1") return transportOrigin;
+  if (!input.forwardedProto || input.forwardedProto.includes(",")) return transportOrigin;
 
-  const requestUrl = new URL(input.requestUrl);
-  const configuredUrl = new URL(input.configuredOrigin);
-  if (
-    `${input.forwardedProto.trim().toLowerCase()}:` !== configuredUrl.protocol
-    || requestUrl.host !== configuredUrl.host
-  ) {
-    return requestOrigin;
-  }
+  if (`${input.forwardedProto.trim().toLowerCase()}:` !== configuredUrl.protocol) return transportOrigin;
   return configuredUrl.origin;
 }
