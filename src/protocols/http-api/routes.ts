@@ -271,4 +271,14 @@ export function registerAgentApiRoutes(app: Hono, dependencies: AgentApiRouteDep
     const envelope = parseTodoEnvelope(await readJsonBody(context.req.raw, dependencies.requestBodyLimitBytes));
     return dependencies.operations.submitTodoCandidate(access, { clientRunId, ...envelope });
   }));
+
+  const unmatched = (context: Context) => run(
+    context,
+    context.req.method === "GET" || context.req.method === "HEAD" ? "read" : "write",
+    async () => {
+      throw new AgentRequestError(404, "target_not_found", "没有找到 API 资源。");
+    },
+  );
+  app.all(route(""), unmatched);
+  app.all(route("/*"), unmatched);
 }

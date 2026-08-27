@@ -45,6 +45,8 @@ import {
 import { AgentRequestError } from "../../.cloud-dist/src/modules/agent-access/request-policy.js";
 import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
 import { AGENT_API_ROUTE_CONTRACT } from "../../.cloud-dist/src/protocols/http-api/routes.js";
+import { createPostgresTodoStorage } from "../../.cloud-dist/src/adapters/postgres/todo.js";
+import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/tenancy.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -873,6 +875,68 @@ test("JSON API requires PAT independently from browser Cookie and returns the st
   assert.match(body.error.requestId, /^req_[0-9a-f]{32}$/);
 });
 
+test("unmatched JSON API routes authenticate and use the stable request error envelope", async () => {
+  const { app, calls } = agentApiTestApp();
+  const response = await app.request("https://dailynews.test/cloud/api/v1/not-a-route", {
+    headers: { authorization: "Bearer valid-token" },
+  });
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get("x-request-id"), /^req_[0-9a-f]{32}$/);
+  assert.deepEqual(Object.keys(await response.json()).sort(), ["error"]);
+  const error = await app.request("https://dailynews.test/cloud/api/v1/still-missing", {
+    headers: { authorization: "Bearer valid-token" },
+  });
+  const body = await error.json();
+  assert.equal(body.error.code, "target_not_found");
+  assert.equal(body.error.message, "没有找到 API 资源。");
+  assert.match(body.error.requestId, /^req_[0-9a-f]{32}$/);
+  assert.equal(calls.filter(({ type }) => type === "authenticate").length, 2);
+  assert.ok(calls.filter(({ type }) => type === "authenticate").every(({ input }) => input.action === "read"));
+});
+
+test("disabled Todo snapshot does not issue any query that reads retained state", async () => {
+  const queries = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      queries.push(sql);
+      if (/SELECT enabled\s+FROM app\.todo_profiles/.test(sql)) {
+        return { rows: [{ enabled: false }], rowCount: 1 };
+      }
+      if (/todo_states|state_payload/.test(sql)) {
+        throw new Error("disabled snapshot must not read retained Todo state");
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async query(sql) {
+      if (/FROM app\.spaces/.test(sql)) {
+        return {
+          rows: [{ id: "space-disabled", user_id: "user-disabled", status: "ready" }],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected pool query: ${sql}`);
+    },
+    async connect() {
+      return client;
+    },
+  };
+  const tenancy = new PostgresTenancyStore(pool);
+  const tenant = await tenancy.resolveTenantContextForSpace("space-disabled");
+  assert.ok(tenant);
+  const snapshot = await createPostgresTodoStorage(pool, tenant).readSnapshot();
+  assert.deepEqual(snapshot, { enabled: false, state: null });
+  assert.equal(released, true);
+  assert.ok(queries.some((sql) => sql === "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"));
+  assert.ok(queries.some((sql) => sql === "COMMIT"));
+  assert.ok(queries.every((sql) => !/todo_states|state_payload/.test(sql)));
+});
+
 test("JSON API validates POST media type, idempotency key, strict envelopes, and streamed size", async () => {
   const { app, calls } = agentApiTestApp({ requestBodyLimitBytes: 256 });
   const url = "https://dailynews.test/cloud/api/v1/publications/daily-news/daily-candidates";
@@ -943,7 +1007,11 @@ test("OpenAPI 3.1 stays aligned with the real routes, auth, idempotency, errors,
     .sort((left, right) => `${left.path}:${left.method}`.localeCompare(`${right.path}:${right.method}`));
   const { app } = agentApiTestApp();
   const registered = app.routes
-    .filter(({ path: routePath }) => routePath.startsWith("/cloud/api/v1"))
+    .filter(({ method, path: routePath }) => (
+      method !== "ALL"
+      && !routePath.includes("*")
+      && routePath.startsWith("/cloud/api/v1/")
+    ))
     .map(({ method, path: routePath }) => ({
       method: method.toLowerCase(),
       path: routePath
@@ -966,6 +1034,19 @@ test("OpenAPI 3.1 stays aligned with the real routes, auth, idempotency, errors,
     "invalid_token", "idempotency_conflict", "revision_conflict", "explicit_confirmation_required",
     "publication_inactive", "todo_disabled", "payload_too_large", "rate_limited", "service_unavailable",
   ]) assert.ok(errorCodes.includes(code));
+
+  const schemas = specification.components.schemas;
+  assert.ok(schemas.DailyContextResponse.required.includes("priorityLimits"));
+  assert.ok(schemas.DailyContextResponse.properties.priorityLimits);
+  for (const field of ["mode", "repaired", "warnings"]) {
+    assert.ok(schemas.DailySubmissionResponse.properties[field], `Daily response must document ${field}`);
+  }
+  for (const field of [
+    "schemaVersion", "candidateId", "baseRevision", "operationCount", "operations", "warnings", "processedAt",
+  ]) {
+    assert.ok(schemas.TodoSubmissionResponse.properties[field], `Todo response must document ${field}`);
+    assert.ok(schemas.TodoSubmissionResponse.required.includes(field), `Todo response must require ${field}`);
+  }
 
   const guide = await readFile(path.join(process.cwd(), "docs", "CLOUD_AGENT_ACCESS.md"), "utf8");
   assert.match(guide, /daily-candidates/);

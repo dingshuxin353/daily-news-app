@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test, { after, beforeEach } from "node:test";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -19,6 +20,7 @@ import { keyedDigest } from "../../.cloud-dist/src/modules/identity/security.js"
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationsDirectory = path.join(projectRoot, "db", "migrations");
+const openApi = JSON.parse(await readFile(path.join(projectRoot, "docs", "openapi-v1.yaml"), "utf8"));
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("TEST_DATABASE_URL is required for PostgreSQL integration tests");
 const databaseName = decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, ""));
@@ -128,6 +130,17 @@ async function postJson(app, url, headers, key, body) {
   });
 }
 
+function assertDocumentedResponseFields(schemaName, payload) {
+  const schema = openApi.components.schemas[schemaName];
+  assert.ok(schema, `missing OpenAPI schema ${schemaName}`);
+  for (const field of Object.keys(payload)) {
+    assert.ok(schema.properties[field], `${schemaName} does not document response field ${field}`);
+  }
+  for (const field of schema.required ?? []) {
+    assert.ok(Object.hasOwn(payload, field), `${schemaName} response is missing required field ${field}`);
+  }
+}
+
 test("0102 upgrades short legacy Todo candidate IDs to independent valid clientRunIds", async () => {
   await pool.query("DROP SCHEMA IF EXISTS auth CASCADE");
   await pool.query("DROP SCHEMA IF EXISTS app CASCADE");
@@ -174,7 +187,9 @@ test("active PAT completes the Content JSON API loop with shared idempotency and
     { headers },
   );
   assert.equal(context.status, 200);
-  assert.deepEqual((await context.json()).issue, { exists: false, revision: null });
+  const contextBody = await context.json();
+  assert.deepEqual(contextBody.issue, { exists: false, revision: null });
+  assertDocumentedResponseFields("DailyContextResponse", contextBody);
 
   const body = {
     mode: "update",
@@ -193,6 +208,7 @@ test("active PAT completes the Content JSON API loop with shared idempotency and
   assert.equal(createdBody.result, "created");
   assert.equal(createdBody.revision, 1);
   assert.equal(createdBody.pageUrl, "https://dailynews.test/p/daily-news/?date=2026-08-27");
+  assertDocumentedResponseFields("DailySubmissionResponse", createdBody);
 
   const repeated = await postJson(
     app,
@@ -322,7 +338,9 @@ test("Todo API keeps disabled state private and uses clientRunId independently f
   };
   const submitted = await postJson(app, "https://dailynews.test/api/v1/todo/candidates", headers, "todo-api-run-0001", candidateBody);
   assert.equal(submitted.status, 200);
-  assert.equal((await submitted.json()).revision, 2);
+  const submittedBody = await submitted.json();
+  assert.equal(submittedBody.revision, 2);
+  assertDocumentedResponseFields("TodoSubmissionResponse", submittedBody);
   const repeated = await postJson(app, "https://dailynews.test/api/v1/todo/candidates", headers, "todo-api-run-0001", structuredClone(candidateBody));
   assert.equal(repeated.status, 200);
   assert.equal((await repeated.json()).revision, 2);

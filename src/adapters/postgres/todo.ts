@@ -42,11 +42,6 @@ interface TodoProfileRow extends QueryResultRow {
   enabled: boolean;
 }
 
-interface TodoSnapshotRow extends QueryResultRow {
-  enabled: boolean;
-  payload: unknown | null;
-}
-
 interface JsonRow extends QueryResultRow {
   payload: unknown;
 }
@@ -284,19 +279,31 @@ export class PostgresTodoStorage {
   }
 
   async readSnapshot(): Promise<{ enabled: boolean; state: unknown | null }> {
-    const result = await this.pool.query<TodoSnapshotRow>(
-      `SELECT p.enabled, s.state_payload AS payload
-       FROM app.todo_profiles p
-       LEFT JOIN app.todo_states s ON s.space_id = p.space_id
-       WHERE p.space_id = $1`,
-      [this.context.spaceId],
-    );
-    const row = result.rows[0];
-    if (!row) throw new TodoStorageError("TODO_STORAGE_FAILED", "Todo profile is unavailable");
-    return {
-      enabled: row.enabled,
-      state: row.enabled ? row.payload ?? structuredClone(EMPTY_STATE) : null,
-    };
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const profile = await client.query<TodoProfileRow>(
+        `SELECT enabled
+         FROM app.todo_profiles
+         WHERE space_id = $1`,
+        [this.context.spaceId],
+      );
+      const row = profile.rows[0];
+      if (!row) throw new TodoStorageError("TODO_STORAGE_FAILED", "Todo profile is unavailable");
+      if (!row.enabled) {
+        await client.query("COMMIT");
+        return { enabled: false, state: null };
+      }
+      const state = await readState(client, this.context);
+      await client.query("COMMIT");
+      return { enabled: true, state };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      if (error instanceof TodoStorageError) throw error;
+      throw new TodoStorageError("TODO_STORAGE_FAILED", "Todo snapshot failed", { cause: error });
+    } finally {
+      client.release();
+    }
   }
 }
 
