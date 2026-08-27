@@ -25,6 +25,21 @@ import {
   canonicalJson,
   jsonSha256,
 } from "../../.cloud-dist/src/modules/shared/canonical-json.js";
+import {
+  constantTimeDigestEquals,
+  derivePairingCode,
+  digestAgentTokenSecret,
+  digestPairingCode,
+  issueAgentToken,
+  normalizePairingCode,
+  parseAgentToken,
+} from "../../.cloud-dist/src/modules/agent-access/token-secret.js";
+import {
+  assertBrowserMutation,
+  createSettingsCsrfToken,
+  readSettingsBody,
+  verifySettingsCsrfToken,
+} from "../../.cloud-dist/src/web/settings-security.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -51,11 +66,22 @@ const validProductConfig = {
     otpAllowedAttempts: 3,
     sessionExpiresInDays: 30,
   },
+  agentAccess: {
+    pairingCodeTtlSeconds: 600,
+    provisioningTtlSeconds: 600,
+    claimIpHourlyLimit: 20,
+    verifyIpHourlyLimit: 40,
+    requestBodyLimitBytes: 16384,
+    rateLimitRetentionHours: 24,
+    auditRetentionDays: 90,
+  },
 };
 
 const requiredIdentityEnvironment = {
   BETTER_AUTH_SECRET: "unit-test-auth-secret-at-least-32-characters",
   IDENTITY_DIGEST_SECRET: "unit-test-digest-secret-at-least-32-characters",
+  AGENT_TOKEN_DIGEST_SECRET: "unit-test-agent-token-secret-at-least-32-characters",
+  PAIRING_CODE_DIGEST_SECRET: "unit-test-pairing-code-secret-at-least-32-characters",
   MAIL_MODE: "fake",
 };
 
@@ -72,7 +98,17 @@ async function loadWithEnvironment(env) {
   return withTempDirectory(async (directory) => {
     const configPath = path.join(directory, "cloud.json");
     await writeFile(configPath, JSON.stringify(validProductConfig));
-    return loadCloudConfig({ configPath, env: { ...requiredIdentityEnvironment, ...env } });
+    const origin = env.CLOUD_ORIGIN;
+    const basePath = env.CLOUD_BASE_PATH || "";
+    return loadCloudConfig({
+      configPath,
+      env: {
+        ...requiredIdentityEnvironment,
+        AGENT_API_BASE_URL: origin ? `${origin}${basePath}/api/v1` : undefined,
+        AGENT_MCP_URL: origin ? `${origin}${basePath}/mcp` : undefined,
+        ...env,
+      },
+    });
   });
 }
 
@@ -144,6 +180,17 @@ test("identity configuration fails closed for missing secrets and incomplete SES
       MAIL_MODE: "ses",
     }),
     (error) => error instanceof CloudConfigError && /TENCENTCLOUD_SECRET_ID/.test(error.message),
+  );
+});
+
+test("Agent and identity digest secrets must remain independent", async () => {
+  await assert.rejects(
+    () => loadWithEnvironment({
+      CLOUD_ORIGIN: "https://example.com",
+      DATABASE_URL: "postgresql://u:p@db:5432/name",
+      AGENT_TOKEN_DIGEST_SECRET: requiredIdentityEnvironment.IDENTITY_DIGEST_SECRET,
+    }),
+    (error) => error instanceof CloudConfigError && /independent/.test(error.message),
   );
 });
 
@@ -262,6 +309,8 @@ test("cloud config rejects malformed committed defaults", async () => {
           ...requiredIdentityEnvironment,
           CLOUD_ORIGIN: "https://example.com",
           DATABASE_URL: "postgresql://u:p@db:5432/name",
+          AGENT_API_BASE_URL: "https://example.com/api/v1",
+          AGENT_MCP_URL: "https://example.com/mcp",
         },
       }),
       (error) => error instanceof CloudConfigError && /schemaVersion/.test(error.message),
@@ -320,6 +369,12 @@ function runtimeConfig(port) {
       authSecret: requiredIdentityEnvironment.BETTER_AUTH_SECRET,
       digestSecret: requiredIdentityEnvironment.IDENTITY_DIGEST_SECRET,
       mailMode: "fake",
+    },
+    agentAccess: {
+      tokenDigestSecret: requiredIdentityEnvironment.AGENT_TOKEN_DIGEST_SECRET,
+      pairingCodeDigestSecret: requiredIdentityEnvironment.PAIRING_CODE_DIGEST_SECRET,
+      apiBaseUrl: "http://127.0.0.1/api/v1",
+      mcpUrl: "http://127.0.0.1/mcp",
     },
     product: validProductConfig,
   };
@@ -401,4 +456,86 @@ test("canonical JSON hashes equivalent inputs identically and rejects unsupporte
   const cyclic = {};
   cyclic.self = cyclic;
   assert.throws(() => canonicalJson(cyclic), CanonicalJsonError);
+});
+
+test("PAT format locks a 128-bit selector, 256-bit secret, and digest-only verification", () => {
+  const digestSecret = "agent-token-unit-secret-with-at-least-32-characters";
+  const issued = issueAgentToken(digestSecret);
+  assert.match(issued.token, /^dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}$/);
+  assert.match(issued.secretDigest, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(issued.hint, new RegExp(issued.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const parsed = parseAgentToken(issued.token);
+  assert.ok(parsed);
+  const received = digestAgentTokenSecret(digestSecret, parsed.selector, parsed.secret);
+  assert.ok(constantTimeDigestEquals(issued.secretDigest, received));
+  assert.equal(parseAgentToken(`${issued.token}x`), null);
+  assert.equal(parseAgentToken("dnpat_short_secret"), null);
+  assert.equal(constantTimeDigestEquals(issued.secretDigest, "0".repeat(64)), false);
+  assert.equal(new Set(Array.from({ length: 100 }, () => issueAgentToken(digestSecret).token)).size, 100);
+});
+
+test("pairing codes are stable per generation, refreshable, normalized, and digest-only", () => {
+  const secret = "pairing-code-unit-secret-with-at-least-32-characters";
+  const pairingId = "f4dc55ba-5555-4555-8555-555555555555";
+  const first = derivePairingCode(secret, pairingId, 1);
+  assert.match(first, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/);
+  assert.equal(first, derivePairingCode(secret, pairingId, 1));
+  assert.notEqual(first, derivePairingCode(secret, pairingId, 2));
+  const normalized = normalizePairingCode(first.toLowerCase().replace("-", " "));
+  assert.ok(normalized);
+  assert.match(digestPairingCode(secret, normalized), /^[0-9a-f]{64}$/);
+  assert.equal(normalizePairingCode("00000-00000"), null);
+});
+
+test("settings CSRF tokens bind to one session and user", () => {
+  const secret = "settings-csrf-unit-secret-with-at-least-32-characters";
+  const token = createSettingsCsrfToken(secret, "session-a", "user-a");
+  assert.ok(verifySettingsCsrfToken(secret, "session-a", "user-a", token));
+  assert.equal(verifySettingsCsrfToken(secret, "session-b", "user-a", token), false);
+  assert.equal(verifySettingsCsrfToken(secret, "session-a", "user-b", token), false);
+  assert.equal(verifySettingsCsrfToken(secret, "session-a", "user-a", `${token}x`), false);
+});
+
+test("settings mutations reject cross-origin, invalid CSRF, unsupported media, and streamed overflow", async () => {
+  const secret = "settings-request-secret-with-at-least-32-characters";
+  const csrf = createSettingsCsrfToken(secret, "session-a", "user-a");
+  const validRequest = new Request("https://dailynews.test/settings/agent/connections", {
+    method: "POST",
+    headers: { origin: "https://dailynews.test", "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ _csrf: csrf, name: "Agent" }),
+  });
+  const body = await readSettingsBody(validRequest.clone(), 1024);
+  assert.deepEqual(body, { _csrf: csrf, name: "Agent" });
+  assert.doesNotThrow(() => assertBrowserMutation({
+    request: validRequest,
+    configuredOrigin: "https://dailynews.test",
+    csrfSecret: secret,
+    sessionId: "session-a",
+    userId: "user-a",
+    body,
+  }));
+  assert.throws(() => assertBrowserMutation({
+    request: new Request(validRequest, { headers: { ...Object.fromEntries(validRequest.headers), origin: "https://attacker.test" } }),
+    configuredOrigin: "https://dailynews.test",
+    csrfSecret: secret,
+    sessionId: "session-a",
+    userId: "user-a",
+    body,
+  }), (error) => error.status === 403);
+  await assert.rejects(
+    () => readSettingsBody(new Request("https://dailynews.test/", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "plain",
+    }), 1024),
+    (error) => error.status === 400,
+  );
+  await assert.rejects(
+    () => readSettingsBody(new Request("https://dailynews.test/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "x".repeat(2048) }),
+    }), 1024),
+    (error) => error.status === 400,
+  );
 });

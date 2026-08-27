@@ -65,7 +65,7 @@ after(async () => {
   await pool.end();
 });
 
-test("tenant and identity migrations create the bounded M2-B and M2-D app tables", async () => {
+test("tenant, identity, and Agent access migrations create the bounded app tables", async () => {
   const result = await pool.query(`
     SELECT tablename
     FROM pg_tables
@@ -74,6 +74,10 @@ test("tenant and identity migrations create the bounded M2-B and M2-D app tables
   `);
   const tables = result.rows.map(({ tablename }) => tablename);
   for (const table of [
+    "agent_credentials",
+    "agent_pairing_sessions",
+    "agent_rate_limit_events",
+    "audit_events",
     "home_profiles",
     "login_mail_deliveries",
     "login_rate_locks",

@@ -1,12 +1,15 @@
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono, type Context } from "hono";
 import type { CloudFileConfig } from "./config.js";
 import type { IdentityService } from "../modules/identity/auth.js";
 import { normalizeEmail, resolveTrustedClientIp } from "../modules/identity/security.js";
+import type { AgentCredentialService } from "../modules/agent-access/credential-service.js";
 import type { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
 import { renderLoginPage, renderSpacePage } from "../web/cloud-pages.js";
+import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
 
 export interface CloudAppDependencies {
   basePath: string;
@@ -16,6 +19,16 @@ export interface CloudAppDependencies {
   defaults?: CloudFileConfig["defaults"];
   clientIpResolver?: (context: Context) => string;
   testMailReader?: { latestFor(email: string): { otp: string } | null };
+  agentSettings?: {
+    origin: string;
+    csrfSecret: string;
+    service: AgentCredentialService;
+    digestActor: (purpose: "session" | "ip", value: string) => string;
+    apiBaseUrl: string;
+    mcpUrl: string;
+    activeCredentialLimit: number;
+    requestBodyLimitBytes: number;
+  };
 }
 
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -102,6 +115,13 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         const session = await identity.getSession(context.req.raw, clientIp(context));
         if (!session) return context.redirect(route("/login"), 303);
         const tenant = await tenancy.ensureSpaceForUser(session.user.id, defaults);
+        if (dependencies.agentSettings) {
+          await dependencies.agentSettings.service.ensureBootstrapPairing(
+            tenant,
+            `req_${randomUUID().replaceAll("-", "")}`,
+            dependencies.agentSettings.digestActor("session", `${session.session.id}:${session.user.id}`),
+          );
+        }
         const repository = tenancy.forTenant(tenant);
         const [home, publications, todo, themes] = await Promise.all([
           repository.getHomeProfile(),
@@ -136,6 +156,24 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         } catch {
           return context.json({ error: "not_found" }, 404);
         }
+      });
+    }
+
+    if (dependencies.agentSettings) {
+      registerAgentSettingsRoutes(app, {
+        basePath: dependencies.basePath,
+        origin: dependencies.agentSettings.origin,
+        csrfSecret: dependencies.agentSettings.csrfSecret,
+        identity,
+        tenancy,
+        defaults,
+        agentAccess: dependencies.agentSettings.service,
+        clientIpResolver: clientIp,
+        digestActor: dependencies.agentSettings.digestActor,
+        apiBaseUrl: dependencies.agentSettings.apiBaseUrl,
+        mcpUrl: dependencies.agentSettings.mcpUrl,
+        activeCredentialLimit: dependencies.agentSettings.activeCredentialLimit,
+        requestBodyLimitBytes: dependencies.agentSettings.requestBodyLimitBytes,
       });
     }
   }
