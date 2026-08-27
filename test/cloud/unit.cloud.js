@@ -175,6 +175,16 @@ test("cloud config fails closed for missing or unsafe environment", async () => 
     () => loadWithEnvironment({ CLOUD_ORIGIN: "https://example.com", CLOUD_HOST: "bad host", DATABASE_URL: "postgresql://u:p@db:5432/name" }),
     (error) => error instanceof CloudConfigError && /CLOUD_HOST/.test(error.message),
   );
+  for (const CLOUD_HOST of ["0.0.0.0", "::", "dailynews.test"]) {
+    await assert.rejects(
+      () => loadWithEnvironment({
+        CLOUD_ORIGIN: "http://127.0.0.1:3000",
+        CLOUD_HOST,
+        DATABASE_URL: "postgresql://u:p@db:5432/name",
+      }),
+      (error) => error instanceof CloudConfigError && /loopback HTTP CLOUD_ORIGIN/.test(error.message),
+    );
+  }
   await assert.rejects(
     () => loadWithEnvironment({
       CLOUD_ORIGIN: "https://example.com",
@@ -640,6 +650,22 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
     remoteAddress: "127.0.0.1",
     forwardedProto: "https",
   }), "https://dailynews.test");
+  assert.equal(resolveTrustedExternalOrigin({
+    requestUrl: "http://127.0.0.1:3000/mcp",
+    requestHost: "127.0.0.1:3000",
+    transportProtocol: "http",
+    configuredOrigin: "http://127.0.0.1:3000",
+    remoteAddress: "203.0.113.20",
+    forwardedProto: undefined,
+  }), null);
+  assert.equal(resolveTrustedExternalOrigin({
+    requestUrl: "http://127.0.0.1:3000/mcp",
+    requestHost: "127.0.0.1:3000",
+    transportProtocol: "http",
+    configuredOrigin: "http://127.0.0.1:3000",
+    remoteAddress: "::ffff:127.0.0.1",
+    forwardedProto: undefined,
+  }), "http://127.0.0.1:3000");
   for (const input of [
     { remoteAddress: "203.0.113.20", forwardedProto: "https" },
     { remoteAddress: "127.0.0.1", forwardedProto: undefined },
@@ -1164,6 +1190,7 @@ test("OpenAPI 3.1 stays aligned with the real routes, auth, idempotency, errors,
 });
 
 function agentMcpTestApp(options = {}) {
+  const origin = options.origin ?? "https://dailynews.test";
   const authentications = [];
   const calls = [];
   const publication = {
@@ -1289,7 +1316,7 @@ function agentMcpTestApp(options = {}) {
     readinessCheck: async () => {},
     clientIpResolver: () => "203.0.113.20",
     agentMcp: {
-      origin: "https://dailynews.test",
+      origin,
       authenticator,
       operations,
       requestBodyLimitBytes: options.requestBodyLimitBytes ?? 262144,
@@ -1297,7 +1324,7 @@ function agentMcpTestApp(options = {}) {
       todoOperationLimit: 100,
       ...(options.useNodeOriginResolver
         ? {}
-        : { requestOriginResolver: options.requestOriginResolver ?? (() => "https://dailynews.test") }),
+        : { requestOriginResolver: options.requestOriginResolver ?? (() => origin) }),
     },
   });
   return { app, authentications, calls };
@@ -1464,6 +1491,32 @@ test("MCP route fails closed for method, Origin, PAT, media type, and body limit
   });
   assert.equal(oversized.status, 413);
   assert.equal((await oversized.json()).error.code, "payload_too_large");
+});
+
+test("MCP rejects non-loopback clients for a loopback HTTP origin before PAT authentication", async () => {
+  const origin = "http://127.0.0.1:3000";
+  const { app, authentications } = agentMcpTestApp({
+    origin,
+    requestOriginResolver: (context) => resolveTrustedExternalOrigin({
+      requestUrl: context.req.url,
+      requestHost: context.req.header("host"),
+      transportProtocol: "http",
+      configuredOrigin: origin,
+      remoteAddress: "203.0.113.20",
+      forwardedProto: context.req.header("x-forwarded-proto"),
+    }),
+  });
+  const response = await app.request(`${origin}/cloud/mcp`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer valid-token",
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  });
+  assert.equal(response.status, 403);
+  assert.equal(authentications.length, 0);
 });
 
 test("MCP tool failures remain structured, redacted, and correlated", async () => {

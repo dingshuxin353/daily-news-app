@@ -102,6 +102,16 @@ export function resolveTrustedExternalOrigin(input: {
 }): string | null {
   const requestUrl = new URL(input.requestUrl);
   const configuredUrl = new URL(input.configuredOrigin);
+  const remote = input.remoteAddress?.startsWith("::ffff:")
+    ? input.remoteAddress.slice(7)
+    : input.remoteAddress;
+  const remoteIsLoopback = remote === "127.0.0.1" || remote === "::1";
+  const configuredHostIsLoopback = configuredUrl.hostname === "127.0.0.1"
+    || configuredUrl.hostname === "localhost"
+    || configuredUrl.hostname === "[::1]";
+  if (configuredUrl.protocol === "http:" && (!configuredHostIsLoopback || !remoteIsLoopback)) {
+    return null;
+  }
   const requestHost = input.requestHost?.trim().toLowerCase();
   if (
     !requestHost
@@ -114,10 +124,7 @@ export function resolveTrustedExternalOrigin(input: {
   const transportOrigin = new URL(`${input.transportProtocol}://${requestHost}`).origin;
   if (transportOrigin === configuredUrl.origin) return configuredUrl.origin;
 
-  const remote = input.remoteAddress?.startsWith("::ffff:")
-    ? input.remoteAddress.slice(7)
-    : input.remoteAddress;
-  if (remote !== "127.0.0.1" && remote !== "::1") return transportOrigin;
+  if (!remoteIsLoopback) return transportOrigin;
   if (!input.forwardedProto || input.forwardedProto.includes(",")) return transportOrigin;
 
   if (`${input.forwardedProto.trim().toLowerCase()}:` !== configuredUrl.protocol) return transportOrigin;

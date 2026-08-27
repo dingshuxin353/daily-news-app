@@ -13,9 +13,9 @@
 
 先参考 [`.env.example`](../.env.example) 准备以下云端配置：
 
-- `CLOUD_ORIGIN`：显式公开 Origin；非回环地址必须使用 HTTPS。
+- `CLOUD_ORIGIN`：显式公开 Origin；非回环地址必须使用 HTTPS。回环 HTTP 只供本机开发，必须同时使用回环 `CLOUD_HOST`。
 - `CLOUD_BASE_PATH`：可留空，或设置为无尾部斜杠的绝对路径。
-- `CLOUD_HOST`：默认 `127.0.0.1`。
+- `CLOUD_HOST`：默认 `127.0.0.1`；回环 HTTP Origin 不得搭配 `0.0.0.0`、`::` 或其他公开监听地址。
 - `CLOUD_PORT`：默认 `3000`。
 - `DATABASE_URL`：独立 PostgreSQL 数据库连接地址。
 - `PG_SSL_MODE`：`disable` 或 `require`。
@@ -68,7 +68,7 @@ Personal Todo 仍默认关闭。设置页只读取开关与非归档数量，不
 
 M3-D 精确锁定 `@modelcontextprotocol/server@2.0.0`、`@modelcontextprotocol/client@2.0.0` 与 `zod@4.2.0`。`POST /mcp` 通过一个 `createMcpHandler` Server Factory 同时服务现代 `2026-07-28` 和无状态兼容 `2025-11-25`，不生成协议 Session，也不注册 GET / DELETE 流。六个工具共享 M3-B 的 `AgentRequestAuthenticator`、`AgentOperationsService`、PostgreSQL 事务、限流、写入租约和 `clientRunId` 幂等状态，不存在第二套 Token 或业务数据路径。
 
-MCP 在解析前按独立的 256 KiB 上限读取请求克隆；原请求保留给官方 SDK。真实 Host、请求目标 Host、Socket 协议、回环 TLS 终止代理和可选浏览器 `Origin` 都必须与 `CLOUD_ORIGIN` 一致，连接元数据不可得时失败关闭。现代请求还必须携带 `MCP-Protocol-Version`；其版本、`Mcp-Method`、`Mcp-Name` 与正文一致性由官方 SDK 校验。PAT 在每个 POST 前重新认证并按实际工具区分读写额度；传入 SDK 的认证对象只含脱敏占位 Token 与内部请求上下文，不把原始 PAT 暴露给工具回调。
+MCP 在解析前按独立的 256 KiB 上限读取请求克隆；原请求保留给官方 SDK。真实 Host、请求目标 Host、Socket 协议、回环 TLS 终止代理和可选浏览器 `Origin` 都必须与 `CLOUD_ORIGIN` 一致，连接元数据不可得时失败关闭。回环 HTTP Origin 还要求进程只绑定回环地址，并在运行时独立拒绝所有非回环连接来源；即使请求 Host 与 Origin 字面一致也不能绕过该边界。现代请求还必须携带 `MCP-Protocol-Version`；其版本、`Mcp-Method`、`Mcp-Name` 与正文一致性由官方 SDK 校验。PAT 在每个 POST 前重新认证并按实际工具区分读写额度；传入 SDK 的认证对象只含脱敏占位 Token 与内部请求上下文，不把原始 PAT 暴露给工具回调。
 
 工具的严格 Zod 输入 / 输出 Schema 会由 SDK 转换为 JSON Schema；Context 返回默认目标、明确日期和写入边界，提交工具继续进入正式 Writer / Compiler。工具业务失败使用 `isError`、稳定 `error.code/message/requestId` 和脱敏短文本，协议错误由 SDK 返回 JSON-RPC 错误。Server Instructions 在前 512 字符内完整声明 Context-first、明确目标、Candidate 隔离、Todo disabled、幂等重试和用户确认规则。
 

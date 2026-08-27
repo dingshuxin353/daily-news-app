@@ -320,6 +320,10 @@ function parseIntegerEnvironment(
   return requireInteger(Number(raw), name, minimum, maximum);
 }
 
+function isLoopbackHost(value: string): boolean {
+  return value === "127.0.0.1" || value === "localhost" || value === "[::1]" || value === "::1";
+}
+
 function parseOrigin(raw: string | undefined): string {
   if (!raw) throw new CloudConfigError("CLOUD_ORIGIN is required");
   let origin: URL;
@@ -328,7 +332,7 @@ function parseOrigin(raw: string | undefined): string {
   } catch {
     throw new CloudConfigError("CLOUD_ORIGIN must be an absolute URL");
   }
-  const loopback = origin.hostname === "127.0.0.1" || origin.hostname === "localhost" || origin.hostname === "[::1]";
+  const loopback = isLoopbackHost(origin.hostname);
   if (origin.protocol !== "https:" && !(origin.protocol === "http:" && loopback)) {
     throw new CloudConfigError("CLOUD_ORIGIN must use HTTPS except on loopback hosts");
   }
@@ -393,6 +397,13 @@ function parseHost(raw: string | undefined): string {
   throw new CloudConfigError("CLOUD_HOST must be a valid IP address or hostname");
 }
 
+function assertOriginBinding(origin: string, host: string): void {
+  const originUrl = new URL(origin);
+  if (originUrl.protocol === "http:" && (!isLoopbackHost(originUrl.hostname) || !isLoopbackHost(host))) {
+    throw new CloudConfigError("loopback HTTP CLOUD_ORIGIN requires a loopback CLOUD_HOST");
+  }
+}
+
 export async function loadCloudConfig(options: {
   env?: NodeJS.ProcessEnv;
   configPath?: string;
@@ -413,6 +424,8 @@ export async function loadCloudConfig(options: {
 
   const origin = parseOrigin(env.CLOUD_ORIGIN);
   const basePath = parseBasePath(env.CLOUD_BASE_PATH);
+  const host = parseHost(env.CLOUD_HOST);
+  assertOriginBinding(origin, host);
   const identity = parseMailConfiguration(env);
   const tokenDigestSecret = requireSecret(env, "AGENT_TOKEN_DIGEST_SECRET");
   const pairingCodeDigestSecret = requireSecret(env, "PAIRING_CODE_DIGEST_SECRET");
@@ -427,7 +440,7 @@ export async function loadCloudConfig(options: {
   return {
     origin,
     basePath,
-    host: parseHost(env.CLOUD_HOST),
+    host,
     port: parseIntegerEnvironment(env, "CLOUD_PORT", 3000, 1, 65535),
     database: {
       connectionString: parseDatabaseUrl(env.DATABASE_URL),
