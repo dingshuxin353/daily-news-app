@@ -469,7 +469,9 @@ export class PostgresDailyStorage {
     const explicitDate = requestedDate === undefined ? undefined : requireDate(requestedDate);
     const client = await this.pool.connect();
     try {
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await client.query("BEGIN");
+      await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      await client.query("SET TRANSACTION READ ONLY");
       const dates = await listDates(client, this.context);
       const date = explicitDate ?? dates[0];
       if (!date) {

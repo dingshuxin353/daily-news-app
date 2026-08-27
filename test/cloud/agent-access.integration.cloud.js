@@ -336,6 +336,7 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   );
 
   const formalHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  assert.equal(formalHome.status, 200);
   const formalHomeHtml = await formalHome.text();
   assert.match(formalHomeHtml, /个性化正式日报/);
   assert.match(formalHomeHtml, /正式主标题/);
