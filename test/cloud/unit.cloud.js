@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { createAdaptorServer } from "@hono/node-server";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -38,6 +39,7 @@ import {
   assertBrowserMutation,
   createSettingsCsrfToken,
   readSettingsBody,
+  resolveTrustedExternalOrigin,
   verifySettingsCsrfToken,
 } from "../../.cloud-dist/src/web/settings-security.js";
 
@@ -508,6 +510,7 @@ test("settings mutations reject cross-origin, invalid CSRF, unsupported media, a
   assert.deepEqual(body, { _csrf: csrf, name: "Agent" });
   assert.doesNotThrow(() => assertBrowserMutation({
     request: validRequest,
+    requestOrigin: "https://dailynews.test",
     configuredOrigin: "https://dailynews.test",
     csrfSecret: secret,
     sessionId: "session-a",
@@ -516,6 +519,7 @@ test("settings mutations reject cross-origin, invalid CSRF, unsupported media, a
   }));
   assert.throws(() => assertBrowserMutation({
     request: new Request(validRequest, { headers: { ...Object.fromEntries(validRequest.headers), origin: "https://attacker.test" } }),
+    requestOrigin: "https://dailynews.test",
     configuredOrigin: "https://dailynews.test",
     csrfSecret: secret,
     sessionId: "session-a",
@@ -538,4 +542,142 @@ test("settings mutations reject cross-origin, invalid CSRF, unsupported media, a
     }), 1024),
     (error) => error.status === 400,
   );
+});
+
+test("external origin trusts one loopback TLS proxy hop and rejects untrusted forwarding", () => {
+  assert.equal(resolveTrustedExternalOrigin({
+    requestUrl: "http://dailynews.test/settings/agent/connections",
+    configuredOrigin: "https://dailynews.test",
+    remoteAddress: "127.0.0.1",
+    forwardedProto: "https",
+  }), "https://dailynews.test");
+  for (const input of [
+    { remoteAddress: "203.0.113.20", forwardedProto: "https" },
+    { remoteAddress: "127.0.0.1", forwardedProto: undefined },
+    { remoteAddress: "127.0.0.1", forwardedProto: "https,http" },
+    { remoteAddress: "127.0.0.1", forwardedProto: "http" },
+  ]) {
+    assert.equal(resolveTrustedExternalOrigin({
+      requestUrl: "http://dailynews.test/settings/agent/connections",
+      configuredOrigin: "https://dailynews.test",
+      ...input,
+    }), "http://dailynews.test");
+  }
+});
+
+test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT verification", async () => {
+  const csrfSecret = "adapter-csrf-secret-with-at-least-32-characters";
+  const session = { session: { id: "session-a" }, user: { id: "user-a" } };
+  const renamed = [];
+  const app = createCloudApp({
+    basePath: "",
+    readinessCheck: async () => {},
+    identity: { getSession: async () => session },
+    tenancy: { ensureSpaceForUser: async () => ({ spaceId: "space-a", userId: "user-a" }) },
+    defaults: validProductConfig.defaults,
+    agentSettings: {
+      origin: "https://dailynews.test",
+      csrfSecret,
+      service: {
+        ensureBootstrapPairing: async () => {},
+        verifyPairing: async () => ({
+          credential: {
+            id: "credential-pairing",
+            spaceId: "space-a",
+            name: "Provisioned Agent",
+            selector: "selector",
+            secretDigest: "digest",
+            tokenHint: "hint",
+            status: "active",
+            rotatedFromId: null,
+            expiresAt: null,
+            createdAt: new Date("2026-08-27T00:00:00.000Z"),
+            lastUsedAt: new Date("2026-08-27T00:00:00.000Z"),
+            revokedAt: null,
+          },
+          context: {
+            publicationId: "daily-news",
+            publicationName: "DailyNews",
+            timeZone: "Asia/Shanghai",
+            todoEnabled: false,
+          },
+        }),
+        renameCredential: async (_tenant, id, name) => {
+          renamed.push({ id, name });
+          return {
+            id,
+            spaceId: "space-a",
+            name,
+            selector: "selector",
+            secretDigest: "digest",
+            tokenHint: "hint",
+            status: "active",
+            rotatedFromId: null,
+            expiresAt: null,
+            createdAt: new Date("2026-08-27T00:00:00.000Z"),
+            lastUsedAt: null,
+            revokedAt: null,
+          };
+        },
+      },
+      digestActor: () => "actor-digest",
+      apiBaseUrl: "https://dailynews.test/api/v1",
+      mcpUrl: "https://dailynews.test/mcp",
+      activeCredentialLimit: 10,
+      requestBodyLimitBytes: 16384,
+    },
+  });
+  const server = createAdaptorServer({ fetch: app.fetch, hostname: "127.0.0.1" });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const csrf = createSettingsCsrfToken(csrfSecret, "session-a", "user-a");
+  const request = (headers = {}) => new Promise((resolve, reject) => {
+    const body = JSON.stringify({ name: "代理后的 Agent", _csrf: csrf });
+    const outgoing = httpRequest({
+      hostname: "127.0.0.1",
+      port: address.port,
+      path: "/settings/agent/connections/credential-a/name",
+      method: "POST",
+      headers: {
+        host: "dailynews.test",
+        origin: "https://dailynews.test",
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+        ...headers,
+      },
+    }, (incoming) => {
+      incoming.resume();
+      incoming.once("end", () => resolve(incoming.statusCode));
+    });
+    outgoing.once("error", reject);
+    outgoing.end(body);
+  });
+  const verifyRequest = () => new Promise((resolve, reject) => {
+    const outgoing = httpRequest({
+      hostname: "127.0.0.1",
+      port: address.port,
+      path: "/agent-pairing/v1/verify",
+      method: "POST",
+      headers: { authorization: "Bearer provisioning-token" },
+    }, (incoming) => {
+      incoming.resume();
+      incoming.once("end", () => resolve(incoming.statusCode));
+    });
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
+  try {
+    assert.equal(await request(), 403);
+    assert.equal(await request({ "x-forwarded-proto": "http" }), 403);
+    assert.equal(await request({ "x-forwarded-proto": "https", origin: "https://attacker.test" }), 403);
+    assert.equal(await request({ "x-forwarded-proto": "https" }), 200);
+    assert.equal(await verifyRequest(), 200);
+    assert.deepEqual(renamed, [{ id: "credential-a", name: "代理后的 Agent" }]);
+  } finally {
+    await closeHttpServer(server);
+  }
 });

@@ -63,9 +63,9 @@ M2-D 精确锁定 `better-auth@1.7.1` 与 `tencentcloud-sdk-nodejs-ses@4.1.271`�
 
 M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret>`：selector 为 128 bit 随机公开定位段，secret 为 256 bit 随机值。服务端只保存带部署 Secret 的 HMAC-SHA-256 摘要与掩码 hint。配对码为 10 位无歧义字符、默认 10 分钟有效，由 Pairing ID 与单调代次派生；数据库只保存摘要，刷新增加代次并立即使旧码失效。Claim 只签发一次默认 10 分钟的 provisioning PAT；完成最小只读 Verify 后同一凭证原子变为 active，超时、取消、轮换或撤销后不能恢复。
 
-`config/cloud.json` 的 `agentAccess` 同时固定 Pairing / provisioning TTL、Claim / Verify 每 IP 小时上限、16 KiB 请求体上限、24 小时限流事件保留期与 90 天最小审计保留期。请求体在 JSON 或表单解析前按流读取并停止超限请求，具体数值不散落在 Controller 中。
+`config/cloud.json` 的 `agentAccess` 同时固定 Pairing / provisioning TTL、Claim / Verify 每 IP 小时上限、16 KiB 浏览器设置与 Claim 请求体上限、24 小时限流事件保留期与 90 天最小审计保留期。浏览器设置与 Claim 请求体在 JSON 或表单解析前按流读取并停止超限请求，具体数值不散落在 Controller 中。Verify 是 PAT-only 的空 POST，不要求也不解析 `Content-Type` 或请求体。
 
-待配对、provisioning 与 active 共同占用每 Space 10 个授权槽位。创建、Claim、手动签发、轮换和撤销均锁定 Space 行；轮换在同一事务中撤销旧凭证并建立替代凭证，不增加槽位。浏览器创建和轮换使用 operation ID，重复提交不会重放明文；相同 operation ID 携带不同请求会冲突。
+待配对、provisioning 与 active 共同占用每 Space 10 个授权槽位。所有 Agent 授权生命周期事务统一按 `Space → Pairing → Credential` 获取有关行锁；只涉及其中一类子资源时仍先锁 Space，不能建立反向锁序。轮换在同一事务中撤销旧凭证并建立替代凭证，不增加槽位。浏览器创建和轮换使用 operation ID，重复提交不会重放明文；相同 operation ID 携带不同请求会冲突。
 
 云端编译产物位于 `.cloud-dist/`，已被 Git 忽略，不进入现有静态 `dist/` 或 `local-dist/`。现有本地文件版仍使用 `npm start`，行为不变。
 
@@ -77,9 +77,9 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `ALL /api/auth/*` 由 Better Auth 处理 Email OTP、Session 与退出。
 - `GET /` 需要有效 Session，幂等补偿 Space 初始化后只显示 Space 名称、默认 Publication、Todo 开关、当前主题和退出入口。
 - `GET /settings/agent` 与其连接 / 高级凭证子路由使用 Session、严格同源检查和绑定当前 Session 的 CSRF Token；M3-A 返回服务端 JSON 契约，M3-C 再接入确认后的可见页面。
-- `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 只接受该 PAT 并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
+- `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
 
-所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。Nginx 必须覆盖 `X-DailyNews-Client-IP`，并只把可信客户端 IP 交给回环监听的 Node.js 进程。
+所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用只在直接上游地址为回环、Host 与 `CLOUD_ORIGIN` 一致且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。来自非回环地址、缺失或多值的代理协议、Host 不匹配及浏览器 `Origin` 不匹配都会继续拒绝，不能用任意 Origin 绕过 CSRF。
 
 ## 测试
 
@@ -97,4 +97,4 @@ M2-B 集成测试额外覆盖并发首次初始化、事务故障回滚、部分
 
 M2-D 自动化只使用 Fake Adapter 或注入的 SES Stub，覆盖完整 OTP 登录、错误次数、重发轮换、一次性与并发消费、Session 跨新运行时保持、退出、初始化补偿、持久限流、全站并发硬上限、跨站首登拒绝、供应商失败脱敏、Cookie 属性和 Fake 测试路由隔离。真实 SES 不进入本地自检或 CI；只有用户另行授权后才能执行一次正式代码真实邮箱冒烟。
 
-M3-A 集成测试覆盖 Bootstrap Pairing、刷新旧码失效、Claim / Verify 一次性、provisioning 超时、摘要存储、CSRF / 跨 Origin、浏览器重复提交、轮换与单独撤销、跨 Space 目标、第 11 个并发授权失败和持久 IP 限流。测试只使用虚构用户和临时凭证，不把明文写入数据库、日志或测试快照。
+M3-A 集成测试覆盖 Bootstrap Pairing、刷新旧码失效、Claim / 无请求体 Verify 一次性、provisioning 超时、摘要存储、CSRF / 跨 Origin、浏览器重复提交、轮换与单独撤销、跨 Space 目标、第 11 个并发授权失败、持久 IP 限流，以及 Claim / 页面 Bootstrap、Verify / 取消之间的真实 PostgreSQL 锁顺序。云端单元测试通过真实 HTTP Adapter 覆盖回环 TLS 终止代理的同源判断及其负向边界。测试只使用虚构用户和临时凭证，不把明文写入数据库、日志或测试快照。

@@ -172,6 +172,13 @@ async function post(app, pathname, body, headers = {}) {
   });
 }
 
+async function verifyPairing(app, token, headers = {}) {
+  return app.request("https://dailynews.test/agent-pairing/v1/verify", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, ...headers },
+  });
+}
+
 async function signIn(harness, email) {
   assert.equal((await post(harness.app, "/api/auth/email-otp/send-verification-otp", {
     email,
@@ -194,6 +201,21 @@ async function getJson(app, pathname, headers = {}) {
 async function mutate(app, pathname, cookie, csrfToken, body = {}, headers = {}) {
   const response = await post(app, pathname, { ...body, _csrf: csrfToken }, { cookie, ...headers });
   return { response, body: await response.json() };
+}
+
+async function waitForBlockedSpaceLocks(minimum) {
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const result = await controlPool.query(`
+      SELECT count(*)::integer AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
+        AND query LIKE 'SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE%'
+    `);
+    if (result.rows[0].count >= minimum) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`expected at least ${minimum} transactions waiting for the Space lock`);
 }
 
 beforeEach(resetAndMigrate);
@@ -273,15 +295,13 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
   assert.doesNotMatch(JSON.stringify(stored.rows[0]), new RegExp(claimed.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   const wrongToken = `${claimed.token.slice(0, -1)}${claimed.token.endsWith("A") ? "B" : "A"}`;
-  const wrongVerify = await post(harness.app, "/agent-pairing/v1/verify", {}, {
-    authorization: `Bearer ${wrongToken}`,
+  const wrongVerify = await verifyPairing(harness.app, wrongToken, {
     "x-test-client-ip": "203.0.113.10",
   });
   assert.equal(wrongVerify.status, 401);
   assert.equal(wrongVerify.headers.get("www-authenticate"), "Bearer");
 
-  const verify = await post(harness.app, "/agent-pairing/v1/verify", {}, {
-    authorization: `Bearer ${claimed.token}`,
+  const verify = await verifyPairing(harness.app, claimed.token, {
     "x-test-client-ip": "203.0.113.10",
   });
   assert.equal(verify.status, 200);
@@ -297,8 +317,7 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
     (await harness.agentAccess.authenticateActiveToken(`Bearer ${claimed.token}`)).id,
     claimed.credentialId,
   );
-  assert.equal((await post(harness.app, "/agent-pairing/v1/verify", {}, {
-    authorization: `Bearer ${claimed.token}`,
+  assert.equal((await verifyPairing(harness.app, claimed.token, {
     "x-test-client-ip": "203.0.113.10",
   })).status, 401);
 
@@ -455,6 +474,110 @@ test("credential quota serializes concurrent creation and pairing refresh consum
   assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials")).rows[0].count, 9);
 });
 
+test("claim and browser bootstrap acquire the Space lock before the pairing row", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "claim-lock-order@example.com");
+  assert.equal((await harness.app.request("https://dailynews.test/", { headers: { cookie } })).status, 200);
+  const settings = await getJson(harness.app, "/settings/agent", { cookie });
+  const pairing = settings.body.pairings[0];
+  const stored = await controlPool.query(
+    "SELECT space_id FROM app.agent_pairing_sessions WHERE id = $1",
+    [pairing.id],
+  );
+  const blocker = await controlPool.connect();
+  let claimPromise;
+  let homePromise;
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [stored.rows[0].space_id]);
+    claimPromise = post(harness.app, "/agent-pairing/v1/claim", {
+      pairingCode: pairing.code,
+      clientName: "Concurrent claimant",
+    });
+    homePromise = harness.app.request("https://dailynews.test/", { headers: { cookie } });
+    await waitForBlockedSpaceLocks(2);
+
+    const observer = await controlPool.connect();
+    try {
+      await observer.query("BEGIN");
+      await observer.query(
+        "SELECT id FROM app.agent_pairing_sessions WHERE id = $1 FOR UPDATE NOWAIT",
+        [pairing.id],
+      );
+      await observer.query("ROLLBACK");
+    } finally {
+      observer.release();
+    }
+    await blocker.query("COMMIT");
+    assert.equal((await claimPromise).status, 201);
+    assert.equal((await homePromise).status, 200);
+  } finally {
+    await blocker.query("ROLLBACK").catch(() => {});
+    blocker.release();
+    await Promise.allSettled([claimPromise, homePromise].filter(Boolean));
+  }
+});
+
+test("verify and cancellation serialize at Space before locking pairing or credential rows", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "verify-lock-order@example.com");
+  assert.equal((await harness.app.request("https://dailynews.test/", { headers: { cookie } })).status, 200);
+  const settings = await getJson(harness.app, "/settings/agent", { cookie });
+  const pairing = settings.body.pairings[0];
+  const claim = await post(harness.app, "/agent-pairing/v1/claim", {
+    pairingCode: pairing.code,
+    clientName: "Concurrent verifier",
+  });
+  assert.equal(claim.status, 201);
+  const claimed = await claim.json();
+  const stored = await controlPool.query(
+    "SELECT space_id FROM app.agent_pairing_sessions WHERE id = $1",
+    [pairing.id],
+  );
+  const blocker = await controlPool.connect();
+  let verifyPromise;
+  let cancelPromise;
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [stored.rows[0].space_id]);
+    verifyPromise = verifyPairing(harness.app, claimed.token);
+    cancelPromise = mutate(
+      harness.app,
+      `/settings/agent/connections/${pairing.id}/pair/cancel`,
+      cookie,
+      settings.body.csrfToken,
+    );
+    await waitForBlockedSpaceLocks(2);
+
+    const observer = await controlPool.connect();
+    try {
+      await observer.query("BEGIN");
+      await observer.query(
+        "SELECT id FROM app.agent_pairing_sessions WHERE id = $1 FOR UPDATE NOWAIT",
+        [pairing.id],
+      );
+      await observer.query(
+        "SELECT id FROM app.agent_credentials WHERE id = $1 FOR UPDATE NOWAIT",
+        [claimed.credentialId],
+      );
+      await observer.query("ROLLBACK");
+    } finally {
+      observer.release();
+    }
+    await blocker.query("COMMIT");
+    const verifyStatus = (await verifyPromise).status;
+    const cancelStatus = (await cancelPromise).response.status;
+    assert.ok(
+      (verifyStatus === 200 && cancelStatus === 409)
+      || (verifyStatus === 401 && cancelStatus === 200),
+    );
+  } finally {
+    await blocker.query("ROLLBACK").catch(() => {});
+    blocker.release();
+    await Promise.allSettled([verifyPromise, cancelPromise].filter(Boolean));
+  }
+});
+
 test("pairing rate limits persist and expired provisioning credentials are revoked before retry", async () => {
   const limited = createHarness({ productOverrides: { agentAccess: { claimIpHourlyLimit: 2 } } });
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -484,9 +607,7 @@ test("pairing rate limits persist and expired provisioning credentials are revok
     "UPDATE app.agent_credentials SET expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
     [claimed.credentialId],
   );
-  const expired = await post(harness.app, "/agent-pairing/v1/verify", {}, {
-    authorization: `Bearer ${claimed.token}`,
-  });
+  const expired = await verifyPairing(harness.app, claimed.token);
   assert.equal(expired.status, 401);
   const lifecycle = await controlPool.query(`
     SELECT c.status AS credential_status, p.status AS pairing_status
@@ -500,7 +621,5 @@ test("pairing rate limits persist and expired provisioning credentials are revok
   assert.equal(retry.response.status, 200);
   assert.equal(retry.body.pairing.status, "pending");
   assert.notEqual(retry.body.pairing.code, pairing.code);
-  assert.equal((await post(harness.app, "/agent-pairing/v1/verify", {}, {
-    authorization: `Bearer ${claimed.token}`,
-  })).status, 401);
+  assert.equal((await verifyPairing(harness.app, claimed.token)).status, 401);
 });

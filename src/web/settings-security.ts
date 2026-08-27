@@ -71,15 +71,15 @@ export async function readSettingsBody(request: Request, bodyLimitBytes: number)
 
 export function assertBrowserMutation(input: {
   request: Request;
+  requestOrigin: string;
   configuredOrigin: string;
   csrfSecret: string;
   sessionId: string;
   userId: string;
   body: Record<string, unknown>;
 }): void {
-  const requestOrigin = new URL(input.request.url).origin;
   if (
-    requestOrigin !== input.configuredOrigin
+    input.requestOrigin !== input.configuredOrigin
     || input.request.headers.get("origin") !== input.configuredOrigin
     || !verifySettingsCsrfToken(
       input.csrfSecret,
@@ -90,4 +90,30 @@ export function assertBrowserMutation(input: {
   ) {
     throw new AgentAccessError(403, "request_forbidden", "请求未通过安全检查。");
   }
+}
+
+export function resolveTrustedExternalOrigin(input: {
+  requestUrl: string;
+  configuredOrigin: string;
+  remoteAddress: string | undefined;
+  forwardedProto: string | undefined;
+}): string {
+  const requestOrigin = new URL(input.requestUrl).origin;
+  if (requestOrigin === input.configuredOrigin) return requestOrigin;
+
+  const remote = input.remoteAddress?.startsWith("::ffff:")
+    ? input.remoteAddress.slice(7)
+    : input.remoteAddress;
+  if (remote !== "127.0.0.1" && remote !== "::1") return requestOrigin;
+  if (!input.forwardedProto || input.forwardedProto.includes(",")) return requestOrigin;
+
+  const requestUrl = new URL(input.requestUrl);
+  const configuredUrl = new URL(input.configuredOrigin);
+  if (
+    `${input.forwardedProto.trim().toLowerCase()}:` !== configuredUrl.protocol
+    || requestUrl.host !== configuredUrl.host
+  ) {
+    return requestOrigin;
+  }
+  return configuredUrl.origin;
 }

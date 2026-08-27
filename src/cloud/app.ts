@@ -10,6 +10,7 @@ import type { AgentCredentialService } from "../modules/agent-access/credential-
 import type { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
 import { renderLoginPage, renderSpacePage } from "../web/cloud-pages.js";
 import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
+import { resolveTrustedExternalOrigin } from "../web/settings-security.js";
 
 export interface CloudAppDependencies {
   basePath: string;
@@ -48,6 +49,21 @@ function resolveNodeClientIp(context: Context): string {
   return resolveTrustedClientIp({
     remoteAddress,
     forwardedAddress: context.req.header("x-dailynews-client-ip"),
+  });
+}
+
+function resolveNodeRequestOrigin(context: Context, configuredOrigin: string): string {
+  let remoteAddress: string | undefined;
+  try {
+    remoteAddress = getConnInfo(context).remote.address;
+  } catch {
+    remoteAddress = "127.0.0.1";
+  }
+  return resolveTrustedExternalOrigin({
+    requestUrl: context.req.url,
+    configuredOrigin,
+    remoteAddress,
+    forwardedProto: context.req.header("x-forwarded-proto"),
   });
 }
 
@@ -169,6 +185,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         defaults,
         agentAccess: dependencies.agentSettings.service,
         clientIpResolver: clientIp,
+        requestOriginResolver: (context) => resolveNodeRequestOrigin(context, dependencies.agentSettings!.origin),
         digestActor: dependencies.agentSettings.digestActor,
         apiBaseUrl: dependencies.agentSettings.apiBaseUrl,
         mcpUrl: dependencies.agentSettings.mcpUrl,

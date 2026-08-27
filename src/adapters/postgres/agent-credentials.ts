@@ -90,6 +90,7 @@ function mapCredential(row: CredentialRow): CredentialRecord {
 }
 
 async function lockSpace(client: PoolClient, spaceId: string): Promise<void> {
+  // Every Agent access lifecycle transaction acquires rows in Space → Pairing → Credential order.
   const result = await client.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [spaceId]);
   if (result.rowCount !== 1) throw new AgentAccessError(404, "target_not_found", "没有找到目标空间。");
 }
@@ -294,6 +295,7 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
   async refreshPairing(input: PairingRefreshInput): Promise<PairingRecord> {
     requireTenantContext(input.tenant);
     return this.transaction(async (client) => {
+      await lockSpace(client, input.tenant.spaceId);
       const result = await client.query<PairingRow>(
         `UPDATE app.agent_pairing_sessions
          SET status = 'pending', code_generation = $3, code_digest = $4, expires_at = $5,
@@ -316,6 +318,7 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
   async cancelClaimAndRefresh(input: PairingRefreshInput): Promise<PairingRecord> {
     requireTenantContext(input.tenant);
     return this.transaction(async (client) => {
+      await lockSpace(client, input.tenant.spaceId);
       const pairingResult = await client.query<PairingRow>(
         `SELECT ${PAIRING_COLUMNS} FROM app.agent_pairing_sessions
          WHERE id = $1 AND space_id = $2 FOR UPDATE`,
@@ -349,16 +352,30 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
 
   async claimPairing(input: PairingClaimInput): Promise<{ pairing: PairingRecord; credential: CredentialRecord }> {
     const outcome = await this.transaction(async (client) => {
+      const discoveredPairing = await client.query<PairingRow>(
+        `SELECT ${PAIRING_COLUMNS} FROM app.agent_pairing_sessions
+         WHERE code_digest = $1 AND status = 'pending'`,
+        [input.codeDigest],
+      );
+      if (!discoveredPairing.rows[0]) {
+        await insertAudit(client, this.retention.auditDays, {
+          spaceId: null, actorDigest: input.ipDigest, eventType: "pairing_claim_failed",
+          targetType: "pairing", result: "invalid", requestId: input.requestId,
+        });
+        return { error: new AgentAccessError(404, "pairing_unavailable", "配对码无效或已更新。") } as const;
+      }
+      await lockSpace(client, discoveredPairing.rows[0].space_id);
       const pairingResult = await client.query<PairingRow>(
         `SELECT ${PAIRING_COLUMNS} FROM app.agent_pairing_sessions
-         WHERE code_digest = $1 AND status = 'pending' FOR UPDATE`,
-        [input.codeDigest],
+         WHERE id = $1 AND code_digest = $2 AND status = 'pending' FOR UPDATE`,
+        [discoveredPairing.rows[0].id, input.codeDigest],
       );
       const pairing = pairingResult.rows[0];
       if (!pairing) {
         await insertAudit(client, this.retention.auditDays, {
-          spaceId: null, actorDigest: input.ipDigest, eventType: "pairing_claim_failed",
-          targetType: "pairing", result: "invalid", requestId: input.requestId,
+          spaceId: discoveredPairing.rows[0].space_id, actorDigest: input.ipDigest,
+          eventType: "pairing_claim_failed", targetType: "pairing",
+          targetId: discoveredPairing.rows[0].id, result: "unavailable", requestId: input.requestId,
         });
         return { error: new AgentAccessError(404, "pairing_unavailable", "配对码无效或已更新。") } as const;
       }
@@ -374,7 +391,6 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
         });
         return { error: new AgentAccessError(404, "pairing_unavailable", "配对码无效或已更新。") } as const;
       }
-      await lockSpace(client, pairing.space_id);
       if (await countOccupiedSlots(client, pairing.space_id) > input.activeCredentialLimit) {
         throw new AgentAccessError(409, "credential_limit_reached", "Agent 授权数量已达到上限。");
       }
@@ -407,26 +423,40 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
 
   async verifyPairing(input: PairingVerifyInput): Promise<{ context: VerifiedPairingContext; credential: CredentialRecord }> {
     const outcome = await this.transaction(async (client) => {
+      const discoveredCredential = await client.query<CredentialRow>(
+        `SELECT ${CREDENTIAL_COLUMNS} FROM app.agent_credentials
+         WHERE id = $1 AND selector = $2`,
+        [input.credentialId, input.selector],
+      );
+      if (!input.authorizationValid || !discoveredCredential.rows[0]) {
+        await insertAudit(client, this.retention.auditDays, {
+          spaceId: discoveredCredential.rows[0]?.space_id ?? null, actorDigest: input.actorDigest,
+          eventType: "pairing_verify_failed", targetType: "credential",
+          targetId: discoveredCredential.rows[0]?.id, result: "invalid", requestId: input.requestId,
+        });
+        return { error: new AgentAccessError(401, "authentication_failed", "连接密钥无效或已失效。") } as const;
+      }
+      await lockSpace(client, discoveredCredential.rows[0].space_id);
+      const pairingResult = await client.query<PairingRow>(
+        `SELECT ${PAIRING_COLUMNS} FROM app.agent_pairing_sessions
+         WHERE provisioning_credential_id = $1 AND status = 'claimed' FOR UPDATE`,
+        [discoveredCredential.rows[0].id],
+      );
+      const pairing = pairingResult.rows[0];
       const credentialResult = await client.query<CredentialRow>(
         `SELECT ${CREDENTIAL_COLUMNS} FROM app.agent_credentials
          WHERE id = $1 AND selector = $2 FOR UPDATE`,
         [input.credentialId, input.selector],
       );
       const credential = credentialResult.rows[0];
-      if (!input.authorizationValid || !credential || credential.status !== "provisioning") {
+      if (!credential || credential.status !== "provisioning") {
         await insertAudit(client, this.retention.auditDays, {
-          spaceId: credential?.space_id ?? null, actorDigest: input.actorDigest,
+          spaceId: discoveredCredential.rows[0].space_id, actorDigest: input.actorDigest,
           eventType: "pairing_verify_failed", targetType: "credential",
-          targetId: credential?.id, result: "invalid", requestId: input.requestId,
+          targetId: discoveredCredential.rows[0].id, result: "invalid", requestId: input.requestId,
         });
         return { error: new AgentAccessError(401, "authentication_failed", "连接密钥无效或已失效。") } as const;
       }
-      const pairingResult = await client.query<PairingRow>(
-        `SELECT ${PAIRING_COLUMNS} FROM app.agent_pairing_sessions
-         WHERE provisioning_credential_id = $1 AND status = 'claimed' FOR UPDATE`,
-        [credential.id],
-      );
-      const pairing = pairingResult.rows[0];
       if (!pairing || !credential.expires_at || credential.expires_at.getTime() <= Date.now()) {
         await client.query(
           `UPDATE app.agent_credentials SET status = 'revoked', revoked_at = clock_timestamp()
@@ -574,6 +604,11 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
     requireTenantContext(input.tenant);
     return this.transaction(async (client) => {
       await lockSpace(client, input.tenant.spaceId);
+      await client.query(
+        `SELECT id FROM app.agent_pairing_sessions
+         WHERE provisioning_credential_id = $1 AND space_id = $2 AND status = 'claimed' FOR UPDATE`,
+        [input.targetCredentialId, input.tenant.spaceId],
+      );
       const result = await client.query<CredentialRow>(
         `UPDATE app.agent_credentials SET status = 'revoked', revoked_at = clock_timestamp()
          WHERE id = $1 AND space_id = $2 AND status IN ('active', 'provisioning')
@@ -599,6 +634,7 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
   async renameCredential(input: CredentialRenameInput): Promise<CredentialRecord> {
     requireTenantContext(input.tenant);
     return this.transaction(async (client) => {
+      await lockSpace(client, input.tenant.spaceId);
       const result = await client.query<CredentialRow>(
         `UPDATE app.agent_credentials SET name = $3
          WHERE id = $1 AND space_id = $2 AND status = 'active'

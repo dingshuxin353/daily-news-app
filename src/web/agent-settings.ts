@@ -20,6 +20,7 @@ export interface AgentSettingsDependencies {
   defaults: CloudFileConfig["defaults"];
   agentAccess: AgentCredentialService;
   clientIpResolver: (context: Context) => string;
+  requestOriginResolver: (context: Context) => string;
   digestActor: (purpose: "session" | "ip", value: string) => string;
   apiBaseUrl: string;
   mcpUrl: string;
@@ -119,6 +120,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     const body = await readSettingsBody(context.req.raw, dependencies.requestBodyLimitBytes);
     assertBrowserMutation({
       request: context.req.raw,
+      requestOrigin: dependencies.requestOriginResolver(context),
       configuredOrigin: dependencies.origin,
       csrfSecret: dependencies.csrfSecret,
       sessionId: access.sessionId,
@@ -311,7 +313,6 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
   }));
 
   app.post(route("/agent-pairing/v1/verify"), (context) => run(context, async (currentRequestId) => {
-    await readSettingsBody(context.req.raw, dependencies.requestBodyLimitBytes);
     const ipDigest = dependencies.digestActor("ip", dependencies.clientIpResolver(context));
     const result = await dependencies.agentAccess.verifyPairing({
       authorization: context.req.header("authorization"),
