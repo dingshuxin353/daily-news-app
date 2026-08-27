@@ -11,6 +11,7 @@ import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/te
 import { FakeMailAdapter } from "../../.cloud-dist/src/adapters/mail/mail.js";
 import { createIdentityService } from "../../.cloud-dist/src/modules/identity/auth.js";
 import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
+import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -23,6 +24,8 @@ const { Pool } = pg;
 const controlPool = new Pool({ connectionString, max: 20, connectionTimeoutMillis: 5000 });
 const openHarnesses = new Set();
 const migrationsDirectory = new URL("../../db/migrations", import.meta.url).pathname;
+const projectRoot = new URL("../../", import.meta.url).pathname;
+const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
 
 const product = {
   schemaVersion: 1,
@@ -105,7 +108,7 @@ function createHarness(options = {}) {
     readinessCheck: async () => {},
     identity,
     tenancy,
-    privateReading: new PrivateReadingService(appPool, tenancy),
+    privateReading: new PrivateReadingService(appPool, tenancy, systemThemes),
     defaults: config.product.defaults,
     clientIpResolver: (context) => context.req.header("x-test-client-ip") || "127.0.0.1",
     testMailReader: options.exposeFake === false ? undefined : fakeMail,

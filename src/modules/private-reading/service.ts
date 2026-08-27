@@ -1,6 +1,7 @@
 import type { PostgresPool } from "../../adapters/postgres/pool.js";
 import { createPostgresDailyStorage } from "../../adapters/postgres/daily.js";
 import { createPostgresTodoStorage } from "../../adapters/postgres/todo.js";
+import type { SystemThemeReader } from "../../adapters/postgres/theme.js";
 import type {
   PostgresTenancyStore,
   PublicationRecord,
@@ -65,6 +66,7 @@ export class PrivateReadingService {
   constructor(
     private readonly pool: PostgresPool,
     private readonly tenancy: PostgresTenancyStore,
+    private readonly systemThemes: SystemThemeReader,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -83,7 +85,10 @@ export class PrivateReadingService {
         ? themes.find((item) => item.targetType === "publication" && item.publicationId === publication.publicationId)
         : undefined,
     );
-    if (!home || !publication || !todo || !theme) {
+    const themeRevision = theme
+      ? await this.systemThemes.readThemeRevision(theme.id, theme.revision)
+      : null;
+    if (!home || !publication || !todo || !theme || !themeRevision) {
       throw new Error("private reading bootstrap is incomplete");
     }
     return {

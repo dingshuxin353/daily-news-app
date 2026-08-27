@@ -13,6 +13,7 @@ import { keyedDigest } from "../../.cloud-dist/src/modules/identity/security.js"
 import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
 import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
 import { compileIssue } from "../../scripts/lib/compiler.js";
+import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -25,6 +26,8 @@ const { Pool } = pg;
 const controlPool = new Pool({ connectionString, max: 30, connectionTimeoutMillis: 5000 });
 const openHarnesses = new Set();
 const migrationsDirectory = new URL("../../db/migrations", import.meta.url).pathname;
+const projectRoot = new URL("../../", import.meta.url).pathname;
+const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
 const testRequestEnvironment = {
   incoming: {
     socket: {
@@ -114,7 +117,7 @@ function createHarness(options = {}) {
   const mail = new FakeMailAdapter();
   const identity = createIdentityService({ config, appPool, authPool, mailAdapter: mail });
   const tenancy = new PostgresTenancyStore(appPool);
-  const privateReading = new PrivateReadingService(appPool, tenancy, () => new Date("2026-08-27T08:00:00+08:00"));
+  const privateReading = new PrivateReadingService(appPool, tenancy, systemThemes, () => new Date("2026-08-27T08:00:00+08:00"));
   const agentAccess = new AgentCredentialService(
     new PostgresAgentAccessRepository(appPool, {
       rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
@@ -419,7 +422,7 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.equal((await controlPool.query("SELECT state_payload FROM app.todo_states WHERE space_id = $1", [space.id])).rowCount, 1);
 
   await controlPool.query(
-    "DELETE FROM app.theme_selections WHERE space_id = $1 AND target_type = 'publication'",
+    "UPDATE app.theme_selections SET theme_id = 'missing-theme', theme_revision = 1 WHERE space_id = $1 AND target_type = 'home'",
     [space.id],
   );
   const incompleteTheme = await appRequest(harness.app, "https://dailynews.test/home", {
