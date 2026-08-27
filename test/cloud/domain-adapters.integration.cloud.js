@@ -183,6 +183,10 @@ test("Daily PostgreSQL Adapter matches the file Adapter for the same M1 input", 
   assert.deepEqual(await storage.readIssue(candidate.date), await readJson(path.join(dataDir, "issues", `${candidate.date}.json`)));
   assert.deepEqual(await storage.readCompiled(candidate.date), await readJson(path.join(dataDir, "compiled", `${candidate.date}.json`)));
   assert.deepEqual(await storage.readIndex(), await readJson(path.join(dataDir, "index.json")));
+  const snapshot = await storage.readSnapshot();
+  assert.equal(snapshot.date, candidate.date);
+  assert.deepEqual(snapshot.issue, await storage.readIssue(candidate.date));
+  assert.deepEqual(snapshot.compiled, await storage.readCompiled(candidate.date));
 });
 
 test("Daily idempotency is canonical, conflict-safe, and race-safe", async () => {

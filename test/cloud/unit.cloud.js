@@ -20,7 +20,11 @@ import {
   normalizeEmail,
   resolveTrustedClientIp,
 } from "../../.cloud-dist/src/modules/identity/security.js";
-import { renderLoginPage } from "../../.cloud-dist/src/web/cloud-pages.js";
+import {
+  renderHomePage,
+  renderLoginPage,
+  renderPublicPage,
+} from "../../.cloud-dist/src/web/private-pages.js";
 import {
   CanonicalJsonError,
   canonicalJson,
@@ -47,6 +51,8 @@ import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-acce
 import { AGENT_API_ROUTE_CONTRACT } from "../../.cloud-dist/src/protocols/http-api/routes.js";
 import { createPostgresTodoStorage } from "../../.cloud-dist/src/adapters/postgres/todo.js";
 import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/tenancy.js";
+import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
+import { compileIssue } from "../../scripts/lib/compiler.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -287,6 +293,29 @@ test("login page contains no account-discovery copy or persistent email storage"
   assert.match(html, /\/cloud\/assets\/cloud-auth\.js/);
   assert.match(html, /autocomplete="email"/);
   assert.doesNotMatch(html, /localStorage|sessionStorage|邮箱不存在|已注册/);
+});
+
+test("M3 public and sample Home pages keep confirmed copy, privacy boundaries, and responsive assets", () => {
+  const publicHtml = renderPublicPage({ basePath: "/cloud", signedIn: false });
+  assert.match(publicHtml, /每天一份，只为你而编的私人日报/);
+  assert.match(publicHtml, /把每天关心的事，交给你的私人编辑部/);
+  assert.match(publicHtml, /private-newsroom\.png/);
+  assert.match(publicHtml, /width="1400" height="466"/);
+  assert.match(publicHtml, /\/cloud\/login/);
+
+  const shell = {
+    spaceName: "我的日报",
+    timeZone: "Asia/Shanghai",
+    publication: { publicationId: "daily-news", displayName: "DailyNews", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
+    theme: { id: "newspaper-default", revision: 1 },
+    todoEnabled: false,
+  };
+  const homeHtml = renderHomePage({ basePath: "/cloud", shell, daily: null });
+  assert.match(homeHtml, /示例日报/);
+  assert.match(homeHtml, /系统内置 · 不代表今日/);
+  assert.match(homeHtml, /设置自动日报/);
+  assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
+  assert.match(homeHtml, /data-theme-id="newspaper-default"/);
 });
 
 test("PG_SSL_MODE is the authoritative pg Pool TLS setting", async () => {
@@ -935,6 +964,81 @@ test("disabled Todo snapshot does not issue any query that reads retained state"
   assert.ok(queries.some((sql) => sql === "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"));
   assert.ok(queries.some((sql) => sql === "COMMIT"));
   assert.ok(queries.every((sql) => !/todo_states|state_payload/.test(sql)));
+});
+
+test("inactive owned Publications retain private access to existing formal Daily snapshots", async () => {
+  const issue = {
+    schemaVersion: 1,
+    date: "2026-08-27",
+    generatedAt: "2026-08-27T08:00:00+08:00",
+    coverage: { start: "2026-08-26T08:00:00+08:00", end: "2026-08-27T08:00:00+08:00" },
+    revision: 1,
+    items: [{
+      id: "retained-daily",
+      title: "停用后保留的正式日报",
+      brief: "保留摘要",
+      summary: "Publication 停用后，所属用户仍可读取这份已经发布的正式日报内容。",
+      category: "产品",
+      editorial: { priority: "lead", selectionReason: "验证停用后的正式读取" },
+      sources: [{ name: "正式来源", url: "https://example.com/retained" }],
+    }],
+  };
+  const compiled = compileIssue(issue).compiled;
+  const clientQueries = [];
+  let connectCount = 0;
+  const client = {
+    async query(sql) {
+      clientQueries.push(sql);
+      if (/SELECT issue_date::text AS issue_date/.test(sql)) {
+        return { rows: [{ issue_date: issue.date }], rowCount: 1 };
+      }
+      if (/SELECT i\.issue_payload, c\.compiled_payload/.test(sql)) {
+        return { rows: [{ issue_payload: issue, compiled_payload: compiled }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const pool = {
+    async query(sql, values) {
+      if (/FROM app\.spaces/.test(sql)) {
+        return { rows: [{ id: "space-reader", user_id: "user-reader", status: "ready" }], rowCount: 1 };
+      }
+      if (/SELECT 1\s+FROM app\.publications/.test(sql)) {
+        return values[1] === "daily-news" ? { rows: [{ "?column?": 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (/SELECT space_id, publication_id, display_name, status, is_default, sort_order/.test(sql)) {
+        return {
+          rows: [{
+            space_id: "space-reader",
+            publication_id: "daily-news",
+            display_name: "DailyNews",
+            status: "inactive",
+            is_default: true,
+            sort_order: 0,
+          }],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected pool query: ${sql}`);
+    },
+    async connect() {
+      connectCount += 1;
+      return client;
+    },
+  };
+  const tenancy = new PostgresTenancyStore(pool);
+  const tenant = await tenancy.resolveTenantContextForSpace("space-reader");
+  assert.ok(tenant);
+  const service = new PrivateReadingService(pool, tenancy, { readThemeRevision: async () => null });
+  const daily = await service.readDaily(tenant, "daily-news", issue.date);
+  assert.equal(daily.issue.items[0].title, "停用后保留的正式日报");
+  assert.equal(connectCount, 1);
+  assert.ok(clientQueries.some((sql) => /SELECT i\.issue_payload, c\.compiled_payload/.test(sql)));
+
+  const hidden = await service.readDaily(tenant, "other-space-publication", issue.date);
+  assert.equal(hidden, null);
+  assert.equal(connectCount, 1);
 });
 
 test("JSON API validates POST media type, idempotency key, strict envelopes, and streamed size", async () => {

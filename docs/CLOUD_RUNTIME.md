@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A 与 M3-B 研发能力，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B 与 M3-C 研发能力，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与默认对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期，以及 M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API。它不包含 MCP、完整 Home 或正式部署。Agent API 的调用契约与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与默认对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期、M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API，以及 M3-C 的公开入口、首次接入、私有 Home、正式日报、Todo 和设置页面。它不包含 MCP 或正式部署。Agent API 的调用契约与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 
@@ -62,6 +62,10 @@ M3-B 的 `/api/v1` 只接受活动 PAT。统一请求层从摘要凭证解析唯
 
 Daily API 把历史日期与完整替换确认绑定到精确 Publication、日期和锁内正式 revision；未来日期、过期确认、停用 Publication 和跨 Space 目标均在正式写入前失败。Todo API 使用独立 `clientRunId` 作为协议幂等键，同时保留 Candidate `candidateId` 的领域唯一性。两条写入都继续通过 M1 Application Service，并在 PostgreSQL 事务中原子提交 Candidate、Submission、正式 State / Issue 与 Compiled Edition。
 
+M3-C 的私有阅读服务只从 Session 解析出的 Space 进入 PostgreSQL Repository。Home、日报阅读页与 Todo 页不接受客户端指定 Space；主题必须同时具备有效 Home 选择与 Publication 选择，选择链不完整时页面失败关闭。正式日报在同一个 `REPEATABLE READ READ ONLY` 快照中取得 Issue 与 Compiled Edition，复用静态构建相同的 Compiled Edition 投影，并保持编译后的模块顺序与层级；指定日期不存在时返回明确 404，不回退到其他日期。首次还没有正式日报时，Home 只显示版本化的系统示例，不写入 Candidate、Issue 或 Compiled Edition；第一份正式日报生成后会在同一位置替换示例。
+
+Personal Todo 仍默认关闭。设置页只读取开关与非归档数量，不展示任务标题；关闭时 `/todo/` 不读取保留的 State 正文，直接引导回设置。启用后，Todo 页面只读展示正式 State，并固定按已逾期、今天、接下来、暂无日期和今天已完成分组；浏览器不能直接修改任务。
+
 M2-D 精确锁定 `better-auth@1.7.1` 与 `tencentcloud-sdk-nodejs-ses@4.1.271`，并以 `uuid@11.1.1` 覆盖腾讯云 SDK 的旧传递版本。Better Auth 使用 `auth` Search Path 和数据库 Session；Email OTP 固定为 6 位、5 分钟、最多错误 3 次、摘要保存、重发轮换。应用在调用邮件 Adapter 前，以 PostgreSQL 锁并发预留单邮箱冷却、邮箱小时、IP 小时和全站每日硬上限；所有状态改变型认证请求还必须通过严格的同源 Origin 校验。
 
 `MAIL_MODE=fake` 不调用外部供应商。Fake OTP 读取能力只由自动化测试在构造测试 App 时显式注入；正式 `npm run start:cloud` 即使运行在 Fake 模式也不会注册测试读取路由。`MAIL_MODE=ses` 使用腾讯云 SES `SendEmail` 触发类模板；成功必须同时保存 RequestId 和 MessageId，拒绝、超时或缺失任一 ID 时返回脱敏 `503`，同一次请求不自动重试。
@@ -78,10 +82,15 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 
 - `GET /health/live` 只证明 Node.js 进程存活，不访问数据库。
 - `GET /health/ready` 检查 PostgreSQL 连接与 Migration 摘要集合；不可用时只返回通用 `503`。
-- `GET /login` 显示邮箱与 OTP 登录页。
+- `GET /` 是不含用户数据的公开产品入口；已登录用户只会看到进入私人编辑部的动作。
+- `GET /login` 显示统一品牌外壳中的邮箱与 OTP 登录页；成功后由 `GET /post-login` 把首次用户送到接入页，已有用户送回安全的站内目标或 Home。
 - `ALL /api/auth/*` 由 Better Auth 处理 Email OTP、Session 与退出。
-- `GET /` 需要有效 Session，幂等补偿 Space 初始化后只显示 Space 名称、默认 Publication、Todo 开关、当前主题和退出入口。
-- `GET /settings/agent` 与其连接 / 高级凭证子路由使用 Session、严格同源检查和绑定当前 Session 的 CSRF Token；M3-A 返回服务端 JSON 契约，M3-C 再接入确认后的可见页面。
+- `GET /onboarding` 显示完整接入话术与独立的短时配对码；接入话术本身不包含配对码、PAT、MCP 配置或完整调度提示词。`GET /.well-known/dailynews-agent-setup.json` 是无用户数据的公开接入说明。
+- `GET /home` 显示系统示例或最新正式日报；正式内容出现后不再并列显示示例，也不伪造调度、在线或更新时间承诺。
+- `GET /p/:publicationId/?date=YYYY-MM-DD` 按 Compiled Edition 的正式层级和顺序阅读指定日期日报；省略日期时读取该 Publication 的最新正式日报。
+- `GET /todo/` 只在 Todo 已启用时展示正式 State；`GET /settings` 管理站点事实、Todo 开关、Agent 授权入口与账户安全。
+- `GET /settings/agent` 与其连接 / 高级凭证子路由使用 Session、严格同源检查和绑定当前 Session 的 CSRF Token；浏览器使用 HTML 页面，声明 JSON 的客户端仍获得 M3-A 契约。完整 PAT 仅在创建或轮换成功响应中显示一次。
+- `GET /settings/agent/openapi.yaml` 需要有效 Session，供高级接入下载当前 OpenAPI 契约。
 - `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
 - `GET /api/v1/publications`、`GET /api/v1/publications/:id/daily-context`、`POST /api/v1/publications/:id/daily-candidates` 与 `GET /api/v1/publications/:id/issues/:date` 提供 Content 正式读写闭环。
 - `GET /api/v1/todo` 与 `POST /api/v1/todo/candidates` 提供 Todo 状态、正式 State 与受控写入；Todo 关闭时不读取保留正文。
@@ -107,3 +116,5 @@ M2-D 自动化只使用 Fake Adapter 或注入的 SES Stub，覆盖完整 OTP �
 M3-A 集成测试覆盖 Bootstrap Pairing、刷新旧码失效、Claim / 无请求体 Verify 一次性、provisioning 超时、摘要存储、CSRF / 跨 Origin、浏览器重复提交、轮换与单独撤销、跨 Space 目标、第 11 个并发授权失败、持久 IP 限流，以及 Claim / 页面 Bootstrap、Verify / 取消之间的真实 PostgreSQL 锁顺序。云端单元测试通过真实 HTTP Adapter 覆盖回环 TLS 终止代理的同源判断及其负向边界。测试只使用虚构用户和临时凭证，不把明文写入数据库、日志或测试快照。
 
 M3-B 集成测试覆盖活动 / 撤销 PAT、`last_used_at` 节流触达、PAT 与 IP 持久限流、跨进程写入租约、Content 正式写入与读取、跨 Space 隐藏、未来 / 历史 / `replace` 锁内确认、停用 Publication、Todo disabled 最小披露、Todo `clientRunId` 幂等与 Candidate ID 独立性，以及 `0102` 对短 legacy Candidate ID 的安全升级。OpenAPI 测试从真实路由清单核对全部 Method / Path、Bearer、POST 幂等头、错误码与假数据示例。
+
+M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与配对码分离、系统示例不落库、第一份正式日报替换示例、Compiled Edition 顺序和层级、指定日期 404、Todo 浏览器启停、正式 State 五组投影、关闭后不披露保留正文、主题选择链不完整时失败关闭，以及动态 Agent 名称的 HTML 转义。云端单元测试同时验证可见页面使用统一品牌外壳、资源入口和无用户数据的公开边界。

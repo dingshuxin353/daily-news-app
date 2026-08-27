@@ -1,5 +1,5 @@
 import type { AddressInfo } from "node:net";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAdaptorServer, type ServerType } from "@hono/node-server";
 import { checkMigrationCompatibility } from "../adapters/postgres/migrations.js";
 import {
@@ -14,10 +14,14 @@ import { createIdentityService } from "../modules/identity/auth.js";
 import { keyedDigest } from "../modules/identity/security.js";
 import { AgentCredentialService } from "../modules/agent-access/credential-service.js";
 import { AgentOperationsService } from "../modules/agent-access/operations.js";
+import { PrivateReadingService } from "../modules/private-reading/service.js";
 import { AgentRequestAuthenticator } from "./agent-context.js";
 import { createCloudApp } from "./app.js";
 import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
 import { defaultMigrationsDirectory } from "./paths.js";
+import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
+
+const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 export interface CloudServerRuntime {
   address: AddressInfo;
@@ -104,6 +108,7 @@ export async function startCloudServer(options: {
       basePath: config.basePath,
       identity,
       tenancy,
+      privateReading: new PrivateReadingService(pool, tenancy, createFileThemeStorage({ rootDir: projectRoot })),
       defaults: config.product.defaults,
       agentSettings: {
         origin: config.origin,

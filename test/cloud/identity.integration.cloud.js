@@ -10,6 +10,8 @@ import {
 import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/tenancy.js";
 import { FakeMailAdapter } from "../../.cloud-dist/src/adapters/mail/mail.js";
 import { createIdentityService } from "../../.cloud-dist/src/modules/identity/auth.js";
+import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
+import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -22,6 +24,8 @@ const { Pool } = pg;
 const controlPool = new Pool({ connectionString, max: 20, connectionTimeoutMillis: 5000 });
 const openHarnesses = new Set();
 const migrationsDirectory = new URL("../../db/migrations", import.meta.url).pathname;
+const projectRoot = new URL("../../", import.meta.url).pathname;
+const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
 
 const product = {
   schemaVersion: 1,
@@ -98,11 +102,13 @@ function createHarness(options = {}) {
   const authPool = createAuthPostgresPool(config.database);
   const fakeMail = options.fakeMail ?? new FakeMailAdapter();
   const identity = createIdentityService({ config, appPool, authPool, mailAdapter: fakeMail });
+  const tenancy = new PostgresTenancyStore(appPool);
   const app = createCloudApp({
     basePath: config.basePath,
     readinessCheck: async () => {},
     identity,
-    tenancy: new PostgresTenancyStore(appPool),
+    tenancy,
+    privateReading: new PrivateReadingService(appPool, tenancy, systemThemes),
     defaults: config.product.defaults,
     clientIpResolver: (context) => context.req.header("x-test-client-ip") || "127.0.0.1",
     testMailReader: options.exposeFake === false ? undefined : fakeMail,
@@ -195,15 +201,27 @@ test("Fake mode completes OTP sign-in, bootstraps one Space, persists the sessio
   assert.match(setCookie, /SameSite=Lax/i);
   assert.match(setCookie, /Path=\//i);
 
-  const privatePage = await secondRuntime.app.request("https://dailynews.test/", {
+  const publicPage = await secondRuntime.app.request("https://dailynews.test/", {
+    headers: { cookie },
+  });
+  assert.equal(publicPage.status, 200);
+  assert.match(await publicPage.text(), /进入私人日报/);
+
+  const destination = await secondRuntime.app.request("https://dailynews.test/post-login", {
+    headers: { cookie },
+  });
+  assert.equal(destination.status, 303);
+  assert.equal(destination.headers.get("location"), "/onboarding");
+
+  const privatePage = await secondRuntime.app.request("https://dailynews.test/home", {
     headers: { cookie },
   });
   assert.equal(privatePage.status, 200);
   const html = await privatePage.text();
-  assert.match(html, /我的日报/);
-  assert.match(html, /DailyNews · daily-news/);
-  assert.match(html, /已关闭/);
-  assert.match(html, /newspaper-default/);
+  assert.match(html, /示例日报/);
+  assert.match(html, /设置自动日报/);
+  assert.match(html, /data-theme-id="newspaper-default"/);
+  assert.doesNotMatch(html, /下次更新时间|负责 Agent|调度健康|迟到/);
   assert.equal(privatePage.headers.get("x-robots-tag"), "noindex, nofollow");
   assert.equal(privatePage.headers.get("cache-control"), "private, no-store");
 
@@ -219,9 +237,9 @@ test("Fake mode completes OTP sign-in, bootstraps one Space, persists the sessio
 
   const signOut = await post(secondRuntime.app, "/api/auth/sign-out", {}, { cookie });
   assert.equal(signOut.status, 200);
-  const afterSignOut = await secondRuntime.app.request("https://dailynews.test/", { headers: { cookie } });
+  const afterSignOut = await secondRuntime.app.request("https://dailynews.test/home", { headers: { cookie } });
   assert.equal(afterSignOut.status, 303);
-  assert.equal(afterSignOut.headers.get("location"), "/login");
+  assert.equal(afterSignOut.headers.get("location"), "/login?returnTo=%2Fhome");
 });
 
 test("Better Auth retains server-side revocation of every session for the current user", async () => {
@@ -247,9 +265,9 @@ test("Better Auth retains server-side revocation of every session for the curren
     0,
   );
   for (const cookie of [firstCookie, secondCookie]) {
-    const privatePage = await harness.app.request("https://dailynews.test/", { headers: { cookie } });
+    const privatePage = await harness.app.request("https://dailynews.test/home", { headers: { cookie } });
     assert.equal(privatePage.status, 303);
-    assert.equal(privatePage.headers.get("location"), "/login");
+    assert.equal(privatePage.headers.get("location"), "/login?returnTo=%2Fhome");
   }
 });
 
@@ -351,7 +369,7 @@ test("Fake mail reader exists only when explicitly injected into a test app", as
   const css = await hidden.app.request("https://dailynews.test/assets/cloud.css");
   assert.equal(css.status, 200);
   assert.match(css.headers.get("content-type"), /text\/css/);
-  assert.match(await css.text(), /macrostructure: Workbench/);
+  assert.match(await css.text(), /macrostructure: Split Studio \+ reading projection/);
 });
 
 test("cross-origin first sign-in with a valid OTP is rejected without consuming it or creating identity state", async () => {

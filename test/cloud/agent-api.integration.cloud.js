@@ -299,10 +299,27 @@ test("Daily API enforces future, historical, replace revision, inactive, and ten
   assert.equal(stale.status, 409);
   assert.equal((await stale.json()).error.code, "revision_conflict");
 
+  const factsBeforeInactiveWrite = (await pool.query(
+    `SELECT
+       (SELECT count(*)::integer FROM app.daily_candidates WHERE space_id = $1 AND publication_id = 'daily-news') AS candidate_count,
+       (SELECT count(*)::integer FROM app.daily_submission_runs WHERE space_id = $1 AND publication_id = 'daily-news') AS submission_count,
+       (SELECT max(revision)::integer FROM app.issues WHERE space_id = $1 AND publication_id = 'daily-news') AS issue_revision,
+       (SELECT max(revision)::integer FROM app.compiled_editions WHERE space_id = $1 AND publication_id = 'daily-news') AS compiled_revision`,
+    [first.tenant.spaceId],
+  )).rows[0];
   await pool.query("UPDATE app.publications SET status = 'inactive' WHERE space_id = $1 AND publication_id = 'daily-news'", [first.tenant.spaceId]);
   const inactive = await postJson(first.app, "https://dailynews.test/api/v1/publications/daily-news/daily-candidates", first.headers, "daily-inactive-run", initial);
   assert.equal(inactive.status, 409);
   assert.equal((await inactive.json()).error.code, "publication_inactive");
+  const factsAfterInactiveWrite = (await pool.query(
+    `SELECT
+       (SELECT count(*)::integer FROM app.daily_candidates WHERE space_id = $1 AND publication_id = 'daily-news') AS candidate_count,
+       (SELECT count(*)::integer FROM app.daily_submission_runs WHERE space_id = $1 AND publication_id = 'daily-news') AS submission_count,
+       (SELECT max(revision)::integer FROM app.issues WHERE space_id = $1 AND publication_id = 'daily-news') AS issue_revision,
+       (SELECT max(revision)::integer FROM app.compiled_editions WHERE space_id = $1 AND publication_id = 'daily-news') AS compiled_revision`,
+    [first.tenant.spaceId],
+  )).rows[0];
+  assert.deepEqual(factsAfterInactiveWrite, factsBeforeInactiveWrite);
 });
 
 test("Todo API keeps disabled state private and uses clientRunId independently from candidateId", async () => {

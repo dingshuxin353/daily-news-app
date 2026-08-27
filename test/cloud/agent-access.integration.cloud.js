@@ -11,6 +11,9 @@ import { FakeMailAdapter } from "../../.cloud-dist/src/adapters/mail/mail.js";
 import { createIdentityService } from "../../.cloud-dist/src/modules/identity/auth.js";
 import { keyedDigest } from "../../.cloud-dist/src/modules/identity/security.js";
 import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
+import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
+import { compileIssue } from "../../scripts/lib/compiler.js";
+import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -23,6 +26,8 @@ const { Pool } = pg;
 const controlPool = new Pool({ connectionString, max: 30, connectionTimeoutMillis: 5000 });
 const openHarnesses = new Set();
 const migrationsDirectory = new URL("../../db/migrations", import.meta.url).pathname;
+const projectRoot = new URL("../../", import.meta.url).pathname;
+const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
 const testRequestEnvironment = {
   incoming: {
     socket: {
@@ -112,6 +117,7 @@ function createHarness(options = {}) {
   const mail = new FakeMailAdapter();
   const identity = createIdentityService({ config, appPool, authPool, mailAdapter: mail });
   const tenancy = new PostgresTenancyStore(appPool);
+  const privateReading = new PrivateReadingService(appPool, tenancy, systemThemes, () => new Date("2026-08-27T08:00:00+08:00"));
   const agentAccess = new AgentCredentialService(
     new PostgresAgentAccessRepository(appPool, {
       rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
@@ -139,6 +145,7 @@ function createHarness(options = {}) {
     readinessCheck: async () => {},
     identity,
     tenancy,
+    privateReading,
     defaults: config.product.defaults,
     clientIpResolver: (context) => context.req.header("x-test-client-ip") || "127.0.0.1",
     testMailReader: mail,
@@ -159,6 +166,8 @@ function createHarness(options = {}) {
     authPool,
     mail,
     agentAccess,
+    tenancy,
+    privateReading,
     async close() {
       openHarnesses.delete(harness);
       await Promise.all([appPool.end(), authPool.end()]);
@@ -257,8 +266,212 @@ after(async () => {
   await controlPool.end();
 });
 
+test("private product journey keeps onboarding, sample replacement, formal Daily, and Todo projection on one tenant", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "reader@example.com");
+
+  const publicPage = await appRequest(harness.app, "https://dailynews.test/", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(publicPage.status, 200);
+  assert.match(await publicPage.text(), /每天一份，只为你而编的私人日报/);
+
+  const destination = await appRequest(harness.app, "https://dailynews.test/post-login", {
+    headers: { cookie },
+  });
+  assert.equal(destination.status, 303);
+  assert.equal(destination.headers.get("location"), "/onboarding");
+
+  const anchoredLogin = await appRequest(harness.app, "https://dailynews.test/login?returnTo=%2Ftodo%2F%23todo-1234abcd", {
+    headers: { accept: "text/html" },
+  });
+  assert.equal(anchoredLogin.status, 200);
+  assert.match(await anchoredLogin.text(), /data-return-to="\/todo\/#todo-1234abcd"/);
+  const anchoredDestination = await appRequest(harness.app, "https://dailynews.test/post-login?returnTo=%2Ftodo%2F%23todo-1234abcd", {
+    headers: { cookie },
+  });
+  assert.equal(anchoredDestination.headers.get("location"), "/todo/#todo-1234abcd");
+
+  const onboarding = await appRequest(harness.app, "https://dailynews.test/onboarding", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(onboarding.status, 200);
+  const onboardingHtml = await onboarding.text();
+  assert.match(onboardingHtml, /把这段话发给你的 Agent/);
+  assert.match(onboardingHtml, /当前显示的配对码/);
+  assert.match(onboardingHtml, /data-copy-source="pairing"/);
+  const instructionText = /data-copy-source="instruction">([\s\S]*?)<\/pre>/.exec(onboardingHtml)?.[1] ?? "";
+  assert.doesNotMatch(instructionText, /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/);
+
+  const sampleHome = await appRequest(harness.app, "https://dailynews.test/home", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(sampleHome.status, 200);
+  const sampleHtml = await sampleHome.text();
+  assert.match(sampleHtml, /示例日报/);
+  assert.match(sampleHtml, /\/assets\/themes\/newspaper-default\/1\.css/);
+  assert.doesNotMatch(sampleHtml, /下次更新时间|负责 Agent|调度健康|迟到/);
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.issues")).rows[0].count, 0);
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.daily_candidates")).rows[0].count, 0);
+  const themeAsset = await appRequest(harness.app, "https://dailynews.test/assets/themes/newspaper-default/1.css");
+  assert.equal(themeAsset.status, 200);
+  assert.match(await themeAsset.text(), /--color-paper: var\(--color-background\)/);
+
+  const space = (await controlPool.query("SELECT id FROM app.spaces")).rows[0];
+  const issue = {
+    schemaVersion: 1,
+    date: "2026-08-27",
+    generatedAt: "2026-08-27T08:00:00+08:00",
+    coverage: { start: "2026-08-26T08:00:00+08:00", end: "2026-08-27T08:00:00+08:00" },
+    revision: 1,
+    items: [
+      { id: "formal-lead", title: "正式主标题", brief: "正式短摘要", summary: "正式完整摘要，用于验证第一份个性化日报会在 Home 的同一位置替换系统示例，而不会与示例并排展示。这里保留足够正文，让大模块使用正式 summary。", category: "正式内容", editorial: { priority: "lead", selectionReason: "正式首要内容" }, sources: [{ name: "正式来源一", url: "https://example.com/lead" }] },
+      { id: "formal-normal", title: "正式次标题", brief: "正式次要摘要", summary: "正式次要完整摘要，用于验证编译顺序和层级。", category: "正式内容", editorial: { priority: "normal", selectionReason: "正式次要内容" }, sources: [{ name: "正式来源二", url: "https://example.com/normal" }] },
+    ],
+  };
+  const compiled = compileIssue(issue).compiled;
+  await controlPool.query(
+    `INSERT INTO app.issues (space_id, publication_id, issue_date, revision, issue_payload)
+     VALUES ($1, 'daily-news', $2::date, 1, $3::jsonb)`,
+    [space.id, issue.date, JSON.stringify(issue)],
+  );
+  await controlPool.query(
+    `INSERT INTO app.compiled_editions (space_id, publication_id, issue_date, revision, compiled_payload)
+     VALUES ($1, 'daily-news', $2::date, 1, $3::jsonb)`,
+    [space.id, issue.date, JSON.stringify(compiled)],
+  );
+
+  const tenant = await harness.tenancy.resolveTenantContextForSpace(space.id);
+  const formalReading = await harness.privateReading.readLatestDaily(tenant);
+  assert.equal(formalReading.date, issue.date);
+  assert.equal(formalReading.projection.rows[0].modules[0].item.id, "formal-lead");
+
+  const formalHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  assert.equal(formalHome.status, 200);
+  const formalHomeHtml = await formalHome.text();
+  assert.match(formalHomeHtml, /个性化正式日报/);
+  assert.match(formalHomeHtml, /正式主标题/);
+  assert.doesNotMatch(formalHomeHtml, /把一天的信息/);
+
+  const dailyPage = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", { headers: { cookie, accept: "text/html" } });
+  assert.equal(dailyPage.status, 200);
+  const dailyHtml = await dailyPage.text();
+  assert.ok(dailyHtml.indexOf("正式主标题") < dailyHtml.indexOf("正式次标题"));
+  assert.match(dailyHtml, /daily-module--large/);
+  assert.match(dailyHtml, /daily-module--small/);
+  const missing = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-26", { headers: { cookie, accept: "text/html" } });
+  assert.equal(missing.status, 404);
+  assert.match(await missing.text(), /没有找到这期正式日报/);
+
+  const otherTenant = await harness.tenancy.ensureSpaceForUser("private-reading-other-user", product.defaults);
+  await controlPool.query(
+    `INSERT INTO app.publications (space_id, publication_id, display_name, status, is_default, sort_order)
+     VALUES ($1, 'private-other', '其他用户的私密日报', 'active', false, 1)`,
+    [otherTenant.spaceId],
+  );
+  const crossTenant = await appRequest(harness.app, "https://dailynews.test/p/private-other/?date=2026-08-27", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(crossTenant.status, 404);
+  assert.doesNotMatch(await crossTenant.text(), /其他用户的私密日报|正式主标题/);
+  const nonexistent = await appRequest(harness.app, "https://dailynews.test/p/not-a-publication/?date=2026-08-27", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(nonexistent.status, 404);
+  assert.doesNotMatch(await nonexistent.text(), /正式主标题/);
+
+  const agentSettings = await getJson(harness.app, "/settings/agent", { cookie });
+  const disabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/todo?reason=todo-disabled", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(disabledSettings.status, 200);
+  const disabledSettingsHtml = await disabledSettings.text();
+  assert.match(disabledSettingsHtml, /个人待办尚未启用/);
+  assert.doesNotMatch(disabledSettingsHtml, /今天的正式任务/);
+  const enabled = await appRequest(harness.app, "https://dailynews.test/settings/todo/enable", {
+    method: "POST",
+    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ _csrf: agentSettings.body.csrfToken }).toString(),
+  });
+  assert.equal(enabled.status, 303);
+  assert.equal(enabled.headers.get("location"), "/todo/");
+
+  const todoState = {
+    schemaVersion: 1,
+    revision: 1,
+    updatedAt: "2026-08-27T08:00:00+08:00",
+    items: [
+      { id: "todo-1234abcd", title: "今天的正式任务", note: "只来自正式 Todo State", dueDate: "2026-08-27", dueTime: "15:00", status: "open", createdAt: "2026-08-27T07:00:00+08:00", updatedAt: "2026-08-27T07:00:00+08:00", completedAt: null, archivedAt: null },
+    ],
+  };
+  await controlPool.query(
+    "INSERT INTO app.todo_states (space_id, revision, state_payload) VALUES ($1, 1, $2::jsonb)",
+    [space.id, JSON.stringify(todoState)],
+  );
+  const todoPage = await appRequest(harness.app, "https://dailynews.test/todo/", { headers: { cookie, accept: "text/html" } });
+  assert.equal(todoPage.status, 200);
+  const todoHtml = await todoPage.text();
+  for (const heading of ["已逾期", "今天", "接下来", "暂无日期", "今天已完成"]) assert.match(todoHtml, new RegExp(heading));
+  assert.match(todoHtml, /今天的正式任务/);
+
+  const enabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/todo", {
+    headers: { cookie, accept: "text/html" },
+  });
+  const enabledSettingsHtml = await enabledSettings.text();
+  assert.match(enabledSettingsHtml, /当前共有 1 项，其中 1 项未完成/);
+  assert.doesNotMatch(enabledSettingsHtml, /今天的正式任务/);
+  const disableConfirmation = await appRequest(harness.app, "https://dailynews.test/settings/todo/disable", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(disableConfirmation.status, 200);
+  assert.match(await disableConfirmation.text(), /已有任务会完整保留/);
+  assert.equal((await controlPool.query("SELECT enabled FROM app.todo_profiles WHERE space_id = $1", [space.id])).rows[0].enabled, true);
+
+  const disabled = await appRequest(harness.app, "https://dailynews.test/settings/todo/disable", {
+    method: "POST",
+    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ _csrf: agentSettings.body.csrfToken }).toString(),
+  });
+  assert.equal(disabled.status, 303);
+  const hiddenTodo = await appRequest(harness.app, "https://dailynews.test/todo/", { headers: { cookie, accept: "text/html" } });
+  assert.equal(hiddenTodo.status, 303);
+  assert.equal(hiddenTodo.headers.get("location"), "/settings/todo?reason=todo-disabled");
+  assert.equal((await controlPool.query("SELECT state_payload FROM app.todo_states WHERE space_id = $1", [space.id])).rowCount, 1);
+
+  await controlPool.query(
+    "UPDATE app.publications SET status = 'inactive' WHERE space_id = $1 AND publication_id = 'daily-news'",
+    [space.id],
+  );
+  const retainedDaily = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(retainedDaily.status, 200);
+  const retainedDailyHtml = await retainedDaily.text();
+  assert.match(retainedDailyHtml, /正式主标题/);
+  assert.match(retainedDailyHtml, /正式次标题/);
+  await controlPool.query(
+    "UPDATE app.publications SET status = 'active' WHERE space_id = $1 AND publication_id = 'daily-news'",
+    [space.id],
+  );
+
+  await controlPool.query(
+    "UPDATE app.theme_selections SET theme_id = 'missing-theme', theme_revision = 1 WHERE space_id = $1 AND target_type = 'home'",
+    [space.id],
+  );
+  const incompleteTheme = await appRequest(harness.app, "https://dailynews.test/home", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(incompleteTheme.status, 503);
+  assert.doesNotMatch(await incompleteTheme.text(), /正式主标题|今天的正式任务/);
+});
+
 test("bootstrap pairing refreshes, claims once, verifies once, and persists no plaintext secret", async () => {
   const harness = createHarness();
+  const signedOutSettings = await appRequest(harness.app, "https://dailynews.test/settings/agent", {
+    headers: { accept: "text/html" },
+  });
+  assert.equal(signedOutSettings.status, 303);
+  assert.equal(signedOutSettings.headers.get("location"), "/login?returnTo=%2Fsettings%2Fagent");
   const cookie = await signIn(harness, "pairing@example.com");
   assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
 
@@ -352,9 +565,16 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
   assert.equal(after.body.authorizations.length, 1);
   assert.equal(after.body.authorizations[0].name, "Codex <script>alert(1)</script>");
   assert.doesNotMatch(JSON.stringify(after.body), /tokenHint|secretDigest|selector|dnpat_/);
+  const agentSettingsPage = await appRequest(harness.app, "https://dailynews.test/settings/agent", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(agentSettingsPage.status, 200);
+  const agentSettingsHtml = await agentSettingsPage.text();
+  assert.match(agentSettingsHtml, /Codex &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(agentSettingsHtml, /Codex <script>/);
   assert.equal((await appRequest(harness.app, "https://dailynews.test/", {
     headers: { authorization: `Bearer ${claimed.token}` },
-  })).status, 303);
+  })).status, 200);
 
   const audits = await controlPool.query("SELECT event_type FROM app.audit_events ORDER BY created_at");
   assert.ok(audits.rows.some(({ event_type }) => event_type === "pairing_claimed"));
@@ -522,7 +742,7 @@ test("claim and browser bootstrap acquire the Space lock before the pairing row"
       pairingCode: pairing.code,
       clientName: "Concurrent claimant",
     });
-    homePromise = appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } });
+    homePromise = appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie } });
     await waitForBlockedTransactions(blockerPid, 2);
 
     const observer = await controlPool.connect();

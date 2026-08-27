@@ -1,4 +1,5 @@
 import { relativeLuminance } from "./theme-validation.js";
+import { buildDailyReadingProjection } from "./domain/daily-reading.js";
 
 function escapeHtml(value) {
   return String(value)
@@ -34,14 +35,9 @@ export function renderNoscriptFallback(issue) {
     </section>`;
   }
 
-  const modules = new Map(
-    (issue.layout?.rows ?? []).flatMap(({ modules: rowModules }) => (
-      rowModules.map((module) => [module.itemId, module])
-    )),
-  );
-  const stories = issue.items.map((item, index) => {
+  const projection = buildDailyReadingProjection(issue);
+  const stories = projection.rows.flatMap(({ modules }) => modules).map(({ item, ...module }, index) => {
     const source = item.sources[0];
-    const module = modules.get(item.id);
     const media = module?.mediaVariant && module.mediaVariant !== "none"
       ? renderImage(item.image, { eager: index === 0 })
       : "";
