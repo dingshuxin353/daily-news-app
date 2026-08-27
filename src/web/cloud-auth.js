@@ -1,5 +1,6 @@
 const body = document.body;
 const basePath = body.dataset.basePath || "";
+const returnTo = body.dataset.returnTo || "";
 const genericError = "请求未完成。请检查输入后重试。";
 
 function setFormState(form, state, message) {
@@ -84,7 +85,12 @@ if (emailForm instanceof HTMLFormElement && otpForm instanceof HTMLFormElement) 
         return;
       }
       setFormState(otpForm, "success", "验证成功，正在进入私有空间。");
-      window.location.assign(`${basePath}/`);
+      const destination = new URL(`${basePath}/post-login`, window.location.origin);
+      const todoAnchor = /^#todo-[a-f0-9]{8}$/.test(window.location.hash) && returnTo.endsWith("/todo/")
+        ? window.location.hash
+        : "";
+      if (returnTo) destination.searchParams.set("returnTo", `${returnTo}${todoAnchor}`);
+      window.location.assign(`${destination.pathname}${destination.search}`);
     } catch {
       setFormState(otpForm, "error", genericError);
     } finally {

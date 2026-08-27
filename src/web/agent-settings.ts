@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type Context, type Hono } from "hono";
 import type { CloudFileConfig } from "../cloud/config.js";
 import type { PostgresTenancyStore, TenantContext } from "../adapters/postgres/tenancy.js";
+import type { PrivateReadingService } from "../modules/private-reading/service.js";
 import type { IdentityService } from "../modules/identity/auth.js";
 import {
   AgentAccessError,
@@ -10,6 +11,13 @@ import {
   type PairingRecord,
 } from "../modules/agent-access/credential-service.js";
 import { assertBrowserMutation, createSettingsCsrfToken, readSettingsBody } from "./settings-security.js";
+import {
+  renderAdvancedAccessPage,
+  renderAgentSettingsPage,
+  renderConfirmPage,
+  renderCredentialSecretPage,
+  renderOnboardingPage,
+} from "./private-pages.js";
 
 export interface AgentSettingsDependencies {
   basePath: string;
@@ -17,6 +25,7 @@ export interface AgentSettingsDependencies {
   csrfSecret: string;
   identity: IdentityService;
   tenancy: PostgresTenancyStore;
+  privateReading?: PrivateReadingService;
   defaults: CloudFileConfig["defaults"];
   agentAccess: AgentCredentialService;
   clientIpResolver: (context: Context) => string;
@@ -69,6 +78,12 @@ function responseError(context: Context, error: unknown, currentRequestId: strin
   const safe = error instanceof AgentAccessError
     ? error
     : new AgentAccessError(503, "service_unavailable", "服务暂时不可用，请稍后重试。");
+  if (safe.status === 401 && context.req.method === "GET" && context.req.header("accept")?.includes("text/html")) {
+    const settingsIndex = context.req.path.indexOf("/settings/agent");
+    const basePath = settingsIndex >= 0 ? context.req.path.slice(0, settingsIndex) : "";
+    const target = `${context.req.path}${new URL(context.req.url).search}`;
+    return context.redirect(`${basePath}/login?returnTo=${encodeURIComponent(target)}`, 303);
+  }
   if (safe.status === 401 && context.req.path.endsWith("/agent-pairing/v1/verify")) {
     context.header("WWW-Authenticate", "Bearer");
   }
@@ -95,6 +110,8 @@ async function run(
 
 export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettingsDependencies): void {
   const route = (pathname: string) => `${dependencies.basePath}${pathname}`;
+  const wantsHtml = (context: Context) => context.req.header("accept")?.includes("text/html") === true;
+  const setupUrl = `${dependencies.origin}${route("/.well-known/dailynews-agent-setup.json")}`;
 
   async function browserAccess(context: Context, currentRequestId: string): Promise<BrowserAccessContext> {
     const session = await dependencies.identity.getSession(context.req.raw, dependencies.clientIpResolver(context));
@@ -136,9 +153,21 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       dependencies.agentAccess.listCredentials(access.tenant),
       dependencies.agentAccess.listPairings(access.tenant, currentRequestId, access.actorDigest),
     ]);
+    const newConnectionOperationId = randomUUID();
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderAgentSettingsPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        credentials,
+        pairings,
+        csrfToken: access.csrfToken,
+        operationId: newConnectionOperationId,
+        activeLimit: dependencies.activeCredentialLimit,
+      }));
+    }
     return context.json({
       csrfToken: access.csrfToken,
-      newConnectionOperationId: randomUUID(),
+      newConnectionOperationId,
       newManualTokenOperationId: randomUUID(),
       activeLimit: dependencies.activeCredentialLimit,
       authorizations: credentials.filter(({ status }) => status === "active").map((item) => credentialSummary(item)),
@@ -155,6 +184,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context)) return context.redirect(route(`/settings/agent/connections/${pairing.id}/pair`), 303);
     return context.json({ pairing: pairingSummary(pairing), requestId: currentRequestId }, pairing.repeated ? 200 : 201);
   }));
 
@@ -166,6 +196,17 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderOnboardingPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        pairing,
+        csrfToken: access.csrfToken,
+        setupUrl,
+        firstUse: false,
+        refreshed: context.req.query("refreshed") === "1",
+      }));
+    }
     return context.json({ pairing: pairingSummary(pairing), csrfToken: access.csrfToken, requestId: currentRequestId });
   }));
 
@@ -177,6 +218,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context)) return context.redirect(`${route(`/settings/agent/connections/${pairing.id}/pair`)}?refreshed=1#pairing-title`, 303);
     return context.json({ pairing: pairingSummary(pairing), requestId: currentRequestId });
   }));
 
@@ -188,6 +230,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context)) return context.redirect(`${route(`/settings/agent/connections/${pairing.id}/pair`)}?refreshed=1#pairing-title`, 303);
     return context.json({ pairing: pairingSummary(pairing), requestId: currentRequestId });
   }));
 
@@ -196,6 +239,17 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
     if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可移除的 Agent 授权。");
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderConfirmPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        title: `移除 ${credential.name}？`,
+        description: "这个 Agent 的访问权会立即撤销；已经提交的日报和 Todo 会保留，其他 Agent 不受影响。",
+        action: route(`/settings/agent/connections/${credential.id}/remove`),
+        csrfToken: access.csrfToken,
+        submitLabel: "移除 Agent",
+      }));
+    }
     return context.json({ credential: credentialSummary(credential), csrfToken: access.csrfToken, requestId: currentRequestId });
   }));
 
@@ -207,6 +261,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context)) return context.redirect(route("/settings/agent"), 303);
     return context.json({ credential: credentialSummary(credential), requestId: currentRequestId });
   }));
 
@@ -225,9 +280,21 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
   app.get(route("/settings/agent/manual-tokens"), (context) => run(context, async (currentRequestId) => {
     const access = await browserAccess(context, currentRequestId);
     const credentials = await dependencies.agentAccess.listCredentials(access.tenant);
+    const operationId = randomUUID();
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderAdvancedAccessPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        credentials,
+        csrfToken: access.csrfToken,
+        operationId,
+        apiBaseUrl: dependencies.apiBaseUrl,
+        mcpUrl: dependencies.mcpUrl,
+      }));
+    }
     return context.json({
       csrfToken: access.csrfToken,
-      operationId: randomUUID(),
+      operationId,
       apiBaseUrl: dependencies.apiBaseUrl,
       mcpUrl: dependencies.mcpUrl,
       credentials: credentials.map((item) => credentialSummary(item, true)),
@@ -243,6 +310,14 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderCredentialSecretPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        token: result.token,
+        title: "个人访问令牌已创建",
+      }), result.repeated ? 200 : 201);
+    }
     return context.json({
       credential: credentialSummary(result.credential, true),
       token: result.token,
@@ -256,9 +331,22 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
     if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可轮换的连接密钥。");
+    const operationId = randomUUID();
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderConfirmPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        title: `轮换 ${credential.name}？`,
+        description: "旧令牌会立即失效，新令牌只显示一次。请先确认客户端能够安全保存新凭证。",
+        action: route(`/settings/agent/manual-tokens/${credential.id}/rotate`),
+        csrfToken: access.csrfToken,
+        submitLabel: "轮换并显示新令牌",
+        hidden: { name: credential.name, operationId },
+      }));
+    }
     return context.json({
       credential: credentialSummary(credential, true),
-      operationId: randomUUID(),
+      operationId,
       csrfToken: access.csrfToken,
       requestId: currentRequestId,
     });
@@ -273,6 +361,14 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderCredentialSecretPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        token: result.token,
+        title: "个人访问令牌已轮换",
+      }));
+    }
     return context.json({
       credential: credentialSummary(result.credential, true),
       token: result.token,
@@ -286,6 +382,17 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
     if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可撤销的连接密钥。");
+    if (wantsHtml(context) && dependencies.privateReading) {
+      return context.html(renderConfirmPage({
+        basePath: dependencies.basePath,
+        shell: await dependencies.privateReading.readShell(access.tenant),
+        title: `撤销 ${credential.name}？`,
+        description: "这个令牌会立即失效；它已经提交的正式内容不会删除。",
+        action: route(`/settings/agent/manual-tokens/${credential.id}/revoke`),
+        csrfToken: access.csrfToken,
+        submitLabel: "撤销令牌",
+      }));
+    }
     return context.json({ credential: credentialSummary(credential, true), csrfToken: access.csrfToken, requestId: currentRequestId });
   }));
 
@@ -297,6 +404,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
+    if (wantsHtml(context)) return context.redirect(route("/settings/agent/manual-tokens"), 303);
     return context.json({ credential: credentialSummary(credential, true), requestId: currentRequestId });
   }));
 

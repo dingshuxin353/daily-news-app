@@ -53,6 +53,11 @@ interface JsonRow extends QueryResultRow {
   payload: unknown;
 }
 
+interface DailySnapshotRow extends QueryResultRow {
+  issue_payload: unknown;
+  compiled_payload: unknown;
+}
+
 interface DateRow extends QueryResultRow {
   issue_date: string;
 }
@@ -450,6 +455,44 @@ export class PostgresDailyStorage {
     try {
       const dates = await listDates(client, this.context);
       return dates.length === 0 ? null : { latest: dates[0], dates };
+    } finally {
+      client.release();
+    }
+  }
+
+  async readSnapshot(requestedDate?: string): Promise<{
+    date: string;
+    issue: unknown;
+    compiled: unknown;
+    dates: string[];
+  } | null> {
+    const explicitDate = requestedDate === undefined ? undefined : requireDate(requestedDate);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const dates = await listDates(client, this.context);
+      const date = explicitDate ?? dates[0];
+      if (!date) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const result = await client.query<DailySnapshotRow>(
+        `SELECT i.issue_payload, c.compiled_payload
+         FROM app.issues i
+         JOIN app.compiled_editions c
+           ON c.space_id = i.space_id
+          AND c.publication_id = i.publication_id
+          AND c.issue_date = i.issue_date
+         WHERE i.space_id = $1 AND i.publication_id = $2 AND i.issue_date = $3::date`,
+        [this.context.tenant.spaceId, this.context.publicationId, date],
+      );
+      await client.query("COMMIT");
+      const row = result.rows[0];
+      return row ? { date, issue: row.issue_payload, compiled: row.compiled_payload, dates } : null;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      if (error instanceof DailyStorageError) throw error;
+      throw new DailyStorageError("DAILY_STORAGE_FAILED", "daily snapshot read failed", { cause: error });
     } finally {
       client.release();
     }

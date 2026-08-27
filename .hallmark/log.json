@@ -5,5 +5,12 @@
     "theme": "Newsprint",
     "enrichment": "none",
     "brief": "M2-D email identity and minimal private Space shell"
+  },
+  {
+    "date": "2026-08-27",
+    "macrostructure": "Split Studio with editorial reading projection",
+    "theme": "Newsprint",
+    "enrichment": "approved transparent private-newsroom illustration",
+    "brief": "M3-C public entry, onboarding, private Daily reading, Todo, and settings"
   }
 ]

@@ -20,7 +20,11 @@ import {
   normalizeEmail,
   resolveTrustedClientIp,
 } from "../../.cloud-dist/src/modules/identity/security.js";
-import { renderLoginPage } from "../../.cloud-dist/src/web/cloud-pages.js";
+import {
+  renderHomePage,
+  renderLoginPage,
+  renderPublicPage,
+} from "../../.cloud-dist/src/web/private-pages.js";
 import {
   CanonicalJsonError,
   canonicalJson,
@@ -287,6 +291,29 @@ test("login page contains no account-discovery copy or persistent email storage"
   assert.match(html, /\/cloud\/assets\/cloud-auth\.js/);
   assert.match(html, /autocomplete="email"/);
   assert.doesNotMatch(html, /localStorage|sessionStorage|邮箱不存在|已注册/);
+});
+
+test("M3 public and sample Home pages keep confirmed copy, privacy boundaries, and responsive assets", () => {
+  const publicHtml = renderPublicPage({ basePath: "/cloud", signedIn: false });
+  assert.match(publicHtml, /每天一份，只为你而编的私人日报/);
+  assert.match(publicHtml, /把每天关心的事，交给你的私人编辑部/);
+  assert.match(publicHtml, /private-newsroom\.png/);
+  assert.match(publicHtml, /width="1400" height="466"/);
+  assert.match(publicHtml, /\/cloud\/login/);
+
+  const shell = {
+    spaceName: "我的日报",
+    timeZone: "Asia/Shanghai",
+    publication: { publicationId: "daily-news", displayName: "DailyNews", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
+    theme: { id: "newspaper-default", revision: 1 },
+    todoEnabled: false,
+  };
+  const homeHtml = renderHomePage({ basePath: "/cloud", shell, daily: null });
+  assert.match(homeHtml, /示例日报/);
+  assert.match(homeHtml, /系统内置 · 不代表今日/);
+  assert.match(homeHtml, /设置自动日报/);
+  assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
+  assert.match(homeHtml, /data-theme-id="newspaper-default"/);
 });
 
 test("PG_SSL_MODE is the authoritative pg Pool TLS setting", async () => {

@@ -14,6 +14,7 @@ import { createIdentityService } from "../modules/identity/auth.js";
 import { keyedDigest } from "../modules/identity/security.js";
 import { AgentCredentialService } from "../modules/agent-access/credential-service.js";
 import { AgentOperationsService } from "../modules/agent-access/operations.js";
+import { PrivateReadingService } from "../modules/private-reading/service.js";
 import { AgentRequestAuthenticator } from "./agent-context.js";
 import { createCloudApp } from "./app.js";
 import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
@@ -104,6 +105,7 @@ export async function startCloudServer(options: {
       basePath: config.basePath,
       identity,
       tenancy,
+      privateReading: new PrivateReadingService(pool, tenancy),
       defaults: config.product.defaults,
       agentSettings: {
         origin: config.origin,

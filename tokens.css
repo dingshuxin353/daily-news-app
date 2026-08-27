@@ -6,7 +6,8 @@
   --color-ink-soft: oklch(29% 0.01 65);
   --color-muted: oklch(39% 0.012 72);
   --color-rule: oklch(64% 0.012 75);
-  --color-accent: oklch(78% 0.13 82);
+  --color-accent-default: oklch(78% 0.13 82);
+  --color-accent: var(--color-accent-default);
   --color-accent-ink: oklch(22% 0.025 70);
   --color-focus: oklch(43% 0.11 76);
   --color-error: oklch(47% 0.18 28);
