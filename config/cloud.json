@@ -37,6 +37,17 @@
     "verifyIpHourlyLimit": 40,
     "requestBodyLimitBytes": 16384,
     "rateLimitRetentionHours": 24,
-    "auditRetentionDays": 90
+    "auditRetentionDays": 90,
+    "apiRequestBodyLimitBytes": 262144,
+    "readTokenHourlyLimit": 600,
+    "writeTokenHourlyLimit": 120,
+    "readIpHourlyLimit": 1200,
+    "writeIpHourlyLimit": 240,
+    "dailyItemLimit": 100,
+    "todoOperationLimit": 100,
+    "concurrentWriteLimitPerSpace": 2,
+    "writeLeaseTtlSeconds": 300,
+    "credentialLastUsedTouchSeconds": 300,
+    "submissionRetentionDays": 90
   }
 }

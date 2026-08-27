@@ -9,9 +9,12 @@ import {
 } from "../adapters/postgres/pool.js";
 import { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
 import { PostgresAgentAccessRepository } from "../adapters/postgres/agent-credentials.js";
+import { PostgresAgentRequestPolicy } from "../adapters/postgres/agent-rate-limit.js";
 import { createIdentityService } from "../modules/identity/auth.js";
 import { keyedDigest } from "../modules/identity/security.js";
 import { AgentCredentialService } from "../modules/agent-access/credential-service.js";
+import { AgentOperationsService } from "../modules/agent-access/operations.js";
+import { AgentRequestAuthenticator } from "./agent-context.js";
 import { createCloudApp } from "./app.js";
 import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
 import { defaultMigrationsDirectory } from "./paths.js";
@@ -63,6 +66,7 @@ export async function startCloudServer(options: {
   let app;
   try {
     const identity = createIdentityService({ config, authPool, appPool: pool });
+    const tenancy = new PostgresTenancyStore(pool);
     const agentAccess = new AgentCredentialService(
       new PostgresAgentAccessRepository(pool, {
         rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
@@ -81,10 +85,25 @@ export async function startCloudServer(options: {
         pairingVerifyUrl: `${config.origin}${config.basePath}/agent-pairing/v1/verify`,
       },
     );
+    const agentRequestPolicy = new PostgresAgentRequestPolicy(pool);
+    const agentRequestAuthenticator = new AgentRequestAuthenticator(
+      agentAccess,
+      tenancy,
+      agentRequestPolicy,
+      {
+        digestSecret: config.agentAccess.pairingCodeDigestSecret,
+        rateLimitRetentionHours: config.product.agentAccess.rateLimitRetentionHours,
+        readTokenHourlyLimit: config.product.agentAccess.readTokenHourlyLimit,
+        writeTokenHourlyLimit: config.product.agentAccess.writeTokenHourlyLimit,
+        readIpHourlyLimit: config.product.agentAccess.readIpHourlyLimit,
+        writeIpHourlyLimit: config.product.agentAccess.writeIpHourlyLimit,
+        credentialLastUsedTouchSeconds: config.product.agentAccess.credentialLastUsedTouchSeconds,
+      },
+    );
     app = createCloudApp({
       basePath: config.basePath,
       identity,
-      tenancy: new PostgresTenancyStore(pool),
+      tenancy,
       defaults: config.product.defaults,
       agentSettings: {
         origin: config.origin,
@@ -98,6 +117,19 @@ export async function startCloudServer(options: {
         mcpUrl: config.agentAccess.mcpUrl,
         activeCredentialLimit: config.product.limits.activeTokensPerUser,
         requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
+      },
+      agentApi: {
+        authenticator: agentRequestAuthenticator,
+        operations: new AgentOperationsService(pool, tenancy, agentRequestPolicy, {
+          origin: config.origin,
+          basePath: config.basePath,
+          dailyItemLimit: config.product.agentAccess.dailyItemLimit,
+          todoOperationLimit: config.product.agentAccess.todoOperationLimit,
+          concurrentWriteLimitPerSpace: config.product.agentAccess.concurrentWriteLimitPerSpace,
+          writeLeaseTtlSeconds: config.product.agentAccess.writeLeaseTtlSeconds,
+          submissionRetentionDays: config.product.agentAccess.submissionRetentionDays,
+        }),
+        requestBodyLimitBytes: config.product.agentAccess.apiRequestBodyLimitBytes,
       },
       readinessCheck: async () => {
         await verifyPostgresConnection(pool);

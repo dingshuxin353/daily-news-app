@@ -17,6 +17,8 @@ export interface CloudTodoCoordinatorOptions {
 export function createCloudTodoCoordinator(options: CloudTodoCoordinatorOptions) {
   return Object.freeze({
     async submit(input: {
+      clientRunId: string;
+      activeCredentialId?: string;
       candidate: unknown;
       now?: string | Date;
     }): Promise<Record<string, unknown>> {
@@ -27,6 +29,8 @@ export function createCloudTodoCoordinator(options: CloudTodoCoordinatorOptions)
       if (typeof candidateId !== "string") throw new TypeError("Todo Candidate must contain candidateId");
       return options.storage.runSubmission(
         {
+          clientRunId: input.clientRunId,
+          activeCredentialId: input.activeCredentialId,
           candidateId,
           payloadHash: jsonSha256(input.candidate),
           candidate: input.candidate,

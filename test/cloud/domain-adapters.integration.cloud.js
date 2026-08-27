@@ -290,16 +290,19 @@ test("Todo PostgreSQL Adapter matches the file Adapter and preserves idempotency
     now,
   });
   const { storage, coordinator } = todoCoordinator(tenant);
-  const postgresResult = await coordinator.submit({ candidate, now });
+  const postgresResult = await coordinator.submit({ clientRunId: "todo-equivalence-run", candidate, now });
   assert.deepEqual(postgresResult, fileResult);
   assert.deepEqual(await storage.readState(), await readJson(statePath));
-  assert.deepEqual(await coordinator.submit({ candidate: Object.fromEntries(Object.entries(candidate).reverse()) }), postgresResult);
+  assert.deepEqual(await coordinator.submit({
+    clientRunId: "todo-equivalence-run",
+    candidate: Object.fromEntries(Object.entries(candidate).reverse()),
+  }), postgresResult);
   assert.equal((await pool.query("SELECT count(*)::integer AS count FROM app.todo_submission_runs")).rows[0].count, 1);
 
   const changed = structuredClone(candidate);
   changed.operations[0].title = "不同输入";
   await assert.rejects(
-    () => coordinator.submit({ candidate: changed, now }),
+    () => coordinator.submit({ clientRunId: "todo-equivalence-run", candidate: changed, now }),
     (error) => error instanceof TodoStorageError && error.code === "TODO_IDEMPOTENCY_CONFLICT",
   );
 });
@@ -316,8 +319,8 @@ test("Todo profile locking prevents lost revisions and records rejected concurre
     operations: [{ type: "add", clientId: candidateId, title }],
   });
   const results = await Promise.all([
-    coordinator.submit({ candidate: candidate("todo-concurrent-a", "A"), now: "2026-08-25T08:01:00+08:00" }),
-    coordinator.submit({ candidate: candidate("todo-concurrent-b", "B"), now: "2026-08-25T08:01:01+08:00" }),
+    coordinator.submit({ clientRunId: "todo-concurrent-run-a", candidate: candidate("todo-concurrent-a", "A"), now: "2026-08-25T08:01:00+08:00" }),
+    coordinator.submit({ clientRunId: "todo-concurrent-run-b", candidate: candidate("todo-concurrent-b", "B"), now: "2026-08-25T08:01:01+08:00" }),
   ]);
   assert.deepEqual(new Set(results.map(({ result }) => result)), new Set(["published", "rejected"]));
   assert.equal((await storage.readState()).revision, 1);
@@ -335,7 +338,7 @@ test("Todo disabled and persistence failure both fail closed with recoverable st
     operations: [{ type: "add", clientId: "first", title: "回滚测试" }],
   };
   await assert.rejects(
-    () => coordinator.submit({ candidate, now: "2026-08-25T08:01:00+08:00" }),
+    () => coordinator.submit({ clientRunId: "todo-rollback-run", candidate, now: "2026-08-25T08:01:00+08:00" }),
     (error) => error instanceof TodoStorageError && error.code === "TODO_DISABLED",
   );
   await pool.query("UPDATE app.todo_profiles SET enabled = true WHERE space_id = $1", [tenant.spaceId]);
@@ -346,12 +349,12 @@ test("Todo disabled and persistence failure both fail closed with recoverable st
     CREATE TRIGGER reject_todo_run BEFORE INSERT ON app.todo_submission_runs
       FOR EACH ROW EXECUTE FUNCTION app.reject_todo_run();
   `);
-  await assert.rejects(() => coordinator.submit({ candidate, now: "2026-08-25T08:01:00+08:00" }));
+  await assert.rejects(() => coordinator.submit({ clientRunId: "todo-rollback-run", candidate, now: "2026-08-25T08:01:00+08:00" }));
   assert.equal((await storage.readState()).revision, 0);
   assert.equal((await pool.query("SELECT count(*)::integer AS count FROM app.todo_states")).rows[0].count, 0);
   await pool.query("DROP TRIGGER reject_todo_run ON app.todo_submission_runs");
   await pool.query("DROP FUNCTION app.reject_todo_run()");
-  assert.equal((await coordinator.submit({ candidate, now: "2026-08-25T08:01:00+08:00" })).result, "published");
+  assert.equal((await coordinator.submit({ clientRunId: "todo-rollback-run", candidate, now: "2026-08-25T08:01:00+08:00" })).result, "published");
 });
 
 test("Theme PostgreSQL Adapter matches file semantics for preview and activation", async () => {
@@ -414,6 +417,7 @@ test("Daily, Todo, and Theme records remain isolated by resolved tenant context"
   const todoA = todoCoordinator(first.tenant);
   const todoB = todoCoordinator(second.tenant);
   await todoA.coordinator.submit({
+    clientRunId: "todo-isolation-run-a",
     candidate: {
       schemaVersion: 1,
       candidateId: "todo-isolation-a",

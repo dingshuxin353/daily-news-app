@@ -71,20 +71,21 @@ test("empty database migrates fully and a repeated run has no side effects", asy
     "0003_create_domain_storage.sql",
     "0100_create_email_identity.sql",
     "0101_create_agent_access.sql",
+    "0102_create_agent_request_layer.sql",
   ]);
-  assert.equal(first.total, 5);
+  assert.equal(first.total, 6);
   assert.deepEqual(second.applied, []);
   const history = await pool.query(`
     SELECT filename, checksum_sha256, executed_at
     FROM app.schema_migrations
   `);
-  assert.equal(history.rowCount, 5);
+  assert.equal(history.rowCount, 6);
   assert.match(history.rows[0].checksum_sha256, /^[0-9a-f]{64}$/);
   assert.ok(history.rows[0].executed_at instanceof Date);
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
 });
 
-test("the exact M2 migration history upgrades atomically to M3-A", async () => {
+test("the exact M2 migration history upgrades atomically through M3-B", async () => {
   await resetAppSchema();
   const m2Names = [
     "0001_initialize_app_schema.sql",
@@ -101,7 +102,10 @@ test("the exact M2 migration history upgrades atomically to M3-A", async () => {
     assert.deepEqual(m2.applied, m2Names);
   });
   const upgraded = await runMigrations(pool, { migrationsDirectory: projectMigrations });
-  assert.deepEqual(upgraded.applied, ["0101_create_agent_access.sql"]);
+  assert.deepEqual(upgraded.applied, [
+    "0101_create_agent_access.sql",
+    "0102_create_agent_request_layer.sql",
+  ]);
   assert.equal(
     (await pool.query("SELECT to_regclass('app.agent_credentials')::text AS relation")).rows[0].relation,
     "app.agent_credentials",

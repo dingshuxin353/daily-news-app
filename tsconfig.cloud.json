@@ -6,6 +6,7 @@
     "rootDir": ".",
     "outDir": ".cloud-dist",
     "strict": true,
+    "allowJs": true,
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true,
