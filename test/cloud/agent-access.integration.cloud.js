@@ -203,19 +203,26 @@ async function mutate(app, pathname, cookie, csrfToken, body = {}, headers = {})
   return { response, body: await response.json() };
 }
 
-async function waitForBlockedSpaceLocks(minimum) {
+async function waitForBlockedTransactions(blockerPid, minimum) {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
     const result = await controlPool.query(`
-      SELECT count(*)::integer AS count
-      FROM pg_stat_activity
-      WHERE datname = current_database()
-        AND wait_event_type = 'Lock'
-        AND query LIKE 'SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE%'
-    `);
+      WITH RECURSIVE blocked(pid) AS (
+        SELECT pid
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND $1::integer = ANY(pg_blocking_pids(pid))
+        UNION
+        SELECT activity.pid
+        FROM pg_stat_activity activity
+        JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+        WHERE activity.datname = current_database()
+      )
+      SELECT count(*)::integer AS count FROM blocked
+    `, [blockerPid]);
     if (result.rows[0].count >= minimum) return;
     await new Promise((resolve) => setImmediate(resolve));
   }
-  throw new Error(`expected at least ${minimum} transactions waiting for the Space lock`);
+  throw new Error(`expected at least ${minimum} transactions blocked by the Space lock holder`);
 }
 
 beforeEach(resetAndMigrate);
@@ -490,12 +497,13 @@ test("claim and browser bootstrap acquire the Space lock before the pairing row"
   try {
     await blocker.query("BEGIN");
     await blocker.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [stored.rows[0].space_id]);
+    const blockerPid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
     claimPromise = post(harness.app, "/agent-pairing/v1/claim", {
       pairingCode: pairing.code,
       clientName: "Concurrent claimant",
     });
     homePromise = harness.app.request("https://dailynews.test/", { headers: { cookie } });
-    await waitForBlockedSpaceLocks(2);
+    await waitForBlockedTransactions(blockerPid, 2);
 
     const observer = await controlPool.connect();
     try {
@@ -540,6 +548,7 @@ test("verify and cancellation serialize at Space before locking pairing or crede
   try {
     await blocker.query("BEGIN");
     await blocker.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [stored.rows[0].space_id]);
+    const blockerPid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
     verifyPromise = verifyPairing(harness.app, claimed.token);
     cancelPromise = mutate(
       harness.app,
@@ -547,7 +556,7 @@ test("verify and cancellation serialize at Space before locking pairing or crede
       cookie,
       settings.body.csrfToken,
     );
-    await waitForBlockedSpaceLocks(2);
+    await waitForBlockedTransactions(blockerPid, 2);
 
     const observer = await controlPool.connect();
     try {
