@@ -5,6 +5,7 @@ import test, { after, beforeEach } from "node:test";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import pg from "pg";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 import { createTestIssue } from "../../test-support/helpers.js";
 import { PostgresAgentAccessRepository } from "../../.cloud-dist/src/adapters/postgres/agent-credentials.js";
@@ -100,26 +101,49 @@ async function fixture(options = {}) {
     writeIpHourlyLimit: 100,
     credentialLastUsedTouchSeconds: 300,
   };
+  const authenticator = new AgentRequestAuthenticator(credentials, tenancy, policy, rateLimits);
+  const operations = new AgentOperationsService(pool, tenancy, policy, {
+    origin: "https://dailynews.test",
+    basePath: "",
+    dailyItemLimit: 100,
+    todoOperationLimit: 100,
+    concurrentWriteLimitPerSpace: options.concurrentWriteLimitPerSpace ?? 2,
+    writeLeaseTtlSeconds: 300,
+    submissionRetentionDays: 90,
+  }, () => new Date("2026-08-27T04:00:00Z"));
   const app = createCloudApp({
     basePath: "",
     readinessCheck: async () => {},
     clientIpResolver: () => "203.0.113.18",
     agentApi: {
-      authenticator: new AgentRequestAuthenticator(credentials, tenancy, policy, rateLimits),
-      operations: new AgentOperationsService(pool, tenancy, policy, {
-        origin: "https://dailynews.test",
-        basePath: "",
-        dailyItemLimit: 100,
-        todoOperationLimit: 100,
-        concurrentWriteLimitPerSpace: options.concurrentWriteLimitPerSpace ?? 2,
-        writeLeaseTtlSeconds: 300,
-        submissionRetentionDays: 90,
-      }, () => new Date("2026-08-27T04:00:00Z")),
+      authenticator,
+      operations,
       requestBodyLimitBytes: 262144,
+    },
+    agentMcp: {
+      origin: "https://dailynews.test",
+      authenticator,
+      operations,
+      requestBodyLimitBytes: 262144,
+      dailyItemLimit: 100,
+      todoOperationLimit: 100,
+      requestOriginResolver: () => "https://dailynews.test",
     },
   });
   const headers = { authorization: `Bearer ${issued.token}` };
-  return { app, headers, tenant, tenancy, credentials, credential: issued.credential, policy };
+  return { app, headers, token: issued.token, tenant, tenancy, credentials, credential: issued.credential, policy };
+}
+
+async function createMcpClient(app, token, era = "modern") {
+  const client = new Client({ name: "dailynews-postgres-integration", version: "1.0.0" }, era === "modern"
+    ? { versionNegotiation: { mode: { pin: "2026-07-28" } } }
+    : undefined);
+  const transport = new StreamableHTTPClientTransport(new URL("https://dailynews.test/mcp"), {
+    requestInit: { headers: { authorization: `Bearer ${token}` } },
+    fetch: async (input, init) => app.request(new Request(input, init)),
+  });
+  await client.connect(transport);
+  return client;
 }
 
 async function postJson(app, url, headers, key, body) {
@@ -241,6 +265,83 @@ test("active PAT completes the Content JSON API loop with shared idempotency and
   const issueBody = await issue.json();
   assert.equal(issueBody.issue.revision, 1);
   assert.equal(issueBody.compiledEdition.revision, 1);
+});
+
+test("one PAT shares formal Daily idempotency across MCP and JSON API, then rotation cuts over", async () => {
+  const { app, headers, token, tenant, credentials, credential } = await fixture({ userId: "mcp-cross-protocol-user" });
+  const client = await createMcpClient(app, token);
+  try {
+    const context = await client.callTool({ name: "get_daily_context", arguments: {} });
+    assert.equal(context.structuredContent.publication.publicationId, "daily-news");
+    assert.equal(context.structuredContent.resolvedDate, "2026-08-27");
+
+    const content = candidate("2026-08-27", "cross-protocol");
+    const mcpCreated = await client.callTool({
+      name: "submit_daily_candidate",
+      arguments: {
+        publicationId: "daily-news",
+        clientRunId: "daily-cross-protocol-0001",
+        mode: "update",
+        confirmation: { historicalDate: null, replace: null },
+        candidate: content,
+      },
+    });
+    assert.equal(mcpCreated.isError, undefined);
+    assert.equal(mcpCreated.structuredContent.result, "created");
+    assert.equal(mcpCreated.structuredContent.revision, 1);
+
+    const apiRepeated = await postJson(
+      app,
+      "https://dailynews.test/api/v1/publications/daily-news/daily-candidates",
+      headers,
+      "daily-cross-protocol-0001",
+      {
+        mode: "update",
+        confirmation: { historicalDate: null, replace: null },
+        candidate: structuredClone(content),
+      },
+    );
+    assert.equal(apiRepeated.status, 200);
+    assert.equal((await apiRepeated.json()).revision, 1);
+    assert.equal((await pool.query(
+      "SELECT count(*)::integer AS count FROM app.daily_submission_runs WHERE space_id = $1 AND client_run_id = $2",
+      [tenant.spaceId, "daily-cross-protocol-0001"],
+    )).rows[0].count, 1);
+
+    const formal = await client.callTool({
+      name: "get_daily_issue",
+      arguments: { publicationId: "daily-news", date: "2026-08-27" },
+    });
+    assert.equal(formal.structuredContent.issue.revision, 1);
+    assert.equal(formal.structuredContent.compiledEdition.revision, 1);
+
+    const rotated = await credentials.rotateCredential(
+      tenant,
+      credential.id,
+      { name: "轮换后的 MCP Agent", operationId: randomUUID() },
+      "req_rotate_mcp",
+      keyedDigest(pairingSecret, "rotate-mcp-actor"),
+    );
+    assert.ok(rotated.token);
+    await assert.rejects(
+      () => client.callTool({ name: "get_todo_context", arguments: {} }),
+      (error) => error?.status === 401 || error?.data?.status === 401,
+    );
+
+    const recovered = await createMcpClient(app, rotated.token);
+    try {
+      const recoveredContext = await recovered.callTool({ name: "get_todo_context", arguments: {} });
+      assert.equal(recoveredContext.structuredContent.enabled, false);
+    } finally {
+      await recovered.close();
+    }
+    const newApiToken = await app.request("https://dailynews.test/api/v1/publications", {
+      headers: { authorization: `Bearer ${rotated.token}` },
+    });
+    assert.equal(newApiToken.status, 200);
+  } finally {
+    await client.close();
+  }
 });
 
 test("Daily API enforces future, historical, replace revision, inactive, and tenant target boundaries", async () => {

@@ -46,6 +46,7 @@ export interface CloudFileConfig {
     rateLimitRetentionHours: number;
     auditRetentionDays: number;
     apiRequestBodyLimitBytes: number;
+    mcpRequestBodyLimitBytes: number;
     readTokenHourlyLimit: number;
     writeTokenHourlyLimit: number;
     readIpHourlyLimit: number;
@@ -205,6 +206,12 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
       apiRequestBodyLimitBytes: requireInteger(
         agentAccess.apiRequestBodyLimitBytes,
         "agentAccess.apiRequestBodyLimitBytes",
+        1024,
+        4 * 1024 * 1024,
+      ),
+      mcpRequestBodyLimitBytes: requireInteger(
+        agentAccess.mcpRequestBodyLimitBytes,
+        "agentAccess.mcpRequestBodyLimitBytes",
         1024,
         4 * 1024 * 1024,
       ),

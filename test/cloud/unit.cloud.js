@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest } from "node:http";
 import { createAdaptorServer } from "@hono/node-server";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -49,6 +50,7 @@ import {
 import { AgentRequestError } from "../../.cloud-dist/src/modules/agent-access/request-policy.js";
 import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
 import { AGENT_API_ROUTE_CONTRACT } from "../../.cloud-dist/src/protocols/http-api/routes.js";
+import { DAILYNEWS_MCP_INSTRUCTIONS } from "../../.cloud-dist/src/protocols/mcp/server.js";
 import { createPostgresTodoStorage } from "../../.cloud-dist/src/adapters/postgres/todo.js";
 import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/tenancy.js";
 import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
@@ -88,6 +90,7 @@ const validProductConfig = {
     rateLimitRetentionHours: 24,
     auditRetentionDays: 90,
     apiRequestBodyLimitBytes: 262144,
+    mcpRequestBodyLimitBytes: 262144,
     readTokenHourlyLimit: 600,
     writeTokenHourlyLimit: 120,
     readIpHourlyLimit: 1200,
@@ -148,6 +151,7 @@ test("cloud config loads explicit runtime values and loopback defaults", async (
   assert.equal(config.database.sslMode, "disable");
   assert.equal(config.identity.mailMode, "fake");
   assert.equal(config.product.defaults.publicationId, "daily-news");
+  assert.equal(config.product.agentAccess.mcpRequestBodyLimitBytes, 262144);
 });
 
 test("cloud config fails closed for missing or unsafe environment", async () => {
@@ -1157,4 +1161,454 @@ test("OpenAPI 3.1 stays aligned with the real routes, auth, idempotency, errors,
   assert.match(guide, /todo\/candidates/);
   assert.match(guide, /Idempotency-Key/);
   assert.doesNotMatch(guide, /dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/);
+});
+
+function agentMcpTestApp(options = {}) {
+  const authentications = [];
+  const calls = [];
+  const publication = {
+    publicationId: "daily-news",
+    name: "DailyNews",
+    isDefault: true,
+    status: "active",
+    writable: true,
+  };
+  const authenticator = {
+    async authenticate(input) {
+      authentications.push(input);
+      if (input.authorization !== "Bearer valid-token") {
+        throw new AgentRequestError(401, "invalid_token", "连接密钥无效或已失效。");
+      }
+      return {
+        requestId: input.requestId,
+        credentialId: "credential-one",
+        credentialName: "MCP test",
+        tenant: { spaceId: "space-one", ownerUserId: "user-one" },
+      };
+    },
+  };
+  const operations = {
+    async listPublications() {
+      calls.push(["listPublications"]);
+      return { publications: [publication] };
+    },
+    async getDailyContext(_access, publicationId, date) {
+      calls.push(["getDailyContext", publicationId, date]);
+      return {
+        publication,
+        timeZone: "Asia/Shanghai",
+        priorityLimits: { lead: 1, important: 2, normal: null },
+        today: "2026-08-27",
+        resolvedDate: date ?? "2026-08-27",
+        issue: { exists: false, revision: null },
+        writeRules: {
+          contentSchemaVersions: [1, 2],
+          maximumItems: 100,
+          historicalConfirmationRequired: false,
+          replaceRequiresExistingIssue: true,
+          replaceExpectedRevision: null,
+        },
+      };
+    },
+    async submitDailyCandidate(_access, input) {
+      calls.push(["submitDailyCandidate", input]);
+      return {
+        result: "created",
+        publicationId: input.publicationId,
+        date: input.candidate.date,
+        revision: 1,
+        mode: input.mode,
+        warnings: [],
+        pageUrl: "https://dailynews.test/p/daily-news/?date=2026-08-27",
+      };
+    },
+    async getDailyIssue(_access, publicationId, date) {
+      calls.push(["getDailyIssue", publicationId, date]);
+      const issue = { ...structuredClone(dailyCandidate), revision: 1 };
+      return {
+        publicationId,
+        date,
+        revision: 1,
+        issue,
+        compiledEdition: {
+          ...structuredClone(issue),
+          layout: {
+            rows: [{
+              usedCapacity: 1,
+              modules: [{
+                itemId: "example-story",
+                resolvedPriority: "normal",
+                size: "small",
+                span: 1,
+                mediaVariant: "none",
+              }],
+            }],
+          },
+        },
+        pageUrl: "https://dailynews.test/p/daily-news/?date=2026-08-27",
+      };
+    },
+    async getTodoContext() {
+      calls.push(["getTodoContext"]);
+      return {
+        enabled: true,
+        candidateRules: { schemaVersion: 1, maximumOperations: 100 },
+        settingsUrl: "https://dailynews.test/settings/todo",
+        revision: 0,
+      };
+    },
+    async submitTodoCandidate(_access, input) {
+      calls.push(["submitTodoCandidate", input]);
+      return {
+        schemaVersion: 1,
+        candidateId: input.candidate.candidateId,
+        result: "published",
+        baseRevision: 0,
+        revision: 1,
+        operationCount: 1,
+        operations: [{ index: 0, type: "add", result: "created", taskId: "todo-1234abcd" }],
+        warnings: [],
+        processedAt: "2026-08-27T09:00:00+08:00",
+        pageUrl: "https://dailynews.test/todo/",
+      };
+    },
+    async getTodoState() {
+      calls.push(["getTodoState"]);
+      if (options.todoDisabled) {
+        throw new AgentRequestError(409, "todo_disabled", "Personal Todo 尚未启用。");
+      }
+      return {
+        state: { schemaVersion: 1, revision: 1, updatedAt: "2026-08-27T09:00:00+08:00", items: [] },
+        revision: 1,
+        pageUrl: "https://dailynews.test/todo/",
+      };
+    },
+  };
+  const app = createCloudApp({
+    basePath: "/cloud",
+    readinessCheck: async () => {},
+    clientIpResolver: () => "203.0.113.20",
+    agentMcp: {
+      origin: "https://dailynews.test",
+      authenticator,
+      operations,
+      requestBodyLimitBytes: options.requestBodyLimitBytes ?? 262144,
+      dailyItemLimit: 100,
+      todoOperationLimit: 100,
+      ...(options.useNodeOriginResolver
+        ? {}
+        : { requestOriginResolver: options.requestOriginResolver ?? (() => "https://dailynews.test") }),
+    },
+  });
+  return { app, authentications, calls };
+}
+
+function mcpClientFor(app, era, exchanges = []) {
+  const client = new Client({ name: `dailynews-${era}-test`, version: "1.0.0" }, era === "modern"
+    ? { versionNegotiation: { mode: { pin: "2026-07-28" } } }
+    : undefined);
+  const fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const body = request.method === "POST" ? await request.clone().text() : "";
+    const response = await app.request(request);
+    exchanges.push({ request, body, response: response.clone() });
+    return response;
+  };
+  const transport = new StreamableHTTPClientTransport(new URL("https://dailynews.test/cloud/mcp"), {
+    requestInit: { headers: { authorization: "Bearer valid-token" } },
+    fetch,
+  });
+  return { client, transport };
+}
+
+const dailyCandidate = {
+  schemaVersion: 2,
+  date: "2026-08-27",
+  generatedAt: "2026-08-27T09:00:00+08:00",
+  coverage: { start: "2026-08-26T09:00:00+08:00", end: "2026-08-27T09:00:00+08:00" },
+  items: [{
+    id: "example-story",
+    title: "虚构标题",
+    brief: "虚构摘要",
+    summary: "只用于 MCP 契约测试的虚构正文。",
+    editorial: { priority: "normal", selectionReason: "验证工具 Schema" },
+    sources: [{ name: "Example", url: "https://example.com/fake-story" }],
+  }],
+};
+
+const todoCandidate = {
+  schemaVersion: 1,
+  candidateId: "example-todo-run",
+  generatedAt: "2026-08-27T09:00:00+08:00",
+  baseRevision: 0,
+  operations: [{ type: "add", clientId: "draft-one", title: "提交示例周报" }],
+};
+
+for (const era of ["legacy", "modern"]) {
+  test(`official MCP ${era} client discovers the same six tools and completes every operation`, async () => {
+    const { app, authentications, calls } = agentMcpTestApp();
+    const exchanges = [];
+    const { client, transport } = mcpClientFor(app, era, exchanges);
+    await client.connect(transport);
+    try {
+      assert.equal(client.getServerVersion().name, "dailynews");
+      assert.equal(client.getInstructions(), DAILYNEWS_MCP_INSTRUCTIONS);
+      assert.ok(client.getInstructions().length <= 512);
+      for (const rule of [
+        /context tool before every write/, /default and availablePublications/, /explicit publicationId and date/,
+        /Never mix Daily Content and Todo Candidates/, /must not set Space, formal revision, or formal state/,
+        /Todo is disabled/, /same clientRunId/, /Historical dates and replace require explicit user confirmation/,
+      ]) assert.match(client.getInstructions(), rule);
+      const listed = await client.listTools();
+      assert.deepEqual(listed.tools.map(({ name }) => name), [
+        "get_daily_context",
+        "submit_daily_candidate",
+        "get_daily_issue",
+        "get_todo_context",
+        "submit_todo_candidate",
+        "get_todo_state",
+      ]);
+      for (const tool of listed.tools) {
+        assert.equal(tool.annotations.openWorldHint, false);
+        assert.ok(tool.inputSchema);
+        assert.ok(tool.outputSchema);
+      }
+      assert.equal(listed.tools.find(({ name }) => name === "get_daily_context").annotations.readOnlyHint, true);
+      const dailySubmitTool = listed.tools.find(({ name }) => name === "submit_daily_candidate");
+      const todoSubmitTool = listed.tools.find(({ name }) => name === "submit_todo_candidate");
+      assert.equal(dailySubmitTool.annotations.destructiveHint, true);
+      assert.equal(dailySubmitTool.inputSchema.properties.candidate.properties.items.maxItems, 100);
+      assert.equal(todoSubmitTool.inputSchema.properties.candidate.properties.operations.maxItems, 100);
+
+      const context = await client.callTool({ name: "get_daily_context", arguments: {} });
+      assert.equal(context.structuredContent.publication.publicationId, "daily-news");
+      assert.equal(context.structuredContent.availablePublications.length, 1);
+      await client.callTool({
+        name: "submit_daily_candidate",
+        arguments: {
+          publicationId: "daily-news",
+          clientRunId: "daily-mcp-run-0001",
+          mode: "update",
+          confirmation: { historicalDate: null, replace: null },
+          candidate: dailyCandidate,
+        },
+      });
+      await client.callTool({
+        name: "get_daily_issue",
+        arguments: { publicationId: "daily-news", date: "2026-08-27" },
+      });
+      await client.callTool({ name: "get_todo_context", arguments: {} });
+      await client.callTool({
+        name: "submit_todo_candidate",
+        arguments: { clientRunId: "todo-mcp-run-0001", candidate: todoCandidate },
+      });
+      await client.callTool({ name: "get_todo_state", arguments: {} });
+
+      assert.ok(calls.some(([name]) => name === "submitDailyCandidate"));
+      assert.ok(calls.some(([name]) => name === "submitTodoCandidate"));
+      assert.ok(authentications.some(({ action }) => action === "read"));
+      assert.ok(authentications.some(({ action }) => action === "write"));
+      assert.ok(exchanges.every(({ response }) => response.headers.get("cache-control") === "private, no-store"));
+      assert.ok(exchanges.every(({ response }) => /^req_[0-9a-f]{32}$/.test(response.headers.get("x-request-id"))));
+      assert.ok(exchanges.every(({ response }) => response.headers.get("mcp-session-id") === null));
+      assert.ok(exchanges.every(({ response }) => response.headers.get("access-control-allow-origin") === null));
+      if (era === "modern") {
+        const modernCalls = exchanges.filter(({ body }) => body.includes('"method":"tools/call"'));
+        assert.ok(modernCalls.length >= 6);
+        assert.ok(modernCalls.every(({ request }) => request.headers.get("mcp-protocol-version") === "2026-07-28"));
+        assert.ok(modernCalls.every(({ request }) => request.headers.get("mcp-method") === "tools/call"));
+        assert.ok(modernCalls.every(({ request }) => request.headers.get("mcp-name")));
+      }
+    } finally {
+      await client.close();
+    }
+  });
+}
+
+test("MCP route fails closed for method, Origin, PAT, media type, and body limits", async () => {
+  const { app, authentications } = agentMcpTestApp({ requestBodyLimitBytes: 128 });
+  const url = "https://dailynews.test/cloud/mcp";
+  const get = await app.request(url);
+  assert.equal(get.status, 405);
+  assert.equal(get.headers.get("allow"), "POST");
+
+  const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+  const crossOrigin = await app.request(url, {
+    method: "POST",
+    headers: { authorization: "Bearer valid-token", origin: "https://attacker.test", "content-type": "application/json" },
+    body: message,
+  });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(authentications.length, 0);
+
+  const cookieOnly = await app.request(url, {
+    method: "POST",
+    headers: { cookie: "session=fake", "content-type": "application/json" },
+    body: message,
+  });
+  assert.equal(cookieOnly.status, 401);
+  assert.equal(cookieOnly.headers.get("www-authenticate"), "Bearer");
+  assert.equal((await cookieOnly.json()).error.code, "invalid_token");
+
+  const wrongMedia = await app.request(url, {
+    method: "POST",
+    headers: { authorization: "Bearer valid-token", "content-type": "text/plain" },
+    body: message,
+  });
+  assert.equal(wrongMedia.status, 415);
+
+  const oversized = await app.request(url, {
+    method: "POST",
+    headers: { authorization: "Bearer valid-token", "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { padding: "x".repeat(200) } }),
+  });
+  assert.equal(oversized.status, 413);
+  assert.equal((await oversized.json()).error.code, "payload_too_large");
+});
+
+test("MCP tool failures remain structured, redacted, and correlated", async () => {
+  const { app } = agentMcpTestApp({ todoDisabled: true });
+  const { client, transport } = mcpClientFor(app, "modern");
+  await client.connect(transport);
+  try {
+    const result = await client.callTool({ name: "get_todo_state", arguments: {} });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.error.code, "todo_disabled");
+    assert.match(result.structuredContent.error.requestId, /^req_[0-9a-f]{32}$/);
+    assert.doesNotMatch(JSON.stringify(result), /valid-token|credential-one|space-one/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("modern MCP rejects protocol and operation header mismatches", async () => {
+  const { app } = agentMcpTestApp();
+  const url = "https://dailynews.test/cloud/mcp";
+  const message = (method, params = {}) => JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method,
+    params: {
+      ...params,
+      _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": { name: "raw-modern-test", version: "1.0.0" },
+        "io.modelcontextprotocol/clientCapabilities": {},
+      },
+    },
+  });
+  const headers = {
+    authorization: "Bearer valid-token",
+    accept: "application/json, text/event-stream",
+    "content-type": "application/json",
+    "mcp-protocol-version": "2026-07-28",
+    "mcp-method": "tools/list",
+  };
+  const valid = await app.request(url, { method: "POST", headers, body: message("tools/list") });
+  assert.equal(valid.status, 200);
+  assert.ok((await valid.json()).result.tools);
+
+  for (const changedHeaders of [
+    { "mcp-protocol-version": undefined },
+    { "mcp-protocol-version": "2026-07-29" },
+    { "mcp-method": undefined },
+    { "mcp-method": "tools/call" },
+  ]) {
+    const requestHeaders = new Headers(headers);
+    for (const [name, value] of Object.entries(changedHeaders)) {
+      if (value === undefined) requestHeaders.delete(name);
+      else requestHeaders.set(name, value);
+    }
+    const response = await app.request(url, { method: "POST", headers: requestHeaders, body: message("tools/list") });
+    const payload = await response.json();
+    assert.ok(response.status >= 400 || payload.error, JSON.stringify({ changedHeaders, status: response.status, payload }));
+  }
+
+  const callHeaders = { ...headers, "mcp-method": "tools/call" };
+  for (const name of [undefined, "get_todo_state"]) {
+    const requestHeaders = new Headers(callHeaders);
+    if (name) requestHeaders.set("mcp-name", name);
+    const response = await app.request(url, {
+      method: "POST",
+      headers: requestHeaders,
+      body: message("tools/call", { name: "get_daily_context", arguments: {} }),
+    });
+    const payload = await response.json();
+    assert.ok(response.status >= 400 || payload.error, JSON.stringify({ name, status: response.status, payload }));
+  }
+});
+
+test("legacy MCP batches containing any submission consume the write quota", async () => {
+  const { app, authentications } = agentMcpTestApp();
+  await app.request("https://dailynews.test/cloud/mcp", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer valid-token",
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify([
+      { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "submit_todo_candidate", arguments: {} } },
+    ]),
+  });
+  assert.equal(authentications.at(-1).action, "write");
+});
+
+test("real HTTP adapter accepts only the trusted loopback TLS terminator for MCP", async () => {
+  const { app } = agentMcpTestApp({ useNodeOriginResolver: true });
+  const server = createAdaptorServer({ fetch: app.fetch, hostname: "127.0.0.1" });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+  const request = (headers = {}, requestTarget = "/cloud/mcp") => new Promise((resolve, reject) => {
+    const outgoing = httpRequest({
+      hostname: "127.0.0.1",
+      port: address.port,
+      path: requestTarget,
+      method: "POST",
+      headers: {
+        host: "dailynews.test",
+        authorization: "Bearer valid-token",
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+        ...headers,
+      },
+    }, (incoming) => {
+      const chunks = [];
+      incoming.on("data", (chunk) => chunks.push(chunk));
+      incoming.once("end", () => resolve({
+        status: incoming.statusCode,
+        headers: incoming.headers,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
+    });
+    outgoing.once("error", reject);
+    outgoing.end(body);
+  });
+  try {
+    assert.equal((await app.request("https://dailynews.test/cloud/mcp", {
+      method: "POST",
+      headers: { authorization: "Bearer valid-token", "content-type": "application/json" },
+      body,
+    })).status, 403);
+    assert.equal((await request()).status, 403);
+    assert.equal((await request({ "x-forwarded-proto": "http" })).status, 403);
+    assert.equal((await request({ "x-forwarded-proto": "https", origin: "https://attacker.test" })).status, 403);
+    assert.equal((await request(
+      { "x-forwarded-proto": "https", host: "attacker.test" },
+      "https://dailynews.test/cloud/mcp",
+    )).status, 403);
+    const accepted = await request({ "x-forwarded-proto": "https", origin: "https://dailynews.test" });
+    assert.equal(accepted.status, 200);
+    assert.match(accepted.body, /get_daily_context/);
+    assert.equal(accepted.headers["mcp-session-id"], undefined);
+  } finally {
+    await closeHttpServer(server);
+  }
 });
