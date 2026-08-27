@@ -363,6 +363,23 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.equal(missing.status, 404);
   assert.match(await missing.text(), /没有找到这期正式日报/);
 
+  const otherTenant = await harness.tenancy.ensureSpaceForUser("private-reading-other-user", product.defaults);
+  await controlPool.query(
+    `INSERT INTO app.publications (space_id, publication_id, display_name, status, is_default, sort_order)
+     VALUES ($1, 'private-other', '其他用户的私密日报', 'active', false, 1)`,
+    [otherTenant.spaceId],
+  );
+  const crossTenant = await appRequest(harness.app, "https://dailynews.test/p/private-other/?date=2026-08-27", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(crossTenant.status, 404);
+  assert.doesNotMatch(await crossTenant.text(), /其他用户的私密日报|正式主标题/);
+  const nonexistent = await appRequest(harness.app, "https://dailynews.test/p/not-a-publication/?date=2026-08-27", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(nonexistent.status, 404);
+  assert.doesNotMatch(await nonexistent.text(), /正式主标题/);
+
   const agentSettings = await getJson(harness.app, "/settings/agent", { cookie });
   const disabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/todo?reason=todo-disabled", {
     headers: { cookie, accept: "text/html" },
@@ -420,6 +437,22 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.equal(hiddenTodo.status, 303);
   assert.equal(hiddenTodo.headers.get("location"), "/settings/todo?reason=todo-disabled");
   assert.equal((await controlPool.query("SELECT state_payload FROM app.todo_states WHERE space_id = $1", [space.id])).rowCount, 1);
+
+  await controlPool.query(
+    "UPDATE app.publications SET status = 'inactive' WHERE space_id = $1 AND publication_id = 'daily-news'",
+    [space.id],
+  );
+  const retainedDaily = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(retainedDaily.status, 200);
+  const retainedDailyHtml = await retainedDaily.text();
+  assert.match(retainedDailyHtml, /正式主标题/);
+  assert.match(retainedDailyHtml, /正式次标题/);
+  await controlPool.query(
+    "UPDATE app.publications SET status = 'active' WHERE space_id = $1 AND publication_id = 'daily-news'",
+    [space.id],
+  );
 
   await controlPool.query(
     "UPDATE app.theme_selections SET theme_id = 'missing-theme', theme_revision = 1 WHERE space_id = $1 AND target_type = 'home'",

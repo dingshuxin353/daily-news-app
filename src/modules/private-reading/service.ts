@@ -3,10 +3,12 @@ import { createPostgresDailyStorage } from "../../adapters/postgres/daily.js";
 import { createPostgresTodoStorage } from "../../adapters/postgres/todo.js";
 import type { SystemThemeReader } from "../../adapters/postgres/theme.js";
 import type {
+  HomeProfileRecord,
   PostgresTenancyStore,
   PublicationRecord,
   TenantContext,
   ThemeSelectionRecord,
+  TodoProfileRecord,
 } from "../../adapters/postgres/tenancy.js";
 import { buildDailyReadingProjection } from "../../../scripts/lib/domain/daily-reading.js";
 import { buildTodoProjection } from "../../../scripts/lib/domain/todo-projection.js";
@@ -62,6 +64,32 @@ function dateInTimeZone(timeZone: string, now = new Date()): string {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+async function buildReadingShell(
+  systemThemes: SystemThemeReader,
+  home: HomeProfileRecord | null,
+  publication: PublicationRecord,
+  todo: TodoProfileRecord | null,
+  themes: ThemeSelectionRecord[],
+): Promise<ReadingShell> {
+  const theme = effectiveTheme(
+    themes.find((item) => item.targetType === "home"),
+    themes.find((item) => item.targetType === "publication" && item.publicationId === publication.publicationId),
+  );
+  const themeRevision = theme
+    ? await systemThemes.readThemeRevision(theme.id, theme.revision)
+    : null;
+  if (!home || !todo || !theme || !themeRevision) {
+    throw new Error("private reading bootstrap is incomplete");
+  }
+  return {
+    spaceName: home.displayName,
+    timeZone: home.timeZone,
+    publication,
+    theme,
+    todoEnabled: todo.enabled,
+  };
+}
+
 export class PrivateReadingService {
   constructor(
     private readonly pool: PostgresPool,
@@ -79,25 +107,25 @@ export class PrivateReadingService {
       repository.listThemeSelections(),
     ]);
     const publication = publications.find((item) => item.isDefault && item.status === "active");
-    const theme = effectiveTheme(
-      themes.find((item) => item.targetType === "home"),
-      publication
-        ? themes.find((item) => item.targetType === "publication" && item.publicationId === publication.publicationId)
-        : undefined,
-    );
-    const themeRevision = theme
-      ? await this.systemThemes.readThemeRevision(theme.id, theme.revision)
-      : null;
-    if (!home || !publication || !todo || !theme || !themeRevision) {
+    if (!publication) {
       throw new Error("private reading bootstrap is incomplete");
     }
-    return {
-      spaceName: home.displayName,
-      timeZone: home.timeZone,
-      publication,
-      theme,
-      todoEnabled: todo.enabled,
-    };
+    return buildReadingShell(this.systemThemes, home, publication, todo, themes);
+  }
+
+  async readPublicationShell(tenant: TenantContext, publicationId: string): Promise<ReadingShell | null> {
+    const publicationContext = await this.tenancy.resolvePublicationContext(tenant, publicationId);
+    if (!publicationContext) return null;
+    const tenantRepository = this.tenancy.forTenant(tenant);
+    const publicationRepository = this.tenancy.forPublication(publicationContext);
+    const [publication, home, todo, themes] = await Promise.all([
+      publicationRepository.getPublication(),
+      tenantRepository.getHomeProfile(),
+      tenantRepository.getTodoProfile(),
+      tenantRepository.listThemeSelections(),
+    ]);
+    if (!publication) return null;
+    return buildReadingShell(this.systemThemes, home, publication, todo, themes);
   }
 
   async readDaily(tenant: TenantContext, publicationId: string, requestedDate?: string): Promise<DailyReading | null> {
@@ -106,7 +134,7 @@ export class PrivateReadingService {
     if (!publication) return null;
     const repository = this.tenancy.forPublication(publication);
     const record = await repository.getPublication();
-    if (!record || record.status !== "active") return null;
+    if (!record) return null;
     const storage = createPostgresDailyStorage(this.pool, publication);
     const snapshot = await storage.readSnapshot(requestedDate);
     if (!snapshot) return null;

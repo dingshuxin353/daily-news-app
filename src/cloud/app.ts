@@ -323,9 +323,11 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         const access = await requirePrivateAccess(context);
         if (access instanceof Response) return access;
         if (!dependencies.privateReading) return context.text("服务暂时不可用，请稍后重试。", 503);
-        const readingShell = await dependencies.privateReading.readShell(access.tenant);
+        const publicationId = context.req.param("publicationId") ?? "";
+        const readingShell = await dependencies.privateReading.readPublicationShell(access.tenant, publicationId);
+        if (!readingShell) return context.text("页面不存在。", 404);
         const requestedDate = context.req.query("date");
-        const daily = await dependencies.privateReading.readDaily(access.tenant, context.req.param("publicationId") ?? "", requestedDate);
+        const daily = await dependencies.privateReading.readDaily(access.tenant, publicationId, requestedDate);
         return context.html(renderDailyPage({ basePath: dependencies.basePath, shell: readingShell, daily, requestedDate }), daily || !requestedDate ? 200 : 404);
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
