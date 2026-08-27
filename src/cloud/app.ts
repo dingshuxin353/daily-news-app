@@ -1,12 +1,16 @@
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono, type Context } from "hono";
 import type { CloudFileConfig } from "./config.js";
 import type { IdentityService } from "../modules/identity/auth.js";
 import { normalizeEmail, resolveTrustedClientIp } from "../modules/identity/security.js";
+import type { AgentCredentialService } from "../modules/agent-access/credential-service.js";
 import type { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
 import { renderLoginPage, renderSpacePage } from "../web/cloud-pages.js";
+import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
+import { resolveTrustedExternalOrigin } from "../web/settings-security.js";
 
 export interface CloudAppDependencies {
   basePath: string;
@@ -16,6 +20,16 @@ export interface CloudAppDependencies {
   defaults?: CloudFileConfig["defaults"];
   clientIpResolver?: (context: Context) => string;
   testMailReader?: { latestFor(email: string): { otp: string } | null };
+  agentSettings?: {
+    origin: string;
+    csrfSecret: string;
+    service: AgentCredentialService;
+    digestActor: (purpose: "session" | "ip", value: string) => string;
+    apiBaseUrl: string;
+    mcpUrl: string;
+    activeCredentialLimit: number;
+    requestBodyLimitBytes: number;
+  };
 }
 
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -30,12 +44,34 @@ function resolveNodeClientIp(context: Context): string {
   try {
     remoteAddress = getConnInfo(context).remote.address;
   } catch {
-    remoteAddress = "127.0.0.1";
+    remoteAddress = "0.0.0.0";
   }
   return resolveTrustedClientIp({
     remoteAddress,
     forwardedAddress: context.req.header("x-dailynews-client-ip"),
   });
+}
+
+function resolveNodeRequestOrigin(context: Context, configuredOrigin: string): string | null {
+  try {
+    const remoteAddress = getConnInfo(context).remote.address;
+    const environment = context.env as {
+      server?: { incoming?: { socket?: { encrypted?: boolean } } };
+      incoming?: { socket?: { encrypted?: boolean } };
+    };
+    const incoming = environment.server?.incoming ?? environment.incoming;
+    if (!incoming?.socket) return null;
+    return resolveTrustedExternalOrigin({
+      requestUrl: context.req.url,
+      requestHost: context.req.header("host"),
+      transportProtocol: incoming.socket.encrypted ? "https" : "http",
+      configuredOrigin,
+      remoteAddress,
+      forwardedProto: context.req.header("x-forwarded-proto"),
+    });
+  } catch {
+    return null;
+  }
 }
 
 function privateResponseHeaders(context: Context): void {
@@ -102,6 +138,13 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         const session = await identity.getSession(context.req.raw, clientIp(context));
         if (!session) return context.redirect(route("/login"), 303);
         const tenant = await tenancy.ensureSpaceForUser(session.user.id, defaults);
+        if (dependencies.agentSettings) {
+          await dependencies.agentSettings.service.ensureBootstrapPairing(
+            tenant,
+            `req_${randomUUID().replaceAll("-", "")}`,
+            dependencies.agentSettings.digestActor("session", `${session.session.id}:${session.user.id}`),
+          );
+        }
         const repository = tenancy.forTenant(tenant);
         const [home, publications, todo, themes] = await Promise.all([
           repository.getHomeProfile(),
@@ -136,6 +179,25 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         } catch {
           return context.json({ error: "not_found" }, 404);
         }
+      });
+    }
+
+    if (dependencies.agentSettings) {
+      registerAgentSettingsRoutes(app, {
+        basePath: dependencies.basePath,
+        origin: dependencies.agentSettings.origin,
+        csrfSecret: dependencies.agentSettings.csrfSecret,
+        identity,
+        tenancy,
+        defaults,
+        agentAccess: dependencies.agentSettings.service,
+        clientIpResolver: clientIp,
+        requestOriginResolver: (context) => resolveNodeRequestOrigin(context, dependencies.agentSettings!.origin),
+        digestActor: dependencies.agentSettings.digestActor,
+        apiBaseUrl: dependencies.agentSettings.apiBaseUrl,
+        mcpUrl: dependencies.agentSettings.mcpUrl,
+        activeCredentialLimit: dependencies.agentSettings.activeCredentialLimit,
+        requestBodyLimitBytes: dependencies.agentSettings.requestBodyLimitBytes,
       });
     }
   }

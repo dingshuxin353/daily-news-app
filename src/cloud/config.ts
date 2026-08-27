@@ -37,6 +37,15 @@ export interface CloudFileConfig {
     otpAllowedAttempts: number;
     sessionExpiresInDays: number;
   };
+  agentAccess: {
+    pairingCodeTtlSeconds: number;
+    provisioningTtlSeconds: number;
+    claimIpHourlyLimit: number;
+    verifyIpHourlyLimit: number;
+    requestBodyLimitBytes: number;
+    rateLimitRetentionHours: number;
+    auditRetentionDays: number;
+  };
 }
 
 export interface TencentSesRuntimeConfig {
@@ -65,6 +74,12 @@ export interface CloudRuntimeConfig {
     digestSecret: string;
     mailMode: "fake" | "ses";
     ses?: TencentSesRuntimeConfig;
+  };
+  agentAccess: {
+    tokenDigestSecret: string;
+    pairingCodeDigestSecret: string;
+    apiBaseUrl: string;
+    mcpUrl: string;
   };
   product: CloudFileConfig;
 }
@@ -110,6 +125,7 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
   const priorityLimits = requireRecord(defaults.priorityLimits, "defaults.priorityLimits");
   const limits = requireRecord(root.limits, "limits");
   const identity = requireRecord(root.identity, "identity");
+  const agentAccess = requireRecord(root.agentAccess, "agentAccess");
   const normal = priorityLimits.normal;
   if (normal !== null && (!Number.isInteger(normal) || (normal as number) < 0)) {
     throw new CloudConfigError("defaults.priorityLimits.normal must be null or a non-negative integer");
@@ -146,6 +162,35 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
       otpExpiresInSeconds: requireInteger(identity.otpExpiresInSeconds, "identity.otpExpiresInSeconds", 60, 1800),
       otpAllowedAttempts: requireInteger(identity.otpAllowedAttempts, "identity.otpAllowedAttempts", 1, 10),
       sessionExpiresInDays: requireInteger(identity.sessionExpiresInDays, "identity.sessionExpiresInDays", 1, 90),
+    },
+    agentAccess: {
+      pairingCodeTtlSeconds: requireInteger(
+        agentAccess.pairingCodeTtlSeconds,
+        "agentAccess.pairingCodeTtlSeconds",
+        60,
+        3600,
+      ),
+      provisioningTtlSeconds: requireInteger(
+        agentAccess.provisioningTtlSeconds,
+        "agentAccess.provisioningTtlSeconds",
+        60,
+        3600,
+      ),
+      claimIpHourlyLimit: requireInteger(agentAccess.claimIpHourlyLimit, "agentAccess.claimIpHourlyLimit", 1, 1000),
+      verifyIpHourlyLimit: requireInteger(agentAccess.verifyIpHourlyLimit, "agentAccess.verifyIpHourlyLimit", 1, 1000),
+      requestBodyLimitBytes: requireInteger(
+        agentAccess.requestBodyLimitBytes,
+        "agentAccess.requestBodyLimitBytes",
+        1024,
+        1024 * 1024,
+      ),
+      rateLimitRetentionHours: requireInteger(
+        agentAccess.rateLimitRetentionHours,
+        "agentAccess.rateLimitRetentionHours",
+        1,
+        24 * 30,
+      ),
+      auditRetentionDays: requireInteger(agentAccess.auditRetentionDays, "agentAccess.auditRetentionDays", 1, 3650),
     },
   };
 }
@@ -223,6 +268,23 @@ function parseBasePath(raw: string | undefined): string {
   return value;
 }
 
+function parseAgentEndpoint(raw: string | undefined, name: string, origin: string, expectedPath: string): string {
+  const value = requireString(raw, name);
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new CloudConfigError(`${name} must be an absolute URL`);
+  }
+  if (endpoint.origin !== origin || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new CloudConfigError(`${name} must use CLOUD_ORIGIN without credentials, query, or fragment`);
+  }
+  if (endpoint.pathname !== expectedPath) {
+    throw new CloudConfigError(`${name} must use the configured cloud base path`);
+  }
+  return endpoint.href.replace(/\/$/, "");
+}
+
 function parseDatabaseUrl(raw: string | undefined): string {
   if (!raw) throw new CloudConfigError("DATABASE_URL is required");
   let url: URL;
@@ -270,9 +332,22 @@ export async function loadCloudConfig(options: {
     throw new CloudConfigError("PG_SSL_MODE must be disable or require");
   }
 
+  const origin = parseOrigin(env.CLOUD_ORIGIN);
+  const basePath = parseBasePath(env.CLOUD_BASE_PATH);
+  const identity = parseMailConfiguration(env);
+  const tokenDigestSecret = requireSecret(env, "AGENT_TOKEN_DIGEST_SECRET");
+  const pairingCodeDigestSecret = requireSecret(env, "PAIRING_CODE_DIGEST_SECRET");
+  if (new Set([
+    identity.authSecret,
+    identity.digestSecret,
+    tokenDigestSecret,
+    pairingCodeDigestSecret,
+  ]).size !== 4) {
+    throw new CloudConfigError("identity and Agent secrets must be independent");
+  }
   return {
-    origin: parseOrigin(env.CLOUD_ORIGIN),
-    basePath: parseBasePath(env.CLOUD_BASE_PATH),
+    origin,
+    basePath,
     host: parseHost(env.CLOUD_HOST),
     port: parseIntegerEnvironment(env, "CLOUD_PORT", 3000, 1, 65535),
     database: {
@@ -282,7 +357,13 @@ export async function loadCloudConfig(options: {
       idleTimeoutMillis: parseIntegerEnvironment(env, "PG_IDLE_TIMEOUT_MS", 30000, 1000, 600000),
       connectionTimeoutMillis: parseIntegerEnvironment(env, "PG_CONNECTION_TIMEOUT_MS", 5000, 100, 60000),
     },
-    identity: parseMailConfiguration(env),
+    identity,
+    agentAccess: {
+      tokenDigestSecret,
+      pairingCodeDigestSecret,
+      apiBaseUrl: parseAgentEndpoint(env.AGENT_API_BASE_URL, "AGENT_API_BASE_URL", origin, `${basePath}/api/v1`),
+      mcpUrl: parseAgentEndpoint(env.AGENT_MCP_URL, "AGENT_MCP_URL", origin, `${basePath}/mcp`),
+    },
     product: validateCloudFileConfig(parsed),
   };
 }

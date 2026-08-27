@@ -48,6 +48,15 @@ const product = {
     otpAllowedAttempts: 3,
     sessionExpiresInDays: 30,
   },
+  agentAccess: {
+    pairingCodeTtlSeconds: 600,
+    provisioningTtlSeconds: 600,
+    claimIpHourlyLimit: 20,
+    verifyIpHourlyLimit: 40,
+    requestBodyLimitBytes: 16384,
+    rateLimitRetentionHours: 24,
+    auditRetentionDays: 90,
+  },
 };
 
 function runtimeConfig(productOverrides = {}) {
@@ -67,6 +76,12 @@ function runtimeConfig(productOverrides = {}) {
       authSecret: "identity-integration-auth-secret-32-characters",
       digestSecret: "identity-integration-digest-secret-32-characters",
       mailMode: "fake",
+    },
+    agentAccess: {
+      tokenDigestSecret: "identity-integration-agent-secret-32-characters",
+      pairingCodeDigestSecret: "identity-integration-pairing-secret-32-characters",
+      apiBaseUrl: "https://dailynews.test/api/v1",
+      mcpUrl: "https://dailynews.test/mcp",
     },
     product: {
       ...product,

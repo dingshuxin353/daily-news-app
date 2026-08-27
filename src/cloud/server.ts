@@ -8,7 +8,10 @@ import {
   verifyPostgresConnection,
 } from "../adapters/postgres/pool.js";
 import { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
+import { PostgresAgentAccessRepository } from "../adapters/postgres/agent-credentials.js";
 import { createIdentityService } from "../modules/identity/auth.js";
+import { keyedDigest } from "../modules/identity/security.js";
+import { AgentCredentialService } from "../modules/agent-access/credential-service.js";
 import { createCloudApp } from "./app.js";
 import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
 import { defaultMigrationsDirectory } from "./paths.js";
@@ -60,11 +63,42 @@ export async function startCloudServer(options: {
   let app;
   try {
     const identity = createIdentityService({ config, authPool, appPool: pool });
+    const agentAccess = new AgentCredentialService(
+      new PostgresAgentAccessRepository(pool, {
+        rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
+        auditDays: config.product.agentAccess.auditRetentionDays,
+      }),
+      {
+        tokenDigestSecret: config.agentAccess.tokenDigestSecret,
+        pairingCodeDigestSecret: config.agentAccess.pairingCodeDigestSecret,
+        activeCredentialLimit: config.product.limits.activeTokensPerUser,
+        pairingCodeTtlSeconds: config.product.agentAccess.pairingCodeTtlSeconds,
+        provisioningTtlSeconds: config.product.agentAccess.provisioningTtlSeconds,
+        claimIpHourlyLimit: config.product.agentAccess.claimIpHourlyLimit,
+        verifyIpHourlyLimit: config.product.agentAccess.verifyIpHourlyLimit,
+        apiBaseUrl: config.agentAccess.apiBaseUrl,
+        mcpUrl: config.agentAccess.mcpUrl,
+        pairingVerifyUrl: `${config.origin}${config.basePath}/agent-pairing/v1/verify`,
+      },
+    );
     app = createCloudApp({
       basePath: config.basePath,
       identity,
       tenancy: new PostgresTenancyStore(pool),
       defaults: config.product.defaults,
+      agentSettings: {
+        origin: config.origin,
+        csrfSecret: config.identity.authSecret,
+        service: agentAccess,
+        digestActor: (purpose, value) => keyedDigest(
+          config.agentAccess.pairingCodeDigestSecret,
+          `${purpose}\0${value}`,
+        ),
+        apiBaseUrl: config.agentAccess.apiBaseUrl,
+        mcpUrl: config.agentAccess.mcpUrl,
+        activeCredentialLimit: config.product.limits.activeTokensPerUser,
+        requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
+      },
       readinessCheck: async () => {
         await verifyPostgresConnection(pool);
         await checkMigrationCompatibility(pool, { migrationsDirectory });
