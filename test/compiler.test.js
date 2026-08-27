@@ -186,6 +186,16 @@ test("编译产物保留 editorial 与多个来源，并只生成一个布局模
   assert.equal(compiled.layout.rows[0].modules[0].resolvedPriority, "lead");
 });
 
+test("编译校验接受 PostgreSQL jsonb 规范化后的对象键顺序", () => {
+  const source = issue(["lead"]);
+  const compiled = compileIssue(source).compiled;
+  compiled.coverage = Object.fromEntries(Object.entries(compiled.coverage).reverse());
+  compiled.items[0] = Object.fromEntries(Object.entries(compiled.items[0]).reverse());
+  compiled.items[0].editorial = Object.fromEntries(Object.entries(compiled.items[0].editorial).reverse());
+  compiled.items[0].sources[0] = Object.fromEntries(Object.entries(compiled.items[0].sources[0]).reverse());
+  assert.doesNotThrow(() => validateCompiled(source, compiled, "jsonb-round-trip"));
+});
+
 test("编译产物缺失、重复内容或超载时校验失败", () => {
   const source = issue(["normal", "normal"]);
   const { compiled } = compileIssue(source);

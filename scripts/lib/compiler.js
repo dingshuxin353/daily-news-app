@@ -1,3 +1,5 @@
+import { sameValue } from "./domain/value.js";
+
 const MODULES = {
   lead: { size: "large", span: 4 },
   important: { size: "medium", span: 2 },
@@ -165,7 +167,7 @@ export function validateCompiled(
     compiled.date !== sourceIssue.date
     || compiled.generatedAt !== sourceIssue.generatedAt
     || compiled.revision !== sourceIssue.revision
-    || JSON.stringify(compiled.coverage) !== JSON.stringify(sourceIssue.coverage)
+    || !sameValue(compiled.coverage, sourceIssue.coverage)
   ) {
     throw new CompilationError(filePath, "date/generatedAt/revision/coverage", "必须与正式日报一致");
   }
@@ -234,7 +236,7 @@ export function validateCompiled(
 
   for (const sourceItem of sourceIssue.items) {
     const item = compiledItems.get(sourceItem.id);
-    if (JSON.stringify(item) !== JSON.stringify(copyCompiledItem(sourceItem, sourceIssue.schemaVersion === 2))) {
+    if (!sameValue(item, copyCompiledItem(sourceItem, sourceIssue.schemaVersion === 2))) {
       throw new CompilationError(filePath, `items.${sourceItem.id}`, "内容与正式日报不一致");
     }
   }
