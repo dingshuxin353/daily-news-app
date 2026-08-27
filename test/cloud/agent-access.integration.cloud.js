@@ -23,6 +23,16 @@ const { Pool } = pg;
 const controlPool = new Pool({ connectionString, max: 30, connectionTimeoutMillis: 5000 });
 const openHarnesses = new Set();
 const migrationsDirectory = new URL("../../db/migrations", import.meta.url).pathname;
+const testRequestEnvironment = {
+  incoming: {
+    socket: {
+      remoteAddress: "127.0.0.1",
+      remotePort: 443,
+      remoteFamily: "IPv4",
+      encrypted: true,
+    },
+  },
+};
 
 const product = {
   schemaVersion: 1,
@@ -164,8 +174,18 @@ async function resetAndMigrate() {
   await runMigrations(controlPool, { migrationsDirectory });
 }
 
+function appRequest(app, input, init = {}) {
+  return app.request(input, {
+    ...init,
+    headers: {
+      host: "dailynews.test",
+      ...Object.fromEntries(new Headers(init.headers)),
+    },
+  }, testRequestEnvironment);
+}
+
 async function post(app, pathname, body, headers = {}) {
-  return app.request(`https://dailynews.test${pathname}`, {
+  return appRequest(app, `https://dailynews.test${pathname}`, {
     method: "POST",
     headers: { origin: "https://dailynews.test", "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -173,7 +193,7 @@ async function post(app, pathname, body, headers = {}) {
 }
 
 async function verifyPairing(app, token, headers = {}) {
-  return app.request("https://dailynews.test/agent-pairing/v1/verify", {
+  return appRequest(app, "https://dailynews.test/agent-pairing/v1/verify", {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, ...headers },
   });
@@ -194,7 +214,7 @@ async function signIn(harness, email) {
 }
 
 async function getJson(app, pathname, headers = {}) {
-  const response = await app.request(`https://dailynews.test${pathname}`, { headers });
+  const response = await appRequest(app, `https://dailynews.test${pathname}`, { headers });
   return { response, body: await response.json() };
 }
 
@@ -240,7 +260,7 @@ after(async () => {
 test("bootstrap pairing refreshes, claims once, verifies once, and persists no plaintext secret", async () => {
   const harness = createHarness();
   const cookie = await signIn(harness, "pairing@example.com");
-  assert.equal((await harness.app.request("https://dailynews.test/", { headers: { cookie } })).status, 200);
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
 
   const settings = await getJson(harness.app, "/settings/agent", { cookie });
   assert.equal(settings.response.status, 200);
@@ -332,7 +352,7 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
   assert.equal(after.body.authorizations.length, 1);
   assert.equal(after.body.authorizations[0].name, "Codex <script>alert(1)</script>");
   assert.doesNotMatch(JSON.stringify(after.body), /tokenHint|secretDigest|selector|dnpat_/);
-  assert.equal((await harness.app.request("https://dailynews.test/", {
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/", {
     headers: { authorization: `Bearer ${claimed.token}` },
   })).status, 303);
 
@@ -484,7 +504,7 @@ test("credential quota serializes concurrent creation and pairing refresh consum
 test("claim and browser bootstrap acquire the Space lock before the pairing row", async () => {
   const harness = createHarness();
   const cookie = await signIn(harness, "claim-lock-order@example.com");
-  assert.equal((await harness.app.request("https://dailynews.test/", { headers: { cookie } })).status, 200);
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
   const settings = await getJson(harness.app, "/settings/agent", { cookie });
   const pairing = settings.body.pairings[0];
   const stored = await controlPool.query(
@@ -502,7 +522,7 @@ test("claim and browser bootstrap acquire the Space lock before the pairing row"
       pairingCode: pairing.code,
       clientName: "Concurrent claimant",
     });
-    homePromise = harness.app.request("https://dailynews.test/", { headers: { cookie } });
+    homePromise = appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } });
     await waitForBlockedTransactions(blockerPid, 2);
 
     const observer = await controlPool.connect();
@@ -529,7 +549,7 @@ test("claim and browser bootstrap acquire the Space lock before the pairing row"
 test("verify and cancellation serialize at Space before locking pairing or credential rows", async () => {
   const harness = createHarness();
   const cookie = await signIn(harness, "verify-lock-order@example.com");
-  assert.equal((await harness.app.request("https://dailynews.test/", { headers: { cookie } })).status, 200);
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
   const settings = await getJson(harness.app, "/settings/agent", { cookie });
   const pairing = settings.body.pairings[0];
   const claim = await post(harness.app, "/agent-pairing/v1/claim", {

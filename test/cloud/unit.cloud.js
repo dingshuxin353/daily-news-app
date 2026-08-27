@@ -667,6 +667,18 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const csrf = createSettingsCsrfToken(csrfSecret, "session-a", "user-a");
+  const noSocketRequest = (host) => app.request(
+    "https://dailynews.test/settings/agent/connections/credential-a/name",
+    {
+      method: "POST",
+      headers: {
+        host,
+        origin: "https://dailynews.test",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "无连接上下文", _csrf: csrf }),
+    },
+  );
   const request = (headers = {}, requestTarget = "/settings/agent/connections/credential-a/name") => new Promise((resolve, reject) => {
     const body = JSON.stringify({ name: "代理后的 Agent", _csrf: csrf });
     const outgoing = httpRequest({
@@ -703,6 +715,8 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
     outgoing.end();
   });
   try {
+    assert.equal((await noSocketRequest("dailynews.test")).status, 403);
+    assert.equal((await noSocketRequest("attacker.test")).status, 403);
     assert.equal(await request(), 403);
     assert.equal(await request({ "x-forwarded-proto": "http" }), 403);
     assert.equal(await request({ "x-forwarded-proto": "https", origin: "https://attacker.test" }), 403);

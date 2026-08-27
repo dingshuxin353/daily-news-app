@@ -44,7 +44,7 @@ function resolveNodeClientIp(context: Context): string {
   try {
     remoteAddress = getConnInfo(context).remote.address;
   } catch {
-    remoteAddress = "127.0.0.1";
+    remoteAddress = "0.0.0.0";
   }
   return resolveTrustedClientIp({
     remoteAddress,
@@ -53,32 +53,25 @@ function resolveNodeClientIp(context: Context): string {
 }
 
 function resolveNodeRequestOrigin(context: Context, configuredOrigin: string): string | null {
-  let remoteAddress: string | undefined;
-  let requestHost: string | undefined;
-  let transportProtocol: "http" | "https";
   try {
-    remoteAddress = getConnInfo(context).remote.address;
+    const remoteAddress = getConnInfo(context).remote.address;
     const environment = context.env as {
       server?: { incoming?: { socket?: { encrypted?: boolean } } };
       incoming?: { socket?: { encrypted?: boolean } };
     };
     const incoming = environment.server?.incoming ?? environment.incoming;
-    requestHost = context.req.header("host");
-    transportProtocol = incoming?.socket?.encrypted ? "https" : "http";
+    if (!incoming?.socket) return null;
+    return resolveTrustedExternalOrigin({
+      requestUrl: context.req.url,
+      requestHost: context.req.header("host"),
+      transportProtocol: incoming.socket.encrypted ? "https" : "http",
+      configuredOrigin,
+      remoteAddress,
+      forwardedProto: context.req.header("x-forwarded-proto"),
+    });
   } catch {
-    const requestUrl = new URL(context.req.url);
-    remoteAddress = "127.0.0.1";
-    requestHost = requestUrl.host;
-    transportProtocol = requestUrl.protocol === "https:" ? "https" : "http";
+    return null;
   }
-  return resolveTrustedExternalOrigin({
-    requestUrl: context.req.url,
-    requestHost,
-    transportProtocol,
-    configuredOrigin,
-    remoteAddress,
-    forwardedProto: context.req.header("x-forwarded-proto"),
-  });
 }
 
 function privateResponseHeaders(context: Context): void {
