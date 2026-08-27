@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "spaceName": "我的日报",
+    "timeZone": "Asia/Shanghai",
+    "publicationId": "daily-news",
+    "publicationName": "DailyNews",
+    "theme": {
+      "id": "newspaper-default",
+      "revision": 1
+    },
+    "todoEnabled": false,
+    "priorityLimits": {
+      "lead": 1,
+      "important": 2,
+      "normal": null
+    }
+  },
+  "limits": {
+    "publicationsPerSpace": 8,
+    "activeTokensPerUser": 10,
+    "testDailyEmailHardLimit": 100,
+    "emailCooldownSeconds": 60,
+    "emailHourlyLimit": 5,
+    "ipHourlyLimit": 20
+  },
+  "identity": {
+    "otpLength": 6,
+    "otpExpiresInSeconds": 300,
+    "otpAllowedAttempts": 3,
+    "sessionExpiresInDays": 30
+  },
+  "agentAccess": {
+    "pairingCodeTtlSeconds": 600,
+    "provisioningTtlSeconds": 600,
+    "claimIpHourlyLimit": 20,
+    "verifyIpHourlyLimit": 40,
+    "requestBodyLimitBytes": 16384,
+    "rateLimitRetentionHours": 24,
+    "auditRetentionDays": 90,
+    "apiRequestBodyLimitBytes": 262144,
+    "readTokenHourlyLimit": 600,
+    "writeTokenHourlyLimit": 120,
+    "readIpHourlyLimit": 1200,
+    "writeIpHourlyLimit": 240,
+    "dailyItemLimit": 100,
+    "todoOperationLimit": 100,
+    "concurrentWriteLimitPerSpace": 2,
+    "writeLeaseTtlSeconds": 300,
+    "credentialLastUsedTouchSeconds": 300,
+    "submissionRetentionDays": 90
+  }
+}

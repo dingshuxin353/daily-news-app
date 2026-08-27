@@ -1,0 +1,131 @@
+# DailyNews Agent JSON API
+
+状态：`v1.0.0` M3-B 研发契约，不代表云端产品已经发布或部署。远程 MCP 由 M3-D 交付。
+
+DailyNews 的 Agent JSON API 使用设置页一次性签发的 Personal Access Token（PAT）。浏览器 Cookie 不能代替 PAT，PAT 也不能打开浏览器私有页面。请从 DailyNews 设置中读取真实 API Base URL；下面的域名、Token 和内容都是假数据。
+
+## 安全与重试
+
+- 请求头使用 `Authorization: Bearer <PAT>`；不要把 PAT 放进 URL、Candidate、日志、项目文件或聊天回复。
+- GET 不需要请求 `Content-Type`。POST 只接受 `application/json`，并且必须带 `Idempotency-Key`。
+- 同一次网络重试复用同一个 key 和完全相同的 JSON；新的用户意图使用新 key。相同 key 携带不同正文会返回 `409 idempotency_conflict`。
+- 响应中的私有页面链接不含凭证；用户打开时仍需自己的浏览器 Session。
+- `401 invalid_token` 不区分错误、过期、轮换或撤销；创建或轮换目标连接密钥后重试。
+- `429` 按 `Retry-After` 等待。`503` 使用原 key 与原正文安全重试。
+
+机器可读契约位于 [`openapi-v1.yaml`](./openapi-v1.yaml)。该文件使用 JSON 表示法保存；JSON 是 YAML 1.2 的合法子集。
+
+## Content 闭环
+
+先读取 Publication，再读取目标日期上下文。日期缺省时，服务端按目标 Publication 时区解析今天：
+
+```bash
+export DAILYNEWS_API_BASE='https://dailynews.example/api/v1'
+export DAILYNEWS_PAT='dnpat_example_only_never_use_this_value'
+
+curl --fail-with-body \
+  -H "Authorization: Bearer ${DAILYNEWS_PAT}" \
+  "${DAILYNEWS_API_BASE}/publications"
+
+curl --fail-with-body \
+  -H "Authorization: Bearer ${DAILYNEWS_PAT}" \
+  "${DAILYNEWS_API_BASE}/publications/daily-news/daily-context?date=2026-08-27"
+```
+
+提交假数据示例：
+
+```bash
+curl --fail-with-body \
+  -X POST \
+  -H "Authorization: Bearer ${DAILYNEWS_PAT}" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: fake-daily-run-20260827' \
+  "${DAILYNEWS_API_BASE}/publications/daily-news/daily-candidates" \
+  --data-binary @- <<'JSON'
+{
+  "mode": "update",
+  "confirmation": {
+    "historicalDate": null,
+    "replace": null
+  },
+  "candidate": {
+    "schemaVersion": 2,
+    "date": "2026-08-27",
+    "generatedAt": "2026-08-27T08:00:00+08:00",
+    "coverage": {
+      "start": "2026-08-26T08:00:00+08:00",
+      "end": "2026-08-27T08:00:00+08:00"
+    },
+    "items": [{
+      "id": "example-update",
+      "title": "示例产品发布新版本",
+      "brief": "这是只用于接口演示的虚构内容。",
+      "summary": "示例团队发布了一个虚构版本，用于说明 Content Candidate 字段。",
+      "editorial": {
+        "priority": "lead",
+        "selectionReason": "演示稳定字段与来源结构"
+      },
+      "sources": [{
+        "name": "Example Source",
+        "url": "https://example.com/fake-dailynews-story"
+      }]
+    }]
+  }
+}
+JSON
+```
+
+提交成功后，使用响应中的 `date` 和 `publicationId` 读取同一正式 revision：
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer ${DAILYNEWS_PAT}" \
+  "${DAILYNEWS_API_BASE}/publications/daily-news/issues/2026-08-27"
+```
+
+历史日期必须令 `confirmation.historicalDate` 与 Candidate 日期完全一致。`replace` 只允许替换已经存在的 Issue，并必须同时绑定 `publicationId`、`date` 和刚从 Context 读取的 `expectedRevision`。锁内 revision 已变化时会返回 `409 revision_conflict`，需要重读并再次取得用户确认。普通修正使用 `update`。
+
+## Personal Todo 闭环
+
+先读取 Todo。未启用时只返回 `enabled: false`、Candidate 规则和绝对设置链接，不返回保留 State 的 revision、数量或正文；Agent 不能自行启用。
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer ${DAILYNEWS_PAT}" \
+  "${DAILYNEWS_API_BASE}/todo"
+```
+
+用户在浏览器明确启用后，可以提交假数据示例：
+
+```bash
+curl --fail-with-body \
+  -X POST \
+  -H "Authorization: Bearer ${DAILYNEWS_PAT}" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: fake-todo-run-20260827' \
+  "${DAILYNEWS_API_BASE}/todo/candidates" \
+  --data-binary @- <<'JSON'
+{
+  "candidate": {
+    "schemaVersion": 1,
+    "candidateId": "example-todo-run",
+    "generatedAt": "2026-08-27T09:00:00+08:00",
+    "baseRevision": 0,
+    "operations": [{
+      "type": "add",
+      "clientId": "draft-one",
+      "title": "提交示例周报",
+      "dueDate": "2026-08-28"
+    }]
+  }
+}
+JSON
+```
+
+Todo 的 `candidateId` 仍是领域标识；`Idempotency-Key` 会规范化为跨 JSON API / MCP 共用的 `clientRunId`。两者不能互相冒充。出现 `409 revision_conflict` 时，重新 GET `/todo`，用最新 `baseRevision` 生成新的 Candidate，并为新意图使用新 key。
+
+## 当前固定限制
+
+`config/cloud.json` 固定首个部署默认值：API 请求体 256 KiB；每枚 PAT 每小时读取 600 次、写入 120 次；每个受信客户端 IP 每小时读取 1200 次、写入 240 次；每个 Content Candidate 最多 100 条内容，每个 Todo Candidate 最多 100 个操作；每个 Space 最多 2 个并发 Agent 写入。限流事件保留 24 小时，Candidate / Submission 幂等回执保留 90 天，写入租约最长 5 分钟，`last_used_at` 最多每 5 分钟节流更新一次。
+
+这些数值属于部署边界，不改变 Candidate、Writer、Compiler 或正式数据语义。

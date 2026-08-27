@@ -17,9 +17,29 @@
     "rollback-theme": "node scripts/rollback-theme.js",
     "build": "node scripts/prepare-data.js && node scripts/build.js",
     "start": "node scripts/prepare-data.js && node scripts/build.js && node scripts/serve.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "build:cloud": "tsc -p tsconfig.cloud.json",
+    "start:cloud": "node .cloud-dist/src/cloud/server.js",
+    "db:migrate": "npm run build:cloud --silent && node .cloud-dist/src/cloud/migrate.js",
+    "test:cloud": "npm run build:cloud --silent && node --test test/cloud/unit.cloud.js",
+    "test:cloud:integration": "npm run build:cloud --silent && node --test --test-concurrency=1 test/cloud/*.integration.cloud.js"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "better-auth": "1.7.1",
+    "hono": "4.13.4",
+    "pg": "8.23.0",
+    "tencentcloud-sdk-nodejs-ses": "4.1.271"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/pg": "8.23.1",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

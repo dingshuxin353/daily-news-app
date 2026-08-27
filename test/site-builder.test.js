@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -272,6 +272,14 @@ test("公开构建即使 Todo 启用也不包含路由、导航、样式或私�
   assert.doesNotMatch(source, /个人待办|\/todo\/|PRIVATE-TODO/);
   await assert.rejects(() => stat(path.join(outputDir, "todo")), /ENOENT/);
   await assert.rejects(() => stat(path.join(outputDir, "todo.css")), /ENOENT/);
+});
+
+test("静态构建只复制浏览器入口，不包含云端运行与 PostgreSQL 源码", async () => {
+  const target = await fixture();
+  const { outputDir } = await buildSite(target, undefined, { asOfDate: "2026-08-23" });
+  assert.deepEqual((await readdir(path.join(outputDir, "src"))).sort(), ["app.js", "home.js"]);
+  await assert.rejects(() => stat(path.join(outputDir, "src", "cloud")), /ENOENT/);
+  await assert.rejects(() => stat(path.join(outputDir, "src", "adapters")), /ENOENT/);
 });
 
 test("本地构建生成 Todo 页面、Home 模块和导航，并继承 Home Theme", async () => {

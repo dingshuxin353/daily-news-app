@@ -143,8 +143,10 @@ export async function buildSite(rootDir, outputDir = path.join(rootDir, "dist"),
   );
   await mkdir(stagingDir, { recursive: false });
   try {
-  for (const entry of ["styles.css", "src"]) {
-    await cp(path.join(rootDir, entry), path.join(stagingDir, entry), { recursive: true });
+  await cp(path.join(rootDir, "styles.css"), path.join(stagingDir, "styles.css"));
+  await mkdir(path.join(stagingDir, "src"), { recursive: true });
+  for (const entry of ["app.js", "home.js"]) {
+    await cp(path.join(rootDir, "src", entry), path.join(stagingDir, "src", entry));
   }
   if (localTodoEnabled) {
     await cp(path.join(rootDir, "todo.css"), path.join(stagingDir, "todo.css"));
