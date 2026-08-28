@@ -17,7 +17,7 @@
 | 范围 | 结果 | 说明 |
 | --- | --- | --- |
 | 版本线基线核心测试 | 通过，120/120 | 覆盖既有本地模式和 M2 回归 |
-| 本分支核心测试 | 通过，125/125 | 包含新增 5 项证据框架安全单测 |
+| 本分支核心测试 | 通过，126/126 | 包含新增 6 项证据框架安全单测 |
 | 云端单测 | 通过，41/41 | 覆盖 MCP 双时代、Schema、错误、Origin/Host/Socket 和安全负向 |
 | 静态构建 | 通过 | `npm run build` |
 | 云端构建 | 通过 | `npm run build:cloud` |
@@ -30,11 +30,11 @@
 ## 3. 本分支新增框架
 
 - `test/m3-e/run-live-mcp.js`：使用官方 MCP Client 通过真实 URL 执行现代 / legacy Discover、Context、Daily、Todo、正式读取和凭证切换探针；可选地执行 JSON API 同一 `clientRunId` 重放。
-- `test/m3-e/record-schedule.js`：只验证并记录真实 Agent 调度事件，不创建或模拟调度器。
+- `test/m3-e/record-schedule.js`：只验证并记录 `codex-standalone-cron` 创建的新任务 / 临时会话调度事件，不创建或模拟调度器。
 - `test/m3-e/lib/safe-evidence.js`：统一执行私有文件权限、仓库外路径、敏感字段拒绝、PAT 脱敏、固定字段摘要和 Git 忽略证据写入。
 - `test/m3-e-framework.test.js`：验证摘要不包含响应正文或凭证材料，私有文件权限和敏感 JSON 字段保护有效。
 
-生成证据位于 Git 忽略的 `test-results/m3-e/`，报告和标准输出不包含 PAT、Authorization、Cookie、Session 或用户正文。
+生成证据位于 Git 忽略的 `test-results/m3-e/`，报告和标准输出不包含 PAT、Authorization、Cookie、Session 凭证或用户正文；调度证据只保留受校验的 task/session 标识。
 
 ## 4. 待真实环境执行矩阵
 
@@ -48,16 +48,16 @@
 | PAT 撤销 / 轮换 | 框架已就绪，待两份临时 PAT | 旧 PAT 被拒绝、新 PAT 成功；凭证不落盘到 Git/日志 |
 | Tenant / Publication / inactive / Todo disabled 隐私 | 既有 CI 已覆盖代码事实；真实端点待复核 | 跨目标失败关闭、disabled 不读 State 的脱敏结果 |
 | 首轮立即运行 | 待真实 Agent | 首轮 Agent 运行与正式日报结果 |
-| 第二次实际定时运行 | 待真实 heartbeat | 自动触发时间、MCP 运行证据；不能人工触发 |
-| 修改要求后的下一次定时运行 | 待真实 heartbeat | 新需求 SHA-256、下一次自动触发和变化后的正式结果 |
+| 第二次实际定时运行 | 待 `codex-standalone-cron` | 新任务/临时会话标识、scheduledAt、startedAt、requestId、正式 revision；不能人工触发 |
+| 修改要求后的下一次定时运行 | 待 `codex-standalone-cron` | 新需求 SHA-256、新任务/临时会话、下一次自动触发和变化后的正式结果 |
 | 页面用户旅程 / 深链 | 既有应用测试已覆盖代码合同；真实浏览器旅程待执行 | 脱敏截图/记录、日期和合法 Todo 锚点保持 |
 
 ## 5. 当前环境阻断
 
-按本轮授权，尚未安装或启动软件，尚未创建数据库、账号、PAT 或 heartbeat/cron。当前没有可用的 `TEST_DATABASE_URL`、真实 `M3E_MCP_URL` 或私有 PAT 文件，因此不能把本地自动化、占位 URL 或历史资料表述为真实外部闭环。
+按本轮授权，尚未安装或启动软件，尚未创建数据库、账号、PAT 或 standalone cron automation。当前没有可用的 `TEST_DATABASE_URL`、真实 `M3E_MCP_URL` 或私有 PAT 文件，因此不能把本地自动化、占位 URL 或历史资料表述为真实外部闭环。
 
 用户安装 PostgreSQL 15 并由研发任务提供可控的隔离运行输入后，再按 `test/m3-e/README.md` 执行真实环境收窄验收。凭证必须通过受限本地文件或安全环境注入，不得放入任务消息、命令行、仓库或报告。
 
 ## 6. 完成判定
 
-本报告和框架只完成 M3-E 的可复查准备工作。M3-E 仍需真实 MCP 客户端闭环、真实调度 Agent 的首轮 / 第二次定时 / 修改要求后下一次运行，以及 PostgreSQL 真实结果和脱敏证据全部齐备后，才能形成最终通过结论。
+本报告和框架只完成 M3-E 的可复查准备工作。M3-E 仍需真实 MCP 客户端闭环、由 standalone cron 创建的新任务 / 临时会话完成首轮后的第二次定时运行及修改要求后的下一次运行，以及 PostgreSQL 真实结果和脱敏证据全部齐备后，才能形成最终通过结论。

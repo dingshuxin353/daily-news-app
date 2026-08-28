@@ -7,12 +7,11 @@ import {
   readPrivateJson,
   readPrivateText,
   sha256,
+  validateScheduleEvent,
   validRunId,
   writeEvidence,
 } from "./lib/safe-evidence.js";
 
-const PHASES = new Set(["initial", "scheduled-repeat", "changed-requirement"]);
-const TRIGGER_SOURCES = new Set(["agent-immediate", "codex-heartbeat"]);
 const DIGEST = /^[0-9a-f]{64}$/;
 
 function usage() {
@@ -24,7 +23,8 @@ function usage() {
     "",
     "The event file must be a private regular JSON file outside the repository.",
     "It may contain only schedule facts; never put PATs, cookies, authorization headers, or user正文 in it.",
-    "For scheduled-repeat and changed-requirement, triggerSource must be codex-heartbeat, automated must be true, and manualTrigger must be false.",
+    "Only schedulerType=codex-standalone-cron is accepted; it must create a new local task/session at the scheduled time.",
+    "automated must be true and manualTrigger must be false; taskId, sessionId, startedAt, requestId, and formalRevision are required.",
     "The recorder writes only a sanitized record under ignored test-results/m3-e/.",
   ].join("\n");
 }
@@ -47,20 +47,6 @@ function parseArgs(argv) {
   return options;
 }
 
-function requiredString(value, code) {
-  if (typeof value !== "string" || value.length === 0) throw new EvidenceInputError(code);
-  return value;
-}
-
-function parseTimestamp(value, code) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
-    throw new EvidenceInputError(code);
-  }
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) throw new EvidenceInputError(code);
-  return value;
-}
-
 function requireDigest(value, code) {
   if (typeof value !== "string" || !DIGEST.test(value)) throw new EvidenceInputError(code);
   return value;
@@ -77,21 +63,7 @@ async function main() {
   if (!event || typeof event !== "object" || Array.isArray(event)) {
     throw new EvidenceInputError("schedule_event_invalid");
   }
-  const phase = requiredString(event.phase, "schedule_phase_required");
-  if (!PHASES.has(phase)) throw new EvidenceInputError("schedule_phase_invalid");
-  const triggerSource = requiredString(event.triggerSource, "trigger_source_required");
-  if (!TRIGGER_SOURCES.has(triggerSource)) throw new EvidenceInputError("trigger_source_invalid");
-  const scheduledAt = parseTimestamp(event.scheduledAt, "scheduled_at_invalid");
-  const triggeredAt = parseTimestamp(event.triggeredAt, "triggered_at_invalid");
-  if (Date.parse(triggeredAt) < Date.parse(scheduledAt)) throw new EvidenceInputError("trigger_before_schedule");
-  const mcpRunId = requiredString(event.mcpRunId, "mcp_run_id_required");
-  if (!validRunId(mcpRunId)) throw new EvidenceInputError("mcp_run_id_invalid");
-  if (phase !== "initial" && (event.automated !== true || event.manualTrigger !== false)) {
-    throw new EvidenceInputError("schedule_must_be_automated");
-  }
-  if (phase !== "initial" && triggerSource !== "codex-heartbeat") {
-    throw new EvidenceInputError("scheduled_phase_requires_heartbeat");
-  }
+  const schedule = validateScheduleEvent(event);
 
   let requirementSha256 = event.requirementSha256 === undefined
     ? undefined
@@ -112,19 +84,13 @@ async function main() {
     schemaVersion: 1,
     runId,
     kind: "schedule-event",
-    phase,
-    triggerSource,
-    automated: event.automated === true,
-    manualTrigger: event.manualTrigger === true,
-    scheduledAt,
-    triggeredAt,
-    mcpRunId,
+    ...schedule,
     requirementSha256,
     ...(requirementBytes === undefined ? {} : { requirementBytes }),
     recordedAt: new Date().toISOString(),
   };
   const evidenceFile = await writeEvidence(runId, evidence);
-  console.log(`[m3-e] status=recorded phase=${phase} evidence=${evidenceFile}`);
+  console.log(`[m3-e] status=recorded phase=${schedule.phase} evidence=${evidenceFile}`);
 }
 
 try {

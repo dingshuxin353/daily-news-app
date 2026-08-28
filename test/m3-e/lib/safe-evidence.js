@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 export const EVIDENCE_ROOT = path.join(PROJECT_ROOT, "test-results", "m3-e");
+export const STANDALONE_SCHEDULER = "codex-standalone-cron";
 
 const PRIVATE_MODE_MASK = 0o077;
 const REQUEST_ID = /^req_[0-9a-f]{32}$/;
@@ -39,6 +40,12 @@ const EXPECTED_TOOLS = new Set([
   "submit_todo_candidate",
   "get_todo_state",
 ]);
+const SCHEDULE_PHASES = new Set(["scheduled-repeat", "changed-requirement"]);
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function isSensitiveKey(key) {
+  return SENSITIVE_KEY.test(key) && key !== "sessionId";
+}
 
 export class EvidenceInputError extends Error {
   constructor(code) {
@@ -113,7 +120,7 @@ export function rejectSensitiveKeys(value, purpose = "input", depth = 0) {
     return;
   }
   for (const [key, entry] of Object.entries(value)) {
-    if (SENSITIVE_KEY.test(key)) {
+    if (isSensitiveKey(key)) {
       throw new EvidenceInputError(`${purpose}_contains_sensitive_field`);
     }
     rejectSensitiveKeys(entry, purpose, depth + 1);
@@ -152,6 +159,58 @@ export function safeStatus(value) {
   return Number.isInteger(value) && value >= 100 && value <= 599 ? value : undefined;
 }
 
+function safeTimestamp(value) {
+  if (typeof value !== "string" || !ISO_TIMESTAMP.test(value) || !Number.isFinite(Date.parse(value))) return undefined;
+  return value;
+}
+
+export function validateScheduleEvent(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new EvidenceInputError("schedule_event_invalid");
+  }
+  if (Object.hasOwn(value, "triggerSource") || Object.hasOwn(value, "triggeredAt")) {
+    throw new EvidenceInputError("schedule_legacy_field_not_allowed");
+  }
+  if (value.schedulerType !== STANDALONE_SCHEDULER) {
+    throw new EvidenceInputError("scheduler_type_invalid");
+  }
+  if (typeof value.phase !== "string" || !SCHEDULE_PHASES.has(value.phase)) {
+    throw new EvidenceInputError("schedule_phase_invalid");
+  }
+  if (value.automated !== true || value.manualTrigger !== false) {
+    throw new EvidenceInputError("schedule_must_be_automated");
+  }
+  const scheduledAt = safeTimestamp(value.scheduledAt);
+  const startedAt = safeTimestamp(value.startedAt);
+  if (!scheduledAt || !startedAt) throw new EvidenceInputError("schedule_timestamp_invalid");
+  if (Date.parse(startedAt) < Date.parse(scheduledAt)) {
+    throw new EvidenceInputError("task_started_before_schedule");
+  }
+  const taskId = validRunId(value.taskId);
+  const sessionId = validRunId(value.sessionId);
+  const mcpRunId = validRunId(value.mcpRunId);
+  const requestId = safeRequestId(value.requestId);
+  const formalRevision = safeRevision(value.formalRevision);
+  if (!taskId || !sessionId || !mcpRunId) throw new EvidenceInputError("schedule_identity_invalid");
+  if (!requestId) throw new EvidenceInputError("schedule_request_id_invalid");
+  if (formalRevision === undefined || formalRevision < 1) {
+    throw new EvidenceInputError("formal_revision_invalid");
+  }
+  return {
+    phase: value.phase,
+    schedulerType: STANDALONE_SCHEDULER,
+    automated: true,
+    manualTrigger: false,
+    scheduledAt,
+    startedAt,
+    taskId,
+    sessionId,
+    mcpRunId,
+    requestId,
+    formalRevision,
+  };
+}
+
 export function redact(value, depth = 0) {
   if (depth > 20) return "[REDACTED_DEPTH]";
   if (typeof value === "string") {
@@ -161,7 +220,7 @@ export function redact(value, depth = 0) {
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
       key,
-      SENSITIVE_KEY.test(key) ? "[REDACTED_SENSITIVE_FIELD]" : redact(entry, depth + 1),
+      isSensitiveKey(key) ? "[REDACTED_SENSITIVE_FIELD]" : redact(entry, depth + 1),
     ]));
   }
   return value;

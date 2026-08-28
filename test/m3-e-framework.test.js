@@ -10,8 +10,10 @@ import {
   readPrivateJson,
   readPrivateText,
   safeRequestId,
+  STANDALONE_SCHEDULER,
   summarizeToolResult,
   summarizeTools,
+  validateScheduleEvent,
 } from "./m3-e/lib/safe-evidence.js";
 
 async function privateFixture(name, contents, mode = 0o600) {
@@ -67,6 +69,44 @@ test("tool summaries keep unexpected server-provided names and error codes out",
     isError: true,
     structuredContent: { error: { code: unexpectedTool } },
   }).errorCode, undefined);
+});
+
+test("schedule evidence only accepts a standalone cron task and its new session", async () => {
+  const valid = {
+    phase: "scheduled-repeat",
+    schedulerType: STANDALONE_SCHEDULER,
+    automated: true,
+    manualTrigger: false,
+    scheduledAt: "2026-08-30T09:00:00+09:00",
+    startedAt: "2026-08-30T09:00:03+09:00",
+    taskId: "m3e-task-20260830-090003",
+    sessionId: "m3e-session-20260830-090003",
+    mcpRunId: "m3e-run-20260830-090003",
+    requestId: "req_0123456789abcdef0123456789abcdef",
+    formalRevision: 2,
+  };
+  assert.deepEqual(validateScheduleEvent(valid), valid);
+  const fixture = await privateFixture("scheduled-repeat.json", JSON.stringify(valid));
+  try {
+    const parsed = await readPrivateJson(fixture.file, "schedule_event");
+    assert.deepEqual(validateScheduleEvent(parsed.value), valid);
+    assert.equal(redact({ sessionId: valid.sessionId }).sessionId, valid.sessionId);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+  const legacyScheduler = ["codex", "legacy", "scheduler"].join("-");
+  assert.throws(
+    () => validateScheduleEvent({ ...valid, schedulerType: legacyScheduler }),
+    (error) => error instanceof EvidenceInputError && error.code === "scheduler_type_invalid",
+  );
+  assert.throws(
+    () => validateScheduleEvent({ ...valid, triggerSource: "manual" }),
+    (error) => error instanceof EvidenceInputError && error.code === "schedule_legacy_field_not_allowed",
+  );
+  assert.throws(
+    () => validateScheduleEvent({ ...valid, manualTrigger: true }),
+    (error) => error instanceof EvidenceInputError && error.code === "schedule_must_be_automated",
+  );
 });
 
 test("private input files must be regular repository-external files with restrictive modes", async () => {

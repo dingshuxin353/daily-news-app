@@ -45,7 +45,7 @@ npm run test:m3e:live -- --phase full --era modern \
 
 ## 定时运行证据
 
-`record-schedule.js` 不创建定时任务，只验证由真实 Agent 调度器产生的事实文件，并写入脱敏记录：
+`record-schedule.js` 不创建定时任务，只验证由 Codex standalone cron automation 到点创建的独立本地任务 / 临时会话事实文件，并写入脱敏记录。它不唤醒已有线程。
 
 ```bash
 npm run test:m3e:record-schedule -- \
@@ -58,18 +58,22 @@ npm run test:m3e:record-schedule -- \
 ```json
 {
   "phase": "scheduled-repeat",
-  "triggerSource": "codex-heartbeat",
+  "schedulerType": "codex-standalone-cron",
   "automated": true,
   "manualTrigger": false,
   "scheduledAt": "2026-08-30T09:00:00+09:00",
-  "triggeredAt": "2026-08-30T09:00:03+09:00",
+  "startedAt": "2026-08-30T09:00:03+09:00",
+  "taskId": "m3e-task-20260830-090003",
+  "sessionId": "m3e-session-20260830-090003",
   "mcpRunId": "m3e-run-20260830-090003",
+  "requestId": "req_0123456789abcdef0123456789abcdef",
+  "formalRevision": 2,
   "requirementSha256": "<64 位小写 SHA-256>"
 }
 ```
 
-`scheduled-repeat` 和 `changed-requirement` 必须来自真实 heartbeat，不能使用人工 follow-up、固定 sleep、模拟时钟或一次性脚本。`changed-requirement` 应使用修改后的需求文件哈希，并关联对应的 MCP 运行证据。
+`scheduled-repeat` 和 `changed-requirement` 必须由 `codex-standalone-cron` 在约定时间创建新的本地任务 / 临时会话，不能使用人工 `create_thread`、`send_message`、follow-up、固定 sleep、模拟时钟或一次性脚本冒充定时触发。`changed-requirement` 应使用修改后的需求文件哈希，并关联对应的 MCP 运行证据、requestId 和正式 revision。
 
 ## 当前运行前提
 
-框架不会替代真实环境。M3-E 需要在真实 PostgreSQL 15、真实 `@hono/node-server` 回环监听、真实官方 MCP 客户端和真实自动调度触发均可用后，补齐首轮、第二次定时运行和修改要求后的下一次运行证据。
+框架不会替代真实环境。M3-E 需要在真实 PostgreSQL 15、真实 `@hono/node-server` 回环监听、真实官方 MCP 客户端和真实 standalone cron 自动触发均可用后，补齐首轮、第二次定时运行和修改要求后的下一次运行证据。
