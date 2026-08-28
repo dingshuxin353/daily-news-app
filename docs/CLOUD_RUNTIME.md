@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B 与 M3-C 研发能力，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B / M3-C 与 M3-D 研发能力，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与默认对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期、M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API，以及 M3-C 的公开入口、首次接入、私有 Home、正式日报、Todo 和设置页面。它不包含 MCP 或正式部署。Agent API 的调用契约与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与默认对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期、M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API、M3-C 的公开与私有页面，以及 M3-D 的双时代远程 MCP。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 
@@ -13,16 +13,16 @@
 
 先参考 [`.env.example`](../.env.example) 准备以下云端配置：
 
-- `CLOUD_ORIGIN`：显式公开 Origin；非回环地址必须使用 HTTPS。
+- `CLOUD_ORIGIN`：显式公开 Origin；非回环地址必须使用 HTTPS。回环 HTTP 只供本机开发，必须同时使用回环 `CLOUD_HOST`。
 - `CLOUD_BASE_PATH`：可留空，或设置为无尾部斜杠的绝对路径。
-- `CLOUD_HOST`：默认 `127.0.0.1`。
+- `CLOUD_HOST`：默认 `127.0.0.1`；回环 HTTP Origin 不得搭配 `0.0.0.0`、`::` 或其他公开监听地址。
 - `CLOUD_PORT`：默认 `3000`。
 - `DATABASE_URL`：独立 PostgreSQL 数据库连接地址。
 - `PG_SSL_MODE`：`disable` 或 `require`。
 - `PG_POOL_MAX`、`PG_IDLE_TIMEOUT_MS`、`PG_CONNECTION_TIMEOUT_MS`：连接池边界。
 - `BETTER_AUTH_SECRET`、`IDENTITY_DIGEST_SECRET`：至少 32 字符的独立随机 Secret。
 - `AGENT_TOKEN_DIGEST_SECRET`、`PAIRING_CODE_DIGEST_SECRET`：至少 32 字符、彼此独立且不得与身份 Secret 复用；分别用于长期凭证摘要和短时配对码派生 / 摘要。
-- `AGENT_API_BASE_URL`、`AGENT_MCP_URL`：与 `CLOUD_ORIGIN` 和 `CLOUD_BASE_PATH` 严格一致的公开绝对地址；M3-A 只在配对结果中声明，实际 API 与 MCP 路由分别由 M3-B、M3-D 交付。
+- `AGENT_API_BASE_URL`、`AGENT_MCP_URL`：与 `CLOUD_ORIGIN` 和 `CLOUD_BASE_PATH` 严格一致的公开绝对地址；分别指向已实现的 JSON API 与 MCP 路由。
 - `MAIL_MODE`：必须显式配置；本地与 CI 使用 `fake`，腾讯云投递使用 `ses`。缺失或空值时云端配置失败，不会降级到 Fake。
 - `TENCENTCLOUD_SECRET_ID`、`TENCENTCLOUD_SECRET_KEY`、`TENCENT_SES_REGION`、`TENCENT_SES_FROM_EMAIL`、`TENCENT_SES_TEMPLATE_ID`、`TENCENT_SES_SUBJECT`：只在 `ses` 模式需要。
 
@@ -66,6 +66,12 @@ M3-C 的私有阅读服务只从 Session 解析出的 Space 进入 PostgreSQL Re
 
 Personal Todo 仍默认关闭。设置页只读取开关与非归档数量，不展示任务标题；关闭时 `/todo/` 不读取保留的 State 正文，直接引导回设置。启用后，Todo 页面只读展示正式 State，并固定按已逾期、今天、接下来、暂无日期和今天已完成分组；浏览器不能直接修改任务。
 
+M3-D 精确锁定 `@modelcontextprotocol/server@2.0.0`、`@modelcontextprotocol/client@2.0.0` 与 `zod@4.2.0`。`POST /mcp` 通过一个 `createMcpHandler` Server Factory 同时服务现代 `2026-07-28` 和无状态兼容 `2025-11-25`，不生成协议 Session，也不注册 GET / DELETE 流。六个工具共享 M3-B 的 `AgentRequestAuthenticator`、`AgentOperationsService`、PostgreSQL 事务、限流、写入租约和 `clientRunId` 幂等状态，不存在第二套 Token 或业务数据路径。
+
+MCP 在解析前按独立的 256 KiB 上限读取请求克隆；原请求保留给官方 SDK。真实 Host、请求目标 Host、Socket 协议、回环 TLS 终止代理和可选浏览器 `Origin` 都必须与 `CLOUD_ORIGIN` 一致，连接元数据不可得时失败关闭。回环 HTTP Origin 还要求进程只绑定回环地址，并在运行时独立拒绝所有非回环连接来源；即使请求 Host 与 Origin 字面一致也不能绕过该边界。现代请求还必须携带 `MCP-Protocol-Version`；其版本、`Mcp-Method`、`Mcp-Name` 与正文一致性由官方 SDK 校验。PAT 在每个 POST 前重新认证并按实际工具区分读写额度；传入 SDK 的认证对象只含脱敏占位 Token 与内部请求上下文，不把原始 PAT 暴露给工具回调。
+
+工具的严格 Zod 输入 / 输出 Schema 会由 SDK 转换为 JSON Schema；Context 返回默认目标、明确日期和写入边界，提交工具继续进入正式 Writer / Compiler。工具业务失败使用 `isError`、稳定 `error.code/message/requestId` 和脱敏短文本，协议错误由 SDK 返回 JSON-RPC 错误。Server Instructions 在前 512 字符内完整声明 Context-first、明确目标、Candidate 隔离、Todo disabled、幂等重试和用户确认规则。
+
 M2-D 精确锁定 `better-auth@1.7.1` 与 `tencentcloud-sdk-nodejs-ses@4.1.271`，并以 `uuid@11.1.1` 覆盖腾讯云 SDK 的旧传递版本。Better Auth 使用 `auth` Search Path 和数据库 Session；Email OTP 固定为 6 位、5 分钟、最多错误 3 次、摘要保存、重发轮换。应用在调用邮件 Adapter 前，以 PostgreSQL 锁并发预留单邮箱冷却、邮箱小时、IP 小时和全站每日硬上限；所有状态改变型认证请求还必须通过严格的同源 Origin 校验。
 
 `MAIL_MODE=fake` 不调用外部供应商。Fake OTP 读取能力只由自动化测试在构造测试 App 时显式注入；正式 `npm run start:cloud` 即使运行在 Fake 模式也不会注册测试读取路由。`MAIL_MODE=ses` 使用腾讯云 SES `SendEmail` 触发类模板；成功必须同时保存 RequestId 和 MessageId，拒绝、超时或缺失任一 ID 时返回脱敏 `503`，同一次请求不自动重试。
@@ -94,6 +100,7 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
 - `GET /api/v1/publications`、`GET /api/v1/publications/:id/daily-context`、`POST /api/v1/publications/:id/daily-candidates` 与 `GET /api/v1/publications/:id/issues/:date` 提供 Content 正式读写闭环。
 - `GET /api/v1/todo` 与 `POST /api/v1/todo/candidates` 提供 Todo 状态、正式 State 与受控写入；Todo 关闭时不读取保留正文。
+- `POST /mcp` 提供六个 Daily / Todo MCP 工具；只接受 Bearer PAT 与 `application/json`。`GET /mcp`、`DELETE /mcp` 和其他方法固定返回 `405 Allow: POST`。
 
 所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用独立核对实际 `Host`、HTTP 请求目标中的 Host、Socket 实际传输协议与 `CLOUD_ORIGIN`，只在两个 Host 都严格一致、直接上游地址为回环且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。连接或 Socket 元数据不可得时直接视为不可信；来自非回环地址、缺失或多值的代理协议、absolute-form 请求目标与 `Host` 不一致、Host 不匹配及浏览器 `Origin` 不匹配都会继续拒绝，不能用任意 Origin 或伪造请求目标绕过 CSRF。
 
@@ -118,3 +125,5 @@ M3-A 集成测试覆盖 Bootstrap Pairing、刷新旧码失效、Claim / 无请�
 M3-B 集成测试覆盖活动 / 撤销 PAT、`last_used_at` 节流触达、PAT 与 IP 持久限流、跨进程写入租约、Content 正式写入与读取、跨 Space 隐藏、未来 / 历史 / `replace` 锁内确认、停用 Publication、Todo disabled 最小披露、Todo `clientRunId` 幂等与 Candidate ID 独立性，以及 `0102` 对短 legacy Candidate ID 的安全升级。OpenAPI 测试从真实路由清单核对全部 Method / Path、Bearer、POST 幂等头、错误码与假数据示例。
 
 M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与配对码分离、系统示例不落库、第一份正式日报替换示例、Compiled Edition 顺序和层级、指定日期 404、Todo 浏览器启停、正式 State 五组投影、关闭后不披露保留正文、主题选择链不完整时失败关闭，以及动态 Agent 名称的 HTML 转义。云端单元测试同时验证可见页面使用统一品牌外壳、资源入口和无用户数据的公开边界。
+
+M3-D 协议自动化使用官方 `@modelcontextprotocol/client@2.0.0` 分别执行现代 Discover 和兼容 Initialize，核对同一组六个工具的 `tools/list`、全部 `tools/call`、Instructions、Schema、Annotations、结构化错误、无 Session 与私有响应头。负向测试覆盖 Method、Content-Type、流式超限、Cookie / PAT 混淆、跨 Origin、现代协议版本与方法 / 工具名 Header 错配，以及真实 Node HTTP Adapter 下的 Host、absolute-form 请求目标、回环 TLS 终止和无 Socket 失败关闭。PostgreSQL 集成测试使用同一 PAT 跨 MCP / JSON API 复用相同 Daily `clientRunId`，核对只产生一个正式 revision，并验证轮换后旧 Token 失败、新 Token 同时恢复两种协议。Inspector 基线与客户端配置见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。

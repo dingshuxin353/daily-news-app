@@ -303,6 +303,22 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   const instructionText = /data-copy-source="instruction">([\s\S]*?)<\/pre>/.exec(onboardingHtml)?.[1] ?? "";
   assert.doesNotMatch(instructionText, /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/);
 
+  const setupResponse = await appRequest(
+    harness.app,
+    "https://dailynews.test/.well-known/dailynews-agent-setup.json",
+  );
+  assert.equal(setupResponse.status, 200);
+  const setup = await setupResponse.json();
+  assert.equal(setup.instructionsVersion, "1.0.0");
+  assert.deepEqual(setup.mcp, {
+    url: "https://dailynews.test/mcp",
+    transport: "streamable-http",
+    protocolVersions: ["2026-07-28", "2025-11-25"],
+    authorization: "bearer",
+  });
+  assert.match(setup.instructions.join(" "), /定时任务/);
+  assert.doesNotMatch(JSON.stringify(setup), /dnpat_|配对码：/);
+
   const sampleHome = await appRequest(harness.app, "https://dailynews.test/home", {
     headers: { cookie, accept: "text/html" },
   });

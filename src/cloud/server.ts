@@ -104,6 +104,15 @@ export async function startCloudServer(options: {
         credentialLastUsedTouchSeconds: config.product.agentAccess.credentialLastUsedTouchSeconds,
       },
     );
+    const agentOperations = new AgentOperationsService(pool, tenancy, agentRequestPolicy, {
+      origin: config.origin,
+      basePath: config.basePath,
+      dailyItemLimit: config.product.agentAccess.dailyItemLimit,
+      todoOperationLimit: config.product.agentAccess.todoOperationLimit,
+      concurrentWriteLimitPerSpace: config.product.agentAccess.concurrentWriteLimitPerSpace,
+      writeLeaseTtlSeconds: config.product.agentAccess.writeLeaseTtlSeconds,
+      submissionRetentionDays: config.product.agentAccess.submissionRetentionDays,
+    });
     app = createCloudApp({
       basePath: config.basePath,
       identity,
@@ -125,16 +134,16 @@ export async function startCloudServer(options: {
       },
       agentApi: {
         authenticator: agentRequestAuthenticator,
-        operations: new AgentOperationsService(pool, tenancy, agentRequestPolicy, {
-          origin: config.origin,
-          basePath: config.basePath,
-          dailyItemLimit: config.product.agentAccess.dailyItemLimit,
-          todoOperationLimit: config.product.agentAccess.todoOperationLimit,
-          concurrentWriteLimitPerSpace: config.product.agentAccess.concurrentWriteLimitPerSpace,
-          writeLeaseTtlSeconds: config.product.agentAccess.writeLeaseTtlSeconds,
-          submissionRetentionDays: config.product.agentAccess.submissionRetentionDays,
-        }),
+        operations: agentOperations,
         requestBodyLimitBytes: config.product.agentAccess.apiRequestBodyLimitBytes,
+      },
+      agentMcp: {
+        origin: config.origin,
+        authenticator: agentRequestAuthenticator,
+        operations: agentOperations,
+        requestBodyLimitBytes: config.product.agentAccess.mcpRequestBodyLimitBytes,
+        dailyItemLimit: config.product.agentAccess.dailyItemLimit,
+        todoOperationLimit: config.product.agentAccess.todoOperationLimit,
       },
       readinessCheck: async () => {
         await verifyPostgresConnection(pool);

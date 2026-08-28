@@ -29,12 +29,15 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
+    "@modelcontextprotocol/server": "2.0.0",
     "better-auth": "1.7.1",
     "hono": "4.13.4",
     "pg": "8.23.0",
-    "tencentcloud-sdk-nodejs-ses": "4.1.271"
+    "tencentcloud-sdk-nodejs-ses": "4.1.271",
+    "zod": "4.2.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "22.20.1",
     "@types/pg": "8.23.1",
     "typescript": "7.0.2"
