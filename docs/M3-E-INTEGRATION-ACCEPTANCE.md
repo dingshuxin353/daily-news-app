@@ -1,6 +1,6 @@
 # M3-E 独立集成验收记录
 
-状态：准备阶段完成，真实环境验收待执行；本报告不代表 M3 已通过。
+状态：首轮真实本机试运行与非调度矩阵部分完成；认证后的私有页面和 standalone cron 调度运行仍待补齐。本报告不代表 M3-E 已通过。
 
 ## 1. 验收对象
 
@@ -23,9 +23,18 @@
 | 云端构建 | 通过 | `npm run build:cloud` |
 | 依赖审计 | 通过 | `npm audit --audit-level=high`，0 high vulnerabilities |
 | PostgreSQL 集成 | CI 通过，46/46 | CI 使用 PostgreSQL 15 专用数据库 |
-| 本机 PostgreSQL 集成 | 未运行 | 本机没有 `TEST_DATABASE_URL`；测试按安全约束拒绝启动，未伪造结果 |
+| 本机 PostgreSQL 集成 | 首轮收窄矩阵通过 | 用户提供的 PostgreSQL 15.19 已由正式服务使用；未运行依赖 `TEST_DATABASE_URL` 的仓库集成命令 |
 
 现有 MCP 自动化使用官方 SDK，但其中的集成 transport 通过本地 `app.request` 或测试 App；它们是代码契约和协议回归证据，不替代真实监听端点上的外部客户端证据。
+
+### 2.1 首轮真实本机结果（2026-08-28）
+
+- 已独立核对用户提供的 manifest、PostgreSQL 15.19 和正式 `@hono/node-server` 服务；服务通过真实 TCP/HTTP 端点监听回环地址，数据库 migration 为 6/6。
+- 官方 `@modelcontextprotocol/client@2.0.0` 通过真实 URL 完成 modern / legacy Discover、六工具发现、Instructions、Daily Context 和 Todo Context；两时代均无 MCP 会话头，六工具精确匹配。
+- modern 首轮 Daily 写入成功，正式 Issue 与 Compiled Edition 均为 revision `1`；同一 `clientRunId` 的 JSON API 重放仍为 revision `1`，数据库只存在 1 条 Daily Submission、1 条 Issue 和 1 条 Compiled Edition。
+- Todo disabled 两时代均只记录 `enabled=false` 并跳过写入；JSON API 只读响应不含保留 State 字段。真实 HTTP 负向检查和 JSON API 读取摘要均已写入脱敏证据。
+- 证据文件均位于 Git 忽略的 `test-results/m3-e/`：`m3e-initial-20260828.json`、`m3e-live-inspect-20260828-r2.json`、`m3e-live-daily-initial-20260828.json`、`m3e-live-todo-disabled-20260828.json`、`m3e-http-negative-20260828.json`、`m3e-json-read-20260828.json`。
+- 浏览器已验证公开首页、未登录 Daily / Todo 深链回登录页、合法日期回跳展示和外部回跳被丢弃；正式服务不含准备阶段的测试邮件读取器，当前没有可复用的已认证浏览器会话，因此认证后的私有 Home / Publication / Todo 页面未执行，未伪造 session。
 
 ## 3. 本分支新增框架
 
@@ -40,24 +49,24 @@
 
 | 场景 | 当前状态 | 完成证据 |
 | --- | --- | --- |
-| PostgreSQL 15 Migration 与正式存储 | 待用户安装并提供专用连接 | Migration 摘要、真实 DB 结果、无明文凭证 |
-| `@hono/node-server` 回环 HTTP 监听 | 待执行 | 实际 socket 访问、Host/Origin/remoteAddress 边界 |
-| 官方 MCP Client modern / legacy | 框架已就绪，待真实端点 | 真实 HTTP 状态、六工具发现和工具调用摘要 |
-| Daily / Todo 正式写入与读取 | 框架已就绪，待真实 PAT | requestId、正式 revision、固定结果摘要 |
-| JSON API / MCP 幂等一致性 | 框架已就绪，待 JSON API URL | 同一 `clientRunId` 的单 revision 与重放结果 |
+| PostgreSQL 15 Migration 与正式存储 | 首轮已执行，6/6 | Migration 摘要、真实 DB 计数与正式 revision、无明文凭证 |
+| `@hono/node-server` 回环 HTTP 监听 | 首轮已执行 | 实际 TCP/HTTP 访问、Host/Origin/remoteAddress 负向边界 |
+| 官方 MCP Client modern / legacy | 首轮通过 | 真实 HTTP 状态、六工具发现、Instructions 和工具调用摘要 |
+| Daily / Todo 正式写入与读取 | Daily 首轮通过；Todo disabled 通过 | requestId、正式 revision、固定结果摘要 |
+| JSON API / MCP 幂等一致性 | 首轮通过 | 同一 `clientRunId` 的单 revision 与重放结果 |
 | PAT 撤销 / 轮换 | 框架已就绪，待两份临时 PAT | 旧 PAT 被拒绝、新 PAT 成功；凭证不落盘到 Git/日志 |
-| Tenant / Publication / inactive / Todo disabled 隐私 | 既有 CI 已覆盖代码事实；真实端点待复核 | 跨目标失败关闭、disabled 不读 State 的脱敏结果 |
-| 首轮立即运行 | 待真实 Agent | 首轮 Agent 运行与正式日报结果 |
+| Tenant / Publication / inactive / Todo disabled 隐私 | Todo disabled 已通过真实 MCP/JSON API；私有页面待认证会话 | 跨目标失败关闭、disabled 不读 State 的脱敏结果 |
+| 首轮立即运行 | Daily 首轮已通过；私有页面显示待认证会话 | 首轮 Agent 运行与正式日报结果 |
 | 第二次实际定时运行 | 待 `codex-standalone-cron` | 新任务/临时会话标识、scheduledAt、startedAt、requestId、正式 revision；不能人工触发 |
 | 修改要求后的下一次定时运行 | 待 `codex-standalone-cron` | 新需求 SHA-256、新任务/临时会话、下一次自动触发和变化后的正式结果 |
-| 页面用户旅程 / 深链 | 既有应用测试已覆盖代码合同；真实浏览器旅程待执行 | 脱敏截图/记录、日期和合法 Todo 锚点保持 |
+| 页面用户旅程 / 深链 | 公开页、未登录深链和回跳参数已通过；认证私有页待会话 | 脱敏页面记录、日期和合法 Todo 锚点保持 |
 
 ## 5. 当前环境阻断
 
-按本轮授权，尚未安装或启动软件，尚未创建数据库、账号、PAT 或 standalone cron automation。当前没有可用的 `TEST_DATABASE_URL`、真实 `M3E_MCP_URL` 或私有 PAT 文件，因此不能把本地自动化、占位 URL 或历史资料表述为真实外部闭环。
+本轮环境已由用户提供并完成只读核对；未执行清理脚本，未撤销当前 PAT，也未创建 standalone cron automation。真实 PostgreSQL、监听端点和私有 PAT 已用于首轮测试，但 PAT 内容未输出。
 
-用户安装 PostgreSQL 15 并由研发任务提供可控的隔离运行输入后，再按 `test/m3-e/README.md` 执行真实环境收窄验收。凭证必须通过受限本地文件或安全环境注入，不得放入任务消息、命令行、仓库或报告。
+当前仍有两个边界未闭合：正式服务不提供准备阶段的测试邮件读取器且没有可复用浏览器会话，无法安全完成认证后的私有页面旅程；本轮按授权没有创建真实 standalone cron，因此第二次运行和修改要求后的下一次运行仍待独立新任务 / 临时会话触发。后续凭证必须继续通过受限本地文件或安全环境注入，不得放入任务消息、命令行、仓库或报告。
 
 ## 6. 完成判定
 
-本报告和框架只完成 M3-E 的可复查准备工作。M3-E 仍需真实 MCP 客户端闭环、由 standalone cron 创建的新任务 / 临时会话完成首轮后的第二次定时运行及修改要求后的下一次运行，以及 PostgreSQL 真实结果和脱敏证据全部齐备后，才能形成最终通过结论。
+本报告和框架已完成 M3-E 首轮真实本机与非调度矩阵的可复查记录，但不构成最终通过。M3-E 仍需认证后的私有页面旅程、由 standalone cron 创建的新任务 / 临时会话完成首轮后的第二次定时运行及修改要求后的下一次运行，以及全部脱敏证据齐备后，才能形成最终通过结论。

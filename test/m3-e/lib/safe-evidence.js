@@ -15,6 +15,8 @@ const RUN_ID = /^[A-Za-z0-9._-]{8,80}$/;
 const PAT = /dnpat_[A-Za-z0-9_-]+/g;
 const BEARER = /Bearer\s+[^\s,;]+/gi;
 const SENSITIVE_KEY = /authorization|cookie|password|secret|token|credential|session/i;
+const SAFE_INPUT_KEYS = new Set(["sessionId"]);
+const SAFE_EVIDENCE_KEYS = new Set(["sessionId", "sessions", "sessionHeaderPresent", "sessionHeadersPresent"]);
 const SAFE_ERROR_CODE = /^[a-z][a-z0-9_]{1,63}$/;
 const SAFE_RESULT = /^(?:created|updated|unchanged|rejected|accepted|disabled|enabled|failed)$/;
 const ERROR_CODES = new Set([
@@ -43,8 +45,8 @@ const EXPECTED_TOOLS = new Set([
 const SCHEDULE_PHASES = new Set(["scheduled-repeat", "changed-requirement"]);
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
-function isSensitiveKey(key) {
-  return SENSITIVE_KEY.test(key) && key !== "sessionId";
+function isSensitiveKey(key, safeKeys = SAFE_INPUT_KEYS) {
+  return SENSITIVE_KEY.test(key) && !safeKeys.has(key);
 }
 
 export class EvidenceInputError extends Error {
@@ -120,7 +122,7 @@ export function rejectSensitiveKeys(value, purpose = "input", depth = 0) {
     return;
   }
   for (const [key, entry] of Object.entries(value)) {
-    if (isSensitiveKey(key)) {
+    if (isSensitiveKey(key, SAFE_INPUT_KEYS)) {
       throw new EvidenceInputError(`${purpose}_contains_sensitive_field`);
     }
     rejectSensitiveKeys(entry, purpose, depth + 1);
@@ -220,7 +222,7 @@ export function redact(value, depth = 0) {
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
       key,
-      isSensitiveKey(key) ? "[REDACTED_SENSITIVE_FIELD]" : redact(entry, depth + 1),
+      isSensitiveKey(key, SAFE_EVIDENCE_KEYS) ? "[REDACTED_SENSITIVE_FIELD]" : redact(entry, depth + 1),
     ]));
   }
   return value;

@@ -91,6 +91,13 @@ test("schedule evidence only accepts a standalone cron task and its new session"
     const parsed = await readPrivateJson(fixture.file, "schedule_event");
     assert.deepEqual(validateScheduleEvent(parsed.value), valid);
     assert.equal(redact({ sessionId: valid.sessionId }).sessionId, valid.sessionId);
+    const safeSessionSummary = redact({
+      sessions: [{ sessionHeaderPresent: false, sessionHeadersPresent: false, sessionId: valid.sessionId, sessionToken: "must-not-survive" }],
+    });
+    assert.equal(safeSessionSummary.sessions[0].sessionHeaderPresent, false);
+    assert.equal(safeSessionSummary.sessions[0].sessionHeadersPresent, false);
+    assert.equal(safeSessionSummary.sessions[0].sessionId, valid.sessionId);
+    assert.equal(safeSessionSummary.sessions[0].sessionToken, "[REDACTED_SENSITIVE_FIELD]");
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
