@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2-A 至 M2-D、M3-A 至 M3-E 与 M4-A 至 M4-D 研发能力，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2–M4 已实现能力与 M5 测试部署运行时合同，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、Agent 配对和凭证生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4 的 Publication、昵称、设置、阅读和 Agent 自定义主题合同。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、Agent 配对和凭证生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4 的 Publication、昵称、设置、阅读和 Agent 自定义主题合同。M5 旧域名测试环境的唯一手工部署入口见 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md)；生产部署不在本文范围。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 
@@ -11,7 +11,7 @@
 - 从仓库根目录运行命令。
 - 真实配置由进程环境注入；程序不会自动读取 `.env` 文件。
 
-先参考 [`.env.example`](../.env.example) 准备以下云端配置：
+先参考 [`.env.example`](../.env.example) 准备以下云端配置。真实值始终从 Git 之外注入；M5 测试机的目录、Migration、进程管理、Nginx、健康检查和应用回退顺序由 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md) 唯一维护：
 
 - `CLOUD_ORIGIN`：显式公开 Origin；非回环地址必须使用 HTTPS。回环 HTTP 只供本机开发，必须同时使用回环 `CLOUD_HOST`。
 - `CLOUD_BASE_PATH`：可留空，或设置为无尾部斜杠的绝对路径。
