@@ -1,10 +1,14 @@
 import { compileIssue } from "../../scripts/lib/compiler.js";
 import { buildDailyReadingProjection } from "../../scripts/lib/domain/daily-reading.js";
-import type { DailyReading, ReadingShell } from "../modules/private-reading/service.js";
+import type {
+  DailyReading,
+  PublicationReadingSummary,
+  ReadingShell,
+} from "../modules/private-reading/service.js";
 import type { CredentialRecord, PairingRecord } from "../modules/agent-access/credential-service.js";
 import type { UserProfile } from "../modules/identity/profile-service.js";
 
-type PageName = "public" | "login" | "onboarding" | "home" | "daily" | "todo" | "settings" | "agent-settings" | "pairing";
+type PageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings" | "pairing";
 
 interface PageShellOptions {
   basePath: string;
@@ -12,7 +16,7 @@ interface PageShellOptions {
   page: PageName;
   body: string;
   privatePage?: boolean;
-  nav?: { publicationId: string; publicationName: string; todoEnabled: boolean; current: string; themeId: string; themeRevision: number; nickname?: string | null };
+  nav?: { todoVisible: boolean; current: string; themeId: string; themeRevision: number; colorScheme: "light" | "dark"; nickname?: string | null };
   returnTo?: string;
 }
 
@@ -32,8 +36,8 @@ function path(basePath: string, pathname: string): string {
 function navigation(basePath: string, nav: NonNullable<PageShellOptions["nav"]>): string {
   const links = [
     { key: "home", href: path(basePath, "/home"), label: "总览" },
-    { key: "daily", href: path(basePath, `/p/${encodeURIComponent(nav.publicationId)}/`), label: nav.publicationName },
-    ...(nav.todoEnabled ? [{ key: "todo", href: path(basePath, "/todo/"), label: "个人待办" }] : []),
+    { key: "publications", href: path(basePath, "/publications/"), label: "我的日报" },
+    ...(nav.todoVisible ? [{ key: "todo", href: path(basePath, "/todo/"), label: "Todo" }] : []),
     { key: "settings", href: path(basePath, "/settings"), label: "编辑部设置" },
   ];
   const account = nav.nickname
@@ -52,6 +56,7 @@ function navigation(basePath: string, nav: NonNullable<PageShellOptions["nav"]>)
 
 function shell(options: PageShellOptions): string {
   const basePath = escapeHtml(options.basePath);
+  const colorScheme = options.nav?.colorScheme ?? "light";
   const themeStylesheet = options.privatePage && options.nav
     ? `<link rel="stylesheet" href="${basePath}/assets/themes/${encodeURIComponent(options.nav.themeId)}/${options.nav.themeRevision}.css">`
     : "";
@@ -68,11 +73,11 @@ function shell(options: PageShellOptions): string {
       <hr class="cloud-masthead__rule" aria-hidden="true">
     </header>`;
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-color-scheme="${colorScheme}">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="${colorScheme}">
     <link rel="icon" href="data:,">
     <title>${escapeHtml(options.title)} · DailyNews</title>
     <link rel="stylesheet" href="${basePath}/assets/cloud.css">
@@ -196,12 +201,11 @@ const sampleProjection: any = buildDailyReadingProjection(sampleCompiled, sample
 
 function pageNav(shellInput: ReadingShell, current: string) {
   return {
-    publicationId: shellInput.publication.publicationId,
-    publicationName: shellInput.publication.displayName,
-    todoEnabled: shellInput.todoEnabled,
+    todoVisible: shellInput.todoEnabled && shellInput.todoHasFormalData,
     current,
     themeId: shellInput.theme.id,
     themeRevision: shellInput.theme.revision,
+    colorScheme: shellInput.theme.colorScheme,
     nickname: shellInput.nickname,
   };
 }
@@ -244,29 +248,67 @@ export function renderSettingsDocument(input: {
   });
 }
 
+function sourceEntry(source: Record<string, any>, index: number): string {
+  const via = source.via && typeof source.via === "object"
+    ? `<p>经由 <a href="${escapeHtml(source.via.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.via.name)}</a></p>`
+    : "";
+  return `<li><p class="source-role">${index === 0 ? "主要来源" : "补充来源"}</p><h3>${escapeHtml(source.name)}</h3>${source.originalTitle ? `<p>${escapeHtml(source.originalTitle)}</p>` : ""}${source.publishedAt ? `<time datetime="${escapeHtml(source.publishedAt)}">${escapeHtml(source.publishedAt)}</time>` : ""}<a class="text-link" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">打开原文 ↗</a>${via}</li>`;
+}
+
+function sourceArchive(item: Record<string, any>): string {
+  return `<section class="source-set" id="sources-${escapeHtml(item.id)}" data-source-title="${escapeHtml(item.title)}" tabindex="-1"><h2>${escapeHtml(item.title)}</h2><ol>${item.sources.map(sourceEntry).join("")}</ol></section>`;
+}
+
+function itemMedia(item: Record<string, any>, eager: boolean): string {
+  if (!item.image || typeof item.image !== "object") return "";
+  const source = item.image.sourceUrl
+    ? `<a href="${escapeHtml(item.image.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.image.credit)}</a>`
+    : escapeHtml(item.image.credit);
+  return `<figure class="daily-module__media"><img src="${escapeHtml(item.image.src)}" alt="${escapeHtml(item.image.alt)}" width="${Number(item.image.width)}" height="${Number(item.image.height)}" decoding="async" loading="${eager ? "eager" : "lazy"}"${eager ? ' fetchpriority="high"' : ""}${String(item.image.src).startsWith("https://") ? ' referrerpolicy="no-referrer"' : ""} data-reading-image><figcaption>${source}</figcaption><p class="image-fallback" data-image-fallback hidden>配图暂不可用，不影响正文阅读。</p></figure>`;
+}
+
 function dailyModule(module: Record<string, any>, index: number): string {
   const item = module.item;
-  const source = item.sources?.[0];
+  const sources = Array.isArray(item.sources) ? item.sources : [];
+  const source = sources[0];
   const copy = module.size === "large" ? item.summary : item.brief;
-  return `<article class="daily-module daily-module--${escapeHtml(module.size)}" style="--module-span:${Number(module.span)}">
+  const sourceAction = sources.length > 1
+    ? `<button class="source-trigger" type="button" data-source-open="sources-${escapeHtml(item.id)}" hidden>查看全部 ${sources.length} 个来源</button><noscript><a href="#sources-${escapeHtml(item.id)}">查看全部 ${sources.length} 个来源</a></noscript>`
+    : source ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.name)} ↗</a>` : "";
+  return `<article class="daily-module daily-module--${escapeHtml(module.size)} daily-module--span-${Number(module.span)}" id="${escapeHtml(item.id)}">
       <header><span>${escapeHtml(item.category ?? "今日编辑")}</span><span>${String(index + 1).padStart(2, "0")}</span></header>
       <h2>${escapeHtml(item.title)}</h2>
+      ${itemMedia(item, index === 0)}
       <p>${escapeHtml(copy)}</p>
-      ${source ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.name)} ↗</a>` : ""}
+      <footer class="daily-module__sources">${sourceAction}</footer>
     </article>`;
 }
 
-function dailyEdition(projection: any): string {
+function dailyEdition(projection: any): { content: string; sources: string } {
   let index = 0;
-  return projection.rows.map((row: any) => `<div class="daily-row" style="--row-capacity:${row.usedCapacity}">
+  const modules = projection.rows.flatMap((row: any) => row.modules);
+  const content = projection.rows.map((row: any) => `<div class="daily-row">
     ${row.modules.map((module: any) => dailyModule(module, index++)).join("\n    ")}
   </div>`).join("\n");
+  const multipleSources = modules
+    .map(({ item }: any) => item)
+    .filter((item: any) => Array.isArray(item.sources) && item.sources.length > 1);
+  return {
+    content,
+    sources: multipleSources.length === 0 ? "" : `<aside class="source-archive" aria-labelledby="source-archive-title"><h2 id="source-archive-title">全部来源</h2>${multipleSources.map(sourceArchive).join("")}</aside><dialog class="source-dialog" data-source-dialog aria-labelledby="source-dialog-title"><header><div><p>来源清单</p><h2 id="source-dialog-title" data-source-dialog-title>全部来源</h2></div><button class="source-dialog__close" type="button" data-source-close>关闭 ×</button></header><div data-source-dialog-content></div></dialog>`,
+  };
+}
+
+function publicationSummary(basePath: string, summary: PublicationReadingSummary, primary = false): string {
+  const href = path(basePath, `/p/${encodeURIComponent(summary.publication.publicationId)}/${summary.latest ? `?date=${summary.latest.date}` : ""}`);
+  return `<li class="publication-entry${primary ? " publication-entry--primary" : ""}"><div><p>${primary ? "首要日报" : "日报"}</p><h2>${escapeHtml(summary.publication.displayName)}</h2>${summary.latest ? `<time datetime="${escapeHtml(summary.latest.date)}">${escapeHtml(summary.latest.date)}</time><p>${escapeHtml(summary.latest.title)}</p>` : "<p>第一份正式日报还没有到达。</p>"}</div><a class="text-link" href="${escapeHtml(href)}">${summary.latest ? "打开最新一期" : "打开日报"} →</a></li>`;
 }
 
 export function renderHomePage(input: {
   basePath: string;
   shell: ReadingShell;
   daily: DailyReading | null;
+  publications?: PublicationReadingSummary[];
   todoProjection?: any;
 }): string {
   const formal = input.daily;
@@ -295,7 +337,8 @@ export function renderHomePage(input: {
           <a class="text-link" href="${escapeHtml(href)}">${formal ? "阅读完整日报" : "设置自动日报"} →</a>
         </article>
       </section>
-      ${formal && todoItems.length > 0 ? `<section class="home-todo" aria-labelledby="home-todo-title">
+      ${(input.publications ?? []).length ? `<section class="home-publications" aria-labelledby="home-publications-title"><header><p>其他日报</p><h2 id="home-publications-title">继续阅读</h2></header><ol>${input.publications!.map((publication) => publicationSummary(input.basePath, publication)).join("")}</ol><a class="text-link" href="${escapeHtml(path(input.basePath, "/publications/"))}">查看我的日报 →</a></section>` : ""}
+      ${todoItems.length > 0 ? `<section class="home-todo" aria-labelledby="home-todo-title">
         <header><h2 id="home-todo-title">个人待办</h2><a href="${escapeHtml(path(input.basePath, "/todo/"))}">查看全部 →</a></header>
         <ol>${todoItems.map((item: any) => `<li><a href="${escapeHtml(path(input.basePath, `/todo/#${item.id}`))}">${escapeHtml(item.title)}</a><span>${escapeHtml(item.dueDate ?? "暂无日期")}</span></li>`).join("")}</ol>
       </section>` : ""}
@@ -304,14 +347,38 @@ export function renderHomePage(input: {
   });
 }
 
-export function renderDailyPage(input: { basePath: string; shell: ReadingShell; daily: DailyReading | null; requestedDate?: string }): string {
-  const body = input.daily
+export function renderPublicationsPage(input: { basePath: string; shell: ReadingShell; publications: PublicationReadingSummary[] }): string {
+  return shell({
+    basePath: input.basePath,
+    title: "我的日报",
+    page: "publications",
+    privatePage: true,
+    nav: pageNav(input.shell, "publications"),
+    body: `<main class="publication-directory" id="content" data-theme-id="${escapeHtml(input.shell.theme.id)}" data-theme-revision="${input.shell.theme.revision}"><header class="directory-heading"><p>私人阅读目录</p><h1>我的日报</h1><p>这里只列出正在使用的日报。创建、排序或停用请前往编辑部设置。</p></header><ol>${input.publications.map((publication) => publicationSummary(input.basePath, publication, publication.publication.isDefault)).join("")}</ol></main>`,
+  });
+}
+
+function dateNavigation(basePath: string, publicationId: string, currentDate: string, dates: string[]): string {
+  const index = dates.indexOf(currentDate);
+  const newer = index > 0 ? dates[index - 1] : null;
+  const older = index >= 0 && index < dates.length - 1 ? dates[index + 1] : null;
+  const href = (date: string) => path(basePath, `/p/${encodeURIComponent(publicationId)}/?date=${date}`);
+  return `<nav class="edition-navigation" aria-label="正式日报期次"><span>${newer ? `<a href="${escapeHtml(href(newer))}">← 更新一期</a>` : "已经是最新一期"}</span><time datetime="${escapeHtml(currentDate)}">${escapeHtml(currentDate)}</time><span>${older ? `<a href="${escapeHtml(href(older))}">更早一期 →</a>` : "已经是最早一期"}</span></nav>`;
+}
+
+export function renderDailyPage(input: { basePath: string; shell: ReadingShell; daily: DailyReading | null; dates?: string[]; requestedDate?: string }): string {
+  const dates = input.dates ?? input.daily?.dates ?? [];
+  const edition = input.daily ? dailyEdition(input.daily.projection) : null;
+  const latest = dates[0];
+  const body = input.daily && edition
     ? `<main class="daily-main" id="content" data-theme-id="${escapeHtml(input.shell.theme.id)}" data-theme-revision="${input.shell.theme.revision}">
-      <header class="daily-heading"><div><p>正式日报</p><h1>${escapeHtml(input.shell.publication.displayName)}</h1></div><time datetime="${escapeHtml(input.daily.date)}">${escapeHtml(input.daily.date)}</time></header>
-      <section class="daily-edition" aria-label="${escapeHtml(input.daily.date)} 日报内容">${dailyEdition(input.daily.projection)}</section>
+      <header class="daily-heading"><div><p>${input.shell.publication.status === "inactive" ? "已停用 · 只读归档" : "正式日报"}</p><h1>${escapeHtml(input.shell.publication.displayName)}</h1></div><span>${input.daily.projection.rows.flatMap(({ modules }) => modules).length} 则内容</span></header>
+      ${dateNavigation(input.basePath, input.shell.publication.publicationId, input.daily.date, dates)}
+      <section class="daily-edition" aria-label="${escapeHtml(input.daily.date)} 日报内容">${edition.content}</section>${edition.sources}
     </main>`
-    : `<main class="empty-reading" id="content"><p>日报</p><h1>${input.requestedDate ? "没有找到这期正式日报" : "第一份正式日报还没有到达"}</h1><p>${input.requestedDate ? `日期 ${escapeHtml(input.requestedDate)} 没有正式内容，地址没有回退到其他日期。` : "你仍可以先阅读 Home 上的系统示例，或继续完成 Agent 设置。"}</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/home"))}">返回总览</a></main>`;
-  return shell({ basePath: input.basePath, title: input.daily?.date ?? "日报", page: "daily", privatePage: true, nav: pageNav(input.shell, "daily"), body });
+    : `<main class="empty-reading" id="content"><p>${input.shell.publication.status === "inactive" ? "已停用 · 只读归档" : "日报"}</p><h1>${input.requestedDate ? "这一天没有正式日报" : "第一份正式日报还没有到达"}</h1><p>${input.requestedDate ? `日期 ${escapeHtml(input.requestedDate)} 没有正式内容，DailyNews 没有替你回退到其他日期。` : "这份日报会在第一份正式内容到达后出现在阅读目录中。"}</p>${latest ? `<a class="button button--quiet" href="${escapeHtml(path(input.basePath, `/p/${encodeURIComponent(input.shell.publication.publicationId)}/?date=${latest}`))}">阅读最近一期 · ${escapeHtml(latest)}</a>` : `<a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/publications/"))}">返回我的日报</a>`}</main>`;
+  const title = input.daily ? `${input.shell.publication.displayName} · ${input.daily.date}` : input.shell.publication.displayName;
+  return shell({ basePath: input.basePath, title, page: "daily", privatePage: true, nav: pageNav(input.shell, "publications"), body });
 }
 
 function todoDate(item: any, asOfDate: string, completed: boolean, timeZone: string): string {

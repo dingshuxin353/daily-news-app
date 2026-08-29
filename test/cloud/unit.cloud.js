@@ -23,10 +23,12 @@ import {
 } from "../../.cloud-dist/src/modules/identity/security.js";
 import {
   renderHomePage,
+  renderDailyPage,
   renderLoginPage,
   renderAccountSettingsPage,
   renderNicknameOnboardingPage,
   renderPublicPage,
+  renderPublicationsPage,
 } from "../../.cloud-dist/src/web/private-pages.js";
 import {
   CanonicalJsonError,
@@ -57,6 +59,7 @@ import { createPostgresTodoStorage } from "../../.cloud-dist/src/adapters/postgr
 import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/tenancy.js";
 import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
 import { compileIssue } from "../../scripts/lib/compiler.js";
+import { buildDailyReadingProjection } from "../../scripts/lib/domain/daily-reading.js";
 
 const validProductConfig = {
   schemaVersion: 1,
@@ -65,8 +68,9 @@ const validProductConfig = {
     timeZone: "Asia/Shanghai",
     publicationId: "daily-news",
     publicationName: "DailyNews",
-    theme: { id: "newspaper-default", revision: 1 },
+    theme: { id: "newspaper-default", revision: 1, colorScheme: "light" },
     todoEnabled: false,
+    todoHasFormalData: false,
     priorityLimits: { lead: 1, important: 2, normal: null },
   },
   limits: {
@@ -155,6 +159,102 @@ test("cloud config loads explicit runtime values and loopback defaults", async (
   assert.equal(config.identity.mailMode, "fake");
   assert.equal(config.product.defaults.publicationId, "daily-news");
   assert.equal(config.product.agentAccess.mcpRequestBodyLimitBytes, 262144);
+});
+
+test("M4 reading renderers expose the fixed navigation, compact publication index, formal dates, sources, images, and inactive state", async () => {
+  const shell = {
+    spaceName: "丁丁的编辑部",
+    timeZone: "Asia/Shanghai",
+    publication: { publicationId: "daily-news", displayName: "AI 日报", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
+    theme: { id: "newspaper-default", revision: 1 },
+    todoEnabled: true,
+    todoHasFormalData: true,
+    nickname: "丁丁",
+  };
+  const additional = [{
+    publication: { publicationId: "product-watch", displayName: "产品观察", status: "active", isDefault: false, sortOrder: 1, spaceId: "space" },
+    latest: { date: "2026-08-28", title: "第二份日报的正式主标题" },
+  }];
+  const home = renderHomePage({
+    basePath: "/cloud",
+    shell,
+    daily: null,
+    publications: additional,
+    todoProjection: { homeItems: [{ id: "todo-a1b2c3d4", title: "正式待办", dueDate: null }] },
+  });
+  const expectedNavigation = ["总览", "我的日报", "Todo", "编辑部设置"];
+  for (const [index, label] of expectedNavigation.entries()) {
+    const position = home.indexOf(`>${label}<`);
+    assert.ok(position > -1);
+    if (index > 0) assert.ok(position > home.indexOf(`>${expectedNavigation[index - 1]}<`));
+  }
+  assert.match(home, /产品观察/);
+  assert.match(home, /第二份日报的正式主标题/);
+  assert.match(home, /正式待办/);
+  assert.doesNotMatch(home, /日报名称.*AI 日报.*产品观察/s);
+
+  const directory = renderPublicationsPage({
+    basePath: "/cloud",
+    shell,
+    publications: [{ publication: shell.publication, latest: null }, ...additional],
+  });
+  assert.match(directory, /我的日报/);
+  assert.match(directory, /首要日报/);
+  assert.match(directory, /第一份正式日报还没有到达/);
+  assert.doesNotMatch(directory, /<form|配置日报|上移|下移/);
+
+  const issue = {
+    schemaVersion: 2,
+    date: "2026-08-29",
+    generatedAt: "2026-08-29T08:00:00+08:00",
+    coverage: { start: "2026-08-28T08:00:00+08:00", end: "2026-08-29T08:00:00+08:00" },
+    revision: 1,
+    items: [{
+      id: "multi-source-story",
+      title: "多来源正式内容",
+      brief: "正式短摘要",
+      summary: "正式完整摘要。",
+      category: "测试",
+      editorial: { priority: "lead", selectionReason: "验证阅读体验" },
+      image: { src: "https://images.example.test/formal.jpg", alt: "虚构正式配图", width: 1200, height: 800, credit: "虚构图片来源", sourceUrl: "https://images.example.test/source" },
+      sources: [
+        { name: "主要来源", url: "https://example.test/primary" },
+        { name: "补充来源", url: "https://example.test/secondary", originalTitle: "Original title" },
+      ],
+    }],
+  };
+  const compiled = compileIssue(issue).compiled;
+  const daily = { date: issue.date, issue, compiled, projection: buildDailyReadingProjection(compiled, issue), dates: [issue.date, "2026-08-28"] };
+  const dailyHtml = renderDailyPage({ basePath: "/cloud", shell: { ...shell, publication: { ...shell.publication, status: "inactive", sortOrder: null, isDefault: false } }, daily });
+  assert.match(dailyHtml, /已停用 · 只读归档/);
+  assert.match(dailyHtml, /2026-08-28/);
+  assert.match(dailyHtml, /data-reading-image/);
+  assert.match(dailyHtml, /daily-module--span-4/);
+  assert.doesNotMatch(dailyHtml, /style="--(?:module-span|row-capacity)/);
+  const darkDailyHtml = renderDailyPage({ basePath: "/cloud", shell: { ...shell, theme: { id: "midnight-tech", revision: 1, colorScheme: "dark" } }, daily });
+  assert.match(darkDailyHtml, /<html lang="zh-CN" data-color-scheme="dark">/);
+  assert.match(darkDailyHtml, /<meta name="color-scheme" content="dark">/);
+  assert.match(dailyHtml, /referrerpolicy="no-referrer"/);
+  assert.match(dailyHtml, /data-source-open="sources-multi-source-story"/);
+  assert.match(dailyHtml, /data-source-dialog/);
+  assert.match(dailyHtml, /<noscript>.*主要来源/s);
+  assert.match(dailyHtml, /class="source-archive"/);
+  assert.match(dailyHtml, /补充来源/);
+
+  const missing = renderDailyPage({ basePath: "/cloud", shell, daily: null, dates: [issue.date], requestedDate: "2026-08-27" });
+  assert.match(missing, /这一天没有正式日报/);
+  assert.match(missing, /没有替你回退/);
+  assert.match(missing, /阅读最近一期 · 2026-08-29/);
+
+  const script = await readFile(new URL("../../src/web/private-pages.js", import.meta.url), "utf8");
+  assert.match(script, /sourceDialog\.showModal\(\)/);
+  assert.match(script, /sourceTrigger\.focus\(\)/);
+  assert.match(script, /data-image-fallback/);
+  assert.match(script, /image\.complete && image\.naturalWidth === 0/);
+  const css = await readFile(new URL("../../src/web/cloud.css", import.meta.url), "utf8");
+  assert.match(css, /html,\s*body\s*{\s*min-width: 0;\s*overflow-x: clip;/);
+  assert.doesNotMatch(css, /min-width:\s*20rem/);
+  assert.match(css, /\[hidden\]\s*{\s*display: none !important;/);
 });
 
 test("cloud config fails closed for missing or unsafe environment", async () => {
@@ -1004,7 +1104,7 @@ test("unmatched JSON API routes authenticate and use the stable request error en
   assert.ok(calls.filter(({ type }) => type === "authenticate").every(({ input }) => input.action === "read"));
 });
 
-test("disabled Todo snapshot does not issue any query that reads retained state", async () => {
+test("disabled Todo reads only formal-data existence metadata and never retained state payload", async () => {
   const queries = [];
   let released = false;
   const client = {
@@ -1030,6 +1130,10 @@ test("disabled Todo snapshot does not issue any query that reads retained state"
           rowCount: 1,
         };
       }
+      if (/EXISTS \(\s*SELECT 1\s*FROM app\.todo_states/.test(sql)) {
+        queries.push(sql);
+        return { rows: [{ enabled: false, has_formal_data: true }], rowCount: 1 };
+      }
       throw new Error(`unexpected pool query: ${sql}`);
     },
     async connect() {
@@ -1039,12 +1143,15 @@ test("disabled Todo snapshot does not issue any query that reads retained state"
   const tenancy = new PostgresTenancyStore(pool);
   const tenant = await tenancy.resolveTenantContextForSpace("space-disabled");
   assert.ok(tenant);
-  const snapshot = await createPostgresTodoStorage(pool, tenant).readSnapshot();
+  const storage = createPostgresTodoStorage(pool, tenant);
+  const snapshot = await storage.readSnapshot();
   assert.deepEqual(snapshot, { enabled: false, state: null });
+  assert.deepEqual(await storage.readAvailability(), { enabled: false, hasFormalData: true });
   assert.equal(released, true);
   assert.ok(queries.some((sql) => sql === "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"));
   assert.ok(queries.some((sql) => sql === "COMMIT"));
-  assert.ok(queries.every((sql) => !/todo_states|state_payload/.test(sql)));
+  assert.ok(queries.every((sql) => !/state_payload/.test(sql)));
+  assert.equal(queries.filter((sql) => /todo_states/.test(sql)).length, 1);
 });
 
 test("inactive owned Publications retain private access to existing formal Daily snapshots", async () => {

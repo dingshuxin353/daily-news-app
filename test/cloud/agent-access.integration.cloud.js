@@ -438,7 +438,7 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.match(dailyHtml, /daily-module--small/);
   const missing = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-26", { headers: { cookie, accept: "text/html" } });
   assert.equal(missing.status, 404);
-  assert.match(await missing.text(), /没有找到这期正式日报/);
+  assert.match(await missing.text(), /这一天没有正式日报/);
 
   const otherTenant = await harness.tenancy.ensureSpaceForUser("private-reading-other-user", product.defaults);
   await controlPool.query(
@@ -541,6 +541,183 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   });
   assert.equal(incompleteTheme.status, 503);
   assert.doesNotMatch(await incompleteTheme.text(), /正式主标题|今天的正式任务/);
+});
+
+test("M4 final reading journey keeps multi-publication indexes, dates, themes, images, sources, inactive archives, and Todo navigation tenant-safe", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "m4-reader@example.com");
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie } })).status, 200);
+  const user = await controlPool.query('SELECT "id" FROM auth."user" WHERE "email" = $1', ["m4-reader@example.com"]);
+  const tenant = await harness.tenancy.resolveTenantContextForUser(user.rows[0].id);
+  assert.ok(tenant);
+  await harness.siteManagement.createPublication(tenant, {
+    publicationId: "product-watch",
+    name: "产品观察",
+    theme: { mode: "override", themeId: "midnight-tech" },
+  });
+
+  const insertDaily = async (publicationId, date, title, options = {}) => {
+    const issue = {
+      schemaVersion: 2,
+      date,
+      generatedAt: `${date}T08:00:00+08:00`,
+      coverage: { start: `${date}T00:00:00+08:00`, end: `${date}T08:00:00+08:00` },
+      revision: 1,
+      items: [{
+        id: `${publicationId}-${date}`,
+        title,
+        brief: `${title}的正式短摘要`,
+        summary: `${title}的正式完整摘要，只用于 M4 隔离验收。`,
+        category: "虚构验收",
+        editorial: { priority: "lead", selectionReason: "验证最终阅读体验" },
+        ...(options.image ? { image: options.image } : {}),
+        sources: options.sources ?? [{ name: "虚构主要来源", url: `https://example.test/${publicationId}/${date}` }],
+      }],
+    };
+    const compiled = compileIssue(issue).compiled;
+    await controlPool.query(
+      `INSERT INTO app.issues (space_id, publication_id, issue_date, revision, issue_payload)
+       VALUES ($1, $2, $3::date, 1, $4::jsonb)`,
+      [tenant.spaceId, publicationId, date, JSON.stringify(issue)],
+    );
+    await controlPool.query(
+      `INSERT INTO app.compiled_editions (space_id, publication_id, issue_date, revision, compiled_payload)
+       VALUES ($1, $2, $3::date, 1, $4::jsonb)`,
+      [tenant.spaceId, publicationId, date, JSON.stringify(compiled)],
+    );
+  };
+
+  await insertDaily("daily-news", "2026-08-28", "AI 日报较早一期");
+  await insertDaily("daily-news", "2026-08-29", "AI 日报最新一期", {
+    image: { src: "https://images.example.test/m4.jpg", alt: "虚构验收配图", width: 1200, height: 800, credit: "虚构图片来源", sourceUrl: "https://images.example.test/m4-source" },
+    sources: [
+      { name: "虚构主要来源", url: "https://example.test/main" },
+      { name: "虚构补充来源", url: "https://example.test/extra", originalTitle: "Fictional original" },
+    ],
+  });
+  await insertDaily("product-watch", "2026-08-29", "产品观察最新一期");
+
+  const firstHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  assert.equal(firstHome.status, 200);
+  const firstHomeHtml = await firstHome.text();
+  assert.match(firstHomeHtml, /AI 日报最新一期/);
+  assert.match(firstHomeHtml, /产品观察最新一期/);
+  assert.ok(firstHomeHtml.indexOf("AI 日报最新一期") < firstHomeHtml.indexOf("产品观察最新一期"));
+  assert.match(firstHomeHtml, /href="\/publications\/"[^>]*>我的日报/);
+  assert.doesNotMatch(firstHomeHtml, />Todo</);
+  assert.match(firstHomeHtml, /assets\/themes\/newspaper-default\/1\.css/);
+
+  const directory = await appRequest(harness.app, "https://dailynews.test/publications/", { headers: { cookie, accept: "text/html" } });
+  assert.equal(directory.status, 200);
+  const directoryHtml = await directory.text();
+  assert.match(directoryHtml, /首要日报/);
+  assert.match(directoryHtml, /AI 日报最新一期/);
+  assert.match(directoryHtml, /产品观察最新一期/);
+  assert.doesNotMatch(directoryHtml, /<form|配置日报|上移|下移/);
+
+  const daily = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-29", { headers: { cookie, accept: "text/html" } });
+  assert.equal(daily.status, 200);
+  const dailyHtml = await daily.text();
+  assert.match(dailyHtml, /AI 日报较早一期|2026-08-28/);
+  assert.match(dailyHtml, /data-reading-image/);
+  assert.match(dailyHtml, /data-source-dialog/);
+  assert.match(dailyHtml, /虚构补充来源/);
+  assert.match(daily.headers.get("content-security-policy"), /img-src 'self' data: https:/);
+
+  const missing = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", { headers: { cookie, accept: "text/html" } });
+  assert.equal(missing.status, 404);
+  const missingHtml = await missing.text();
+  assert.match(missingHtml, /这一天没有正式日报/);
+  assert.match(missingHtml, /阅读最近一期 · 2026-08-29/);
+  assert.doesNotMatch(missingHtml, /AI 日报最新一期/);
+  const invalidCalendarDate = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-02-31", { headers: { cookie, accept: "text/html" } });
+  assert.equal(invalidCalendarDate.status, 404);
+  assert.match(await invalidCalendarDate.text(), /页面不存在/);
+
+  await harness.siteManagement.reorderPublications(tenant, ["product-watch", "daily-news"]);
+  const reordered = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  const reorderedHtml = await reordered.text();
+  assert.match(reorderedHtml, /产品观察最新一期/);
+  assert.ok(reorderedHtml.indexOf("产品观察最新一期") < reorderedHtml.indexOf("AI 日报最新一期"));
+  assert.match(reorderedHtml, /assets\/themes\/newspaper-default\/1\.css/);
+
+  await harness.siteManagement.setPublicationStatus(tenant, "product-watch", "inactive");
+  const inactive = await appRequest(harness.app, "https://dailynews.test/p/product-watch/?date=2026-08-29", { headers: { cookie, accept: "text/html" } });
+  assert.equal(inactive.status, 200);
+  assert.match(await inactive.text(), /已停用 · 只读归档/);
+  const activeDirectory = await appRequest(harness.app, "https://dailynews.test/publications/", { headers: { cookie, accept: "text/html" } });
+  assert.doesNotMatch(await activeDirectory.text(), /产品观察最新一期/);
+
+  await harness.siteManagement.setTodoEnabled(tenant, true);
+  const enabledWithoutData = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  assert.doesNotMatch(await enabledWithoutData.text(), />Todo</);
+  await controlPool.query(
+    `INSERT INTO app.todo_states (space_id, revision, state_payload)
+     VALUES ($1, 1, $2::jsonb)`,
+    [tenant.spaceId, JSON.stringify({ schemaVersion: 1, revision: 1, updatedAt: "2026-08-29T08:00:00+08:00", items: [{ id: "todo-a1b2c3d4", title: "M4 正式待办", dueDate: "2026-08-29", status: "open", createdAt: "2026-08-29T07:00:00+08:00", updatedAt: "2026-08-29T07:00:00+08:00", completedAt: null, archivedAt: null }] })],
+  );
+  const enabledWithData = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  const enabledWithDataHtml = await enabledWithData.text();
+  assert.match(enabledWithDataHtml, />Todo</);
+  assert.match(enabledWithDataHtml, /M4 正式待办/);
+  await harness.siteManagement.setTodoEnabled(tenant, false);
+  const disabledWithData = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  assert.doesNotMatch(await disabledWithData.text(), />Todo</);
+
+  await harness.siteManagement.setPublicationTheme(tenant, "daily-news", { mode: "override", themeId: "swiss-editorial" });
+  const publicationThemed = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-29", { headers: { cookie, accept: "text/html" } });
+  const publicationThemedHtml = await publicationThemed.text();
+  assert.match(publicationThemedHtml, /assets\/themes\/swiss-editorial\/1\.css/);
+  assert.match(publicationThemedHtml, /<meta name="color-scheme" content="light">/);
+  await harness.siteManagement.updateHome(tenant, { themeId: "midnight-tech" });
+  const darkHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  const darkHomeHtml = await darkHome.text();
+  assert.match(darkHomeHtml, /assets\/themes\/midnight-tech\/1\.css/);
+  assert.match(darkHomeHtml, /<meta name="color-scheme" content="dark">/);
+
+  const customDefinition = {
+    schemaVersion: 1,
+    id: "reader-custom",
+    name: "阅读自定义",
+    revision: 1,
+    compilerVersion: "1",
+    usesSiteAccent: false,
+    tokens: {
+      colors: { background: "#F5F1E8", text: "#171A19", muted: "#696A64", accent: "#9A7531", rule: "#B8B3A8" },
+      typography: { headlinePreset: "serif-cn", uiPreset: "sans-cn", headlineScale: "balanced" },
+      density: "balanced",
+      motion: "subtle",
+      ruleStyle: "hairline",
+      surfaceStyle: "paper",
+    },
+    recipes: { masthead: "classic", lead: "stacked", important: "minimal", normal: "compact" },
+  };
+  const customCss = ":root { --color-background: #F5F1E8; --color-text: #171A19; --color-muted: #696A64; --color-accent: #9A7531; --color-rule: #B8B3A8; --font-headline: ui-serif, serif; --font-ui: ui-sans-serif, sans-serif; --surface-background: var(--color-background); }";
+  await controlPool.query(
+    `INSERT INTO app.theme_definitions (space_id, theme_id, revision, definition_payload, compiled_css)
+     VALUES ($1, 'reader-custom', 1, $2::jsonb, $3)`,
+    [tenant.spaceId, JSON.stringify(customDefinition), customCss],
+  );
+  await controlPool.query(
+    `INSERT INTO app.custom_themes (space_id, theme_id, display_name, current_revision)
+     VALUES ($1, 'reader-custom', '阅读自定义', 1)`,
+    [tenant.spaceId],
+  );
+  await harness.siteManagement.updateHome(tenant, { themeId: "reader-custom" });
+  const themedHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
+  assert.match(await themedHome.text(), /assets\/themes\/reader-custom\/1\.css/);
+  const anonymousTheme = await appRequest(harness.app, "https://dailynews.test/assets/themes/reader-custom/1.css");
+  assert.equal(anonymousTheme.status, 404);
+  const customTheme = await appRequest(harness.app, "https://dailynews.test/assets/themes/reader-custom/1.css", { headers: { cookie } });
+  assert.equal(customTheme.status, 200);
+  assert.match(await customTheme.text(), /--color-background: #F5F1E8/);
+  for (const themeId of ["newspaper-default", "midnight-tech", "swiss-editorial"]) {
+    assert.equal((await appRequest(harness.app, `https://dailynews.test/assets/themes/${themeId}/1.css`)).status, 200);
+  }
+
+  const otherCookie = await signIn(harness, "m4-other@example.com");
+  const hiddenCustomTheme = await appRequest(harness.app, "https://dailynews.test/assets/themes/reader-custom/1.css", { headers: { cookie: otherCookie } });
+  assert.equal(hiddenCustomTheme.status, 404);
 });
 
 test("M4 browser settings complete the five-section site, theme, and account journey", async () => {
