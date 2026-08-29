@@ -96,13 +96,16 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `GET /login` 显示统一品牌外壳中的邮箱与 OTP 登录页；成功后由 `GET /post-login` 把首次用户送到接入页，已有用户送回安全的站内目标或 Home。
 - `ALL /api/auth/*` 由 Better Auth 处理 Email OTP、Session 与退出。
 - `GET /onboarding` 对昵称未完成的新用户先显示 1–24 个可见字符的昵称步骤；保存后才显示完整接入话术与独立的短时配对码。接入话术本身不包含配对码、PAT、MCP 配置或完整调度提示词。`GET /.well-known/dailynews-agent-setup.json` 是无用户数据的公开接入说明。
-- `GET /home` 显示系统示例或最新正式日报；正式内容出现后不再并列显示示例，也不伪造调度、在线或更新时间承诺。
-- `GET /p/:publicationId/?date=YYYY-MM-DD` 按 Compiled Edition 的正式层级和顺序阅读指定日期日报；省略日期时读取该 Publication 的最新正式日报。
-- `GET /todo/` 只在 Todo 已启用时展示正式 State；`GET /settings` 规范跳转到 `/settings/sites`。
+- `GET /home` 显示系统示例或首要 Publication 的最新正式日报；正式内容出现后不再并列显示示例。其他活动 Publication 只有在已有正式内容时才以精简入口出现，不在 Home 展开完整正文，也不伪造调度、在线或更新时间承诺。
+- `GET /publications/` 是活动 Publication 的阅读目录，展示首要标记与最新正式一期；尚无正式内容的活动项仍保留明确空状态，创建、排序、停用等管理操作不进入阅读目录。
+- `GET /p/:publicationId/?date=YYYY-MM-DD` 按 Compiled Edition 的正式层级和顺序阅读指定日期日报；省略日期时读取该 Publication 的最新正式日报。指定日期不存在时明确返回 `404` 并只提供真实存在的最近一期入口，不静默回退。停用项不再出现在目录和 Home，但所属用户仍可通过原地址只读已有正式内容。
+- `GET /todo/` 只在 Todo 已启用且存在正式 State 时出现在全局导航，并只展示正式 State；Home 的 Todo 摘要与日报是否已有正式内容相互独立。`GET /settings` 规范跳转到 `/settings/sites`。
 - 设置外壳固定为五项：`/settings/sites` 日报站点、`/settings/themes` 只读主题库、`/settings/agent` Agent 授权、`/settings/account` 账户与安全、`/settings/advanced` 高级接入。日报站点下另有 Home、新建与精确 Publication 配置页，不提供设置 Dashboard 或独立 Todo 设置页。
 - 日报站点的创建、名称 / 主题合并保存、锁内移动、停用 / 恢复与 Todo 启停，以及昵称保存，都使用 Session、严格同源检查和绑定当前 Session 的 CSRF Token；PAT 不能进入这些浏览器写入路径。失败会保留表单输入，事务失败不留下部分事实。
 - `GET /settings/agent` 与连接子路由沿用相同浏览器安全边界；昵称未完成时不能跳过首次步骤建立 Agent 授权。`GET /settings/advanced` 管理手动凭证，完整 PAT 仅在创建或轮换成功响应中显示一次；`GET /settings/advanced/openapi.yaml` 需要有效 Session。
 - 登录后的私有外壳读取显式昵称并显示首字符头像；昵称、Home 名称和 Publication 名称保持三个独立事实。账户页只读显示完整登录邮箱与“邮箱验证码”，退出只结束当前浏览器 Session。
+- 私有阅读外壳固定为“总览 / 我的日报 / Todo（满足可见条件时）/ 编辑部设置”，不随首要 Publication 名称变化。日报页的多来源以一个共享 Dialog 渐进增强；无 JavaScript 时仍保留可访问的来源列表。正式图片保留尺寸、替代文本与来源信息，远端图片不发送 Referrer，加载失败时回退为文字说明。
+- 官方主题 CSS 继续从只读构建产物公开读取；自定义主题精确 revision 的 CSS 必须经过当前 Session 与 Space 归属校验，匿名用户和其他 Space 不能探测。Home、日报目录、日报正文与 Todo 都使用解析后的有效主题；Home 的 inherit 与 Publication 直接选择继续随 current revision 指针变化。
 - `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
 - `GET /api/v1/publications`、`GET /api/v1/publications/:id/daily-context`、`POST /api/v1/publications/:id/daily-candidates` 与 `GET /api/v1/publications/:id/issues/:date` 提供 Content 正式读写闭环。
 - `GET /api/v1/todo` 与 `POST /api/v1/todo/candidates` 提供 Todo 状态、正式 State 与受控写入；Todo 关闭时不读取保留正文。
@@ -137,3 +140,5 @@ M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与配对
 M4-A PostgreSQL 集成测试覆盖空库与精确 M3 Schema 升级、Migration 幂等、8 份 Publication 上限、同 Space 名称 / 地址冲突、并发创建、活动排序派生首要项、停用 / 恢复与最后活动项保护、跨 Space 隔离、依赖行写入失败整体回滚、主题 current revision 传播、官方 ID 防遮蔽、Todo 正式数据与开关独立投影，以及昵称写入与身份名称同步的原子性。本地 `npm test` 继续作为文件模式回归。
 
 M4-C 集成测试覆盖昵称先于配对、五项设置 IA、Home / Publication 表单、创建后普通语言 Agent 话术、名称与主题原子保存、锁内排序和首要项派生、停用 / 恢复确认、Todo 固定行与保留正文隔离、只读主题预览、账户资料 / 退出、输入失败回显、CSRF / Origin / PAT 混淆、旧可见设置路径消失及跨 Space 404。浏览器页面继续在 320、375、414、768 与桌面宽度核对键盘焦点、目标尺寸和无横向溢出。
+
+M4-D 集成测试覆盖多 Publication Home 摘要与活动阅读目录、真实日期前后导航和明确缺期 `404`、停用项归档直读、首要顺序变化、正式图片与单/多来源投影、Todo 导航与正式 State 存在性、三套官方主题、自定义主题 current revision，以及自定义 CSS 的 Session / Space 隔离。页面脚本测试同时锁定无 JavaScript 来源回退、共享 Dialog 焦点归还和图片加载失败文字回退。

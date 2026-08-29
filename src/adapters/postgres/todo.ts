@@ -305,6 +305,23 @@ export class PostgresTodoStorage {
       client.release();
     }
   }
+
+  async readAvailability(): Promise<{ enabled: boolean; hasFormalData: boolean }> {
+    const result = await this.pool.query<{ enabled: boolean; has_formal_data: boolean }>(
+      `SELECT profile.enabled,
+              EXISTS (
+                SELECT 1
+                FROM app.todo_states AS state
+                WHERE state.space_id = profile.space_id
+              ) AS has_formal_data
+       FROM app.todo_profiles AS profile
+       WHERE profile.space_id = $1`,
+      [this.context.spaceId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new TodoStorageError("TODO_STORAGE_FAILED", "Todo profile is unavailable");
+    return { enabled: row.enabled, hasFormalData: row.has_formal_data };
+  }
 }
 
 export function createPostgresTodoStorage(

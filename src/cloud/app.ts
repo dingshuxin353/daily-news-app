@@ -21,6 +21,7 @@ import {
   renderLoginPage,
   renderNicknameOnboardingPage,
   renderOnboardingPage,
+  renderPublicationsPage,
   renderPublicPage,
   renderTodoPage,
 } from "../web/private-pages.js";
@@ -109,6 +110,7 @@ function safeReturnTo(raw: string | undefined, basePath: string): { path: string
     ? url.pathname.slice(basePath.length) || "/"
     : url.pathname;
   if (localPath === "/home") return { path: `${basePath}/home`, label: "私人日报总览" };
+  if (localPath === "/publications/") return { path: `${basePath}/publications/`, label: "我的日报" };
   if (localPath === "/todo/") {
     if (url.hash && !/^#todo-[a-f0-9]{8}$/.test(url.hash)) return null;
     return { path: `${basePath}/todo/${url.hash}`, label: "个人待办" };
@@ -163,7 +165,7 @@ function resolveNodeRequestOrigin(context: Context, configuredOrigin: string): s
 
 function privateResponseHeaders(context: Context): void {
   context.header("Cache-Control", "private, no-store");
-  context.header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  context.header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
   context.header("Referrer-Policy", "no-referrer");
   context.header("X-Content-Type-Options", "nosniff");
   context.header("X-Frame-Options", "DENY");
@@ -272,7 +274,13 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         const content = await readFile(new URL(`themes/compiled/${themeId}/${revision}.css`, `file://${projectRoot}/`), "utf8");
         return context.body(`${content}${cloudThemeBridge}`, 200, { "Content-Type": "text/css; charset=utf-8" });
       } catch {
-        return context.json({ error: "not_found" }, 404);
+        if (!dependencies.privateReading) return context.json({ error: "not_found" }, 404);
+        const access = await privateAccess(context);
+        if (!access) return context.json({ error: "not_found" }, 404);
+        const content = await dependencies.privateReading.readThemeCss(access.tenant, themeId, Number(revision));
+        return content
+          ? context.body(`${content}${cloudThemeBridge}`, 200, { "Content-Type": "text/css; charset=utf-8" })
+          : context.json({ error: "not_found" }, 404);
       }
     });
 
@@ -354,12 +362,30 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
           if (!home || !publication || !todo || !homeTheme?.themeId) throw new Error("bootstrap unavailable");
           return context.html(renderSpacePage({ basePath: dependencies.basePath, spaceName: home.displayName, publicationName: publication.displayName, publicationId: publication.publicationId, todoEnabled: todo.enabled, themeName: homeTheme.themeId }));
         }
-        const readingShell = await dependencies.privateReading.readShell(access.tenant);
-        const [daily, todo] = await Promise.all([
-          dependencies.privateReading.readLatestDaily(access.tenant),
-          readingShell.todoEnabled ? dependencies.privateReading.readTodo(access.tenant) : Promise.resolve(null),
-        ]);
-        return context.html(renderHomePage({ basePath: dependencies.basePath, shell: readingShell, daily, todoProjection: todo?.projection }));
+        const reading = await dependencies.privateReading.readHome(access.tenant);
+        return context.html(renderHomePage({
+          basePath: dependencies.basePath,
+          shell: reading.shell,
+          daily: reading.daily,
+          publications: reading.publications,
+          todoProjection: reading.todoProjection,
+        }));
+      } catch {
+        return context.text("服务暂时不可用，请稍后重试。", 503);
+      }
+    });
+
+    app.get(route("/publications/"), async (context) => {
+      try {
+        const access = await requirePrivateAccess(context);
+        if (access instanceof Response) return access;
+        if (!dependencies.privateReading) return context.text("服务暂时不可用，请稍后重试。", 503);
+        const reading = await dependencies.privateReading.readPublicationDirectory(access.tenant);
+        return context.html(renderPublicationsPage({
+          basePath: dependencies.basePath,
+          shell: reading.shell,
+          publications: reading.publications,
+        }));
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
       }
@@ -374,8 +400,15 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         const readingShell = await dependencies.privateReading.readPublicationShell(access.tenant, publicationId);
         if (!readingShell) return context.text("页面不存在。", 404);
         const requestedDate = context.req.query("date");
-        const daily = await dependencies.privateReading.readDaily(access.tenant, publicationId, requestedDate);
-        return context.html(renderDailyPage({ basePath: dependencies.basePath, shell: readingShell, daily, requestedDate }), daily || !requestedDate ? 200 : 404);
+        const result = await dependencies.privateReading.readDailyResult(access.tenant, publicationId, requestedDate);
+        if (!result) return context.text("页面不存在。", 404);
+        return context.html(renderDailyPage({
+          basePath: dependencies.basePath,
+          shell: readingShell,
+          daily: result.daily,
+          dates: result.dates,
+          requestedDate,
+        }), result.daily || !requestedDate ? 200 : 404);
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
       }
