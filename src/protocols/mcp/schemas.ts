@@ -127,6 +127,61 @@ export const getDailyIssueInputSchema = z.object({
 
 export const emptyInputSchema = z.object({}).strict();
 
+const themeColors = z.object({
+  background: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  text: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  muted: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  accent: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  rule: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+}).strict();
+
+const themeTypography = z.object({
+  headlinePreset: z.enum(["serif-cn", "sans-cn", "mono"]).optional(),
+  uiPreset: z.enum(["serif-cn", "sans-cn", "mono"]).optional(),
+  headlineScale: z.enum(["restrained", "editorial", "poster"]).optional(),
+}).strict();
+
+export const agentThemeSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  name: z.string().min(1).refine((value) => value === value.trim() && [...value].length <= 40),
+  description: z.string().min(1).optional(),
+  extends: identifier,
+  tokens: z.object({
+    colors: themeColors.optional(),
+    typography: themeTypography.optional(),
+    density: z.enum(["compact", "balanced", "spacious"]).optional(),
+    ruleStyle: z.enum(["hairline", "strong", "double"]).optional(),
+    surfaceStyle: z.enum(["flat", "paper", "soft-gradient"]).optional(),
+    motion: z.enum(["none", "subtle"]).optional(),
+  }).strict(),
+  recipes: z.object({
+    masthead: z.enum(["compact", "classic", "banner"]).optional(),
+    lead: z.enum(["split", "stacked", "editorial"]).optional(),
+    important: z.enum(["ruled", "minimal", "contrast"]).optional(),
+    normal: z.enum(["compact", "minimal", "accent"]).optional(),
+  }).strict(),
+}).strict().refine((value) => (
+  Object.keys(value.tokens).length + Object.keys(value.recipes).length > 0
+), "tokens and recipes must contain at least one override");
+
+export const getThemeInputSchema = z.object({ themeId: identifier }).strict();
+export const createThemeInputSchema = z.object({
+  clientRunId: z.string().regex(CLIENT_RUN_ID),
+  theme: agentThemeSchema,
+}).strict();
+export const updateThemeInputSchema = z.object({
+  themeId: identifier,
+  clientRunId: z.string().regex(CLIENT_RUN_ID),
+  baseRevision: z.number().int().min(1),
+  theme: agentThemeSchema,
+}).strict();
+export const deleteThemeInputSchema = z.object({
+  themeId: identifier,
+  clientRunId: z.string().regex(CLIENT_RUN_ID),
+  baseRevision: z.number().int().min(1),
+}).strict();
+
 export const submitTodoCandidateInputSchema = z.object({
   clientRunId: z.string().regex(CLIENT_RUN_ID).describe("Stable idempotency key. Reuse only for an exact retry."),
   candidate: todoCandidateSchema,
@@ -215,6 +270,10 @@ export const errorOutputSchema = z.object({
       "explicit_confirmation_required",
       "publication_inactive",
       "todo_disabled",
+      "theme_conflict",
+      "theme_read_only",
+      "theme_in_use",
+      "theme_limit_reached",
       "payload_too_large",
       "rate_limited",
       "service_unavailable",
@@ -322,5 +381,56 @@ export const todoStateOutputSchema = resultOutputSchema(z.object({
   state: todoState,
   revision: z.number().int().min(0),
   pageUrl: httpUrl,
+  requestId,
+}).strict());
+
+const themeUsage = z.object({
+  home: z.boolean(),
+  publications: z.array(z.object({
+    publicationId: identifier,
+    name: z.string().min(1),
+    mode: z.enum(["inherit", "override"]),
+    status: z.enum(["active", "inactive"]),
+  }).strict()),
+}).strict();
+
+const themeSummary = z.object({
+  themeId: identifier,
+  name: z.string().min(1),
+  source: z.enum(["official", "custom"]),
+  revision: z.number().int().min(1),
+  usage: themeUsage,
+}).strict();
+
+export const themeContextOutputSchema = resultOutputSchema(z.object({
+  themeSchema: z.object({
+    schemaVersion: z.literal(1),
+    idPattern: z.string(),
+    name: z.object({ minimumVisibleCharacters: z.literal(1), maximumVisibleCharacters: z.literal(40) }).strict(),
+    colors: z.object({ format: z.literal("#RRGGBB"), minimumTextContrast: z.literal(4.5) }).strict(),
+    enums: z.record(z.string(), z.array(z.string())),
+    forbidden: z.array(z.string()),
+  }).strict(),
+  constraints: z.object({
+    customThemeLimit: z.number().int().min(1),
+    customThemeCount: z.number().int().min(0),
+    officialThemesReadOnly: z.literal(true),
+    selectionManagedInBrowser: z.literal(true),
+    baseRevisionRequiredForUpdateAndDelete: z.literal(true),
+  }).strict(),
+  themes: z.array(themeSummary),
+  requestId,
+}).strict());
+
+export const themeOutputSchema = resultOutputSchema(themeSummary.extend({
+  definition: z.record(z.string(), z.unknown()),
+  requestId,
+}).strict());
+
+export const themeMutationOutputSchema = resultOutputSchema(z.object({
+  result: z.enum(["created", "updated", "unchanged", "deleted"]),
+  themeId: identifier,
+  revision: z.number().int().min(1),
+  affected: themeUsage,
   requestId,
 }).strict());

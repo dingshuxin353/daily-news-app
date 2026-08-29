@@ -40,6 +40,7 @@ const product = {
   },
   limits: {
     publicationsPerSpace: 8,
+    customThemesPerSpace: 24,
     activeTokensPerUser: 10,
     testDailyEmailHardLimit: 100,
     emailCooldownSeconds: 60,

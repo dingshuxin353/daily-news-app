@@ -104,6 +104,7 @@ export async function startCloudServer(options: {
         credentialLastUsedTouchSeconds: config.product.agentAccess.credentialLastUsedTouchSeconds,
       },
     );
+    const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
     const agentOperations = new AgentOperationsService(pool, tenancy, agentRequestPolicy, {
       origin: config.origin,
       basePath: config.basePath,
@@ -112,12 +113,13 @@ export async function startCloudServer(options: {
       concurrentWriteLimitPerSpace: config.product.agentAccess.concurrentWriteLimitPerSpace,
       writeLeaseTtlSeconds: config.product.agentAccess.writeLeaseTtlSeconds,
       submissionRetentionDays: config.product.agentAccess.submissionRetentionDays,
-    });
+      customThemeLimit: config.product.limits.customThemesPerSpace,
+    }, systemThemes);
     app = createCloudApp({
       basePath: config.basePath,
       identity,
       tenancy,
-      privateReading: new PrivateReadingService(pool, tenancy, createFileThemeStorage({ rootDir: projectRoot })),
+      privateReading: new PrivateReadingService(pool, tenancy, systemThemes),
       defaults: config.product.defaults,
       agentSettings: {
         origin: config.origin,

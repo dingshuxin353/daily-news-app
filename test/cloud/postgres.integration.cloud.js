@@ -74,14 +74,15 @@ test("empty database migrates fully and a repeated run has no side effects", asy
     "0101_create_agent_access.sql",
     "0102_create_agent_request_layer.sql",
     "0103_create_m4_domain_contract.sql",
+    "0104_create_theme_agent_operations.sql",
   ]);
-  assert.equal(first.total, 7);
+  assert.equal(first.total, 8);
   assert.deepEqual(second.applied, []);
   const history = await pool.query(`
     SELECT filename, checksum_sha256, executed_at
     FROM app.schema_migrations
   `);
-  assert.equal(history.rowCount, 7);
+  assert.equal(history.rowCount, 8);
   assert.match(history.rows[0].checksum_sha256, /^[0-9a-f]{64}$/);
   assert.ok(history.rows[0].executed_at instanceof Date);
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
@@ -108,6 +109,7 @@ test("the exact M2 migration history upgrades atomically through M3-B", async ()
     "0101_create_agent_access.sql",
     "0102_create_agent_request_layer.sql",
     "0103_create_m4_domain_contract.sql",
+    "0104_create_theme_agent_operations.sql",
   ]);
   assert.equal(
     (await pool.query("SELECT to_regclass('app.agent_credentials')::text AS relation")).rows[0].relation,
@@ -194,6 +196,7 @@ test("the exact M3 schema and retained facts upgrade to the M4 domain contract",
 
   assert.deepEqual((await runMigrations(pool, { migrationsDirectory: projectMigrations })).applied, [
     "0103_create_m4_domain_contract.sql",
+    "0104_create_theme_agent_operations.sql",
   ]);
   const publications = await pool.query(
     `SELECT publication_id, display_name, status, sort_order

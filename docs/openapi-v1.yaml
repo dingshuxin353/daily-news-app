@@ -134,6 +134,69 @@
           "503": { "$ref": "#/components/responses/Unavailable" }
         }
       }
+    },
+    "/themes/context": {
+      "get": {
+        "operationId": "getThemeContext",
+        "responses": {
+          "200": { "description": "Theme Schema, constraints, visible catalog, current revisions, and usage", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ThemeContextResponse" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/themes": {
+      "post": {
+        "operationId": "createTheme",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/CreateThemeRequest" },
+          "example": { "theme": { "schemaVersion": 1, "id": "fictional-blue", "name": "虚构深蓝", "description": "只用于接口文档的虚构主题。", "extends": "newspaper-default", "tokens": { "colors": { "accent": "#2457A7" }, "density": "compact" }, "recipes": { "normal": "accent" } } }
+        } } },
+        "responses": {
+          "200": { "description": "Custom Theme created or exact retry replayed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ThemeMutationResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "429": { "$ref": "#/components/responses/RateLimited" }, "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/themes/{themeId}": {
+      "get": {
+        "operationId": "getTheme",
+        "parameters": [{ "$ref": "#/components/parameters/ThemeId" }],
+        "responses": {
+          "200": { "description": "Visible official or custom Theme current definition and usage", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ThemeResponse" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }, "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "operationId": "updateTheme",
+        "parameters": [{ "$ref": "#/components/parameters/ThemeId" }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/UpdateThemeRequest" },
+          "example": { "baseRevision": 1, "theme": { "schemaVersion": 1, "id": "fictional-blue", "name": "虚构深蓝", "description": "只用于接口文档的虚构主题。", "extends": "newspaper-default", "tokens": { "colors": { "accent": "#1D4F91" }, "density": "balanced" }, "recipes": { "normal": "minimal" } } }
+        } } },
+        "responses": {
+          "200": { "description": "Custom Theme current revision updated, unchanged, or exact retry replayed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ThemeMutationResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" }, "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTheme",
+        "parameters": [{ "$ref": "#/components/parameters/ThemeId" }, { "$ref": "#/components/parameters/IdempotencyKey" }, { "$ref": "#/components/parameters/ThemeRevisionMatch" }],
+        "responses": {
+          "200": { "description": "Unused custom Theme removed from the current catalog; history remains", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ThemeMutationResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" }, "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
     }
   },
   "components": {
@@ -142,8 +205,10 @@
     },
     "parameters": {
       "PublicationId": { "name": "publicationId", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" } },
+      "ThemeId": { "name": "themeId", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" } },
       "IssueDate": { "name": "date", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Date" } },
-      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,80}$" }, "description": "Reuse the same key and exact body only for a retry of the same intent." }
+      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,80}$" }, "description": "Reuse the same key and exact body only for a retry of the same intent." },
+      "ThemeRevisionMatch": { "name": "If-Match", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^\"[1-9][0-9]*\"$", "example": "\"1\"" }, "description": "Quoted current custom Theme revision." }
     },
     "schemas": {
       "Date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
@@ -231,13 +296,24 @@
       "TodoStateChange": { "type": "object", "additionalProperties": false, "required": ["type", "taskId"], "properties": { "type": { "type": "string", "enum": ["complete", "reopen", "archive", "restore"] }, "taskId": { "type": "string", "pattern": "^todo-[a-f0-9]{8}$" } } },
       "TodoOperationResult": { "type": "object", "additionalProperties": false, "required": ["index", "type", "result", "taskId"], "properties": { "index": { "type": "integer", "minimum": 0 }, "type": { "type": "string", "enum": ["add", "update", "complete", "reopen", "archive", "restore"] }, "result": { "type": "string", "enum": ["created", "updated", "unchanged"] }, "clientId": { "type": "string" }, "taskId": { "type": "string" } } },
       "TodoSubmissionResponse": { "type": "object", "additionalProperties": false, "required": ["schemaVersion", "candidateId", "result", "baseRevision", "revision", "operationCount", "operations", "warnings", "processedAt", "pageUrl", "requestId"], "properties": { "schemaVersion": { "const": 1 }, "candidateId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "result": { "type": "string", "enum": ["published", "unchanged"] }, "baseRevision": { "type": "integer", "minimum": 0 }, "revision": { "type": "integer", "minimum": 0 }, "operationCount": { "type": "integer", "minimum": 1, "maximum": 100 }, "operations": { "type": "array", "items": { "$ref": "#/components/schemas/TodoOperationResult" } }, "warnings": { "type": "array", "items": {} }, "processedAt": { "type": "string", "format": "date-time" }, "pageUrl": { "type": "string", "format": "uri" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
-      "Error": { "type": "object", "additionalProperties": false, "required": ["error"], "properties": { "error": { "type": "object", "additionalProperties": false, "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["invalid_request", "schema_invalid", "future_date_not_allowed", "invalid_token", "target_not_found", "idempotency_conflict", "revision_conflict", "explicit_confirmation_required", "publication_inactive", "todo_disabled", "payload_too_large", "rate_limited", "service_unavailable"] }, "message": { "type": "string" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } } } }
+      "ThemeDefinition": { "type": "object", "additionalProperties": false, "required": ["schemaVersion", "id", "name", "extends", "tokens", "recipes"], "properties": { "schemaVersion": { "const": 1 }, "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "name": { "type": "string", "minLength": 1, "maxLength": 40 }, "description": { "type": "string", "minLength": 1 }, "extends": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "description": "Must be a visible official Theme ID." }, "tokens": { "$ref": "#/components/schemas/ThemeTokens" }, "recipes": { "$ref": "#/components/schemas/ThemeRecipes" } }, "anyOf": [{ "properties": { "tokens": { "minProperties": 1 } } }, { "properties": { "recipes": { "minProperties": 1 } } }] },
+      "ThemeTokens": { "type": "object", "additionalProperties": false, "properties": { "colors": { "type": "object", "additionalProperties": false, "properties": { "background": { "$ref": "#/components/schemas/ThemeColor" }, "text": { "$ref": "#/components/schemas/ThemeColor" }, "muted": { "$ref": "#/components/schemas/ThemeColor" }, "accent": { "$ref": "#/components/schemas/ThemeColor" }, "rule": { "$ref": "#/components/schemas/ThemeColor" } } }, "typography": { "type": "object", "additionalProperties": false, "properties": { "headlinePreset": { "type": "string", "enum": ["serif-cn", "sans-cn", "mono"] }, "uiPreset": { "type": "string", "enum": ["serif-cn", "sans-cn", "mono"] }, "headlineScale": { "type": "string", "enum": ["restrained", "editorial", "poster"] } } }, "density": { "type": "string", "enum": ["compact", "balanced", "spacious"] }, "ruleStyle": { "type": "string", "enum": ["hairline", "strong", "double"] }, "surfaceStyle": { "type": "string", "enum": ["flat", "paper", "soft-gradient"] }, "motion": { "type": "string", "enum": ["none", "subtle"] } } },
+      "ThemeColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+      "ThemeRecipes": { "type": "object", "additionalProperties": false, "properties": { "masthead": { "type": "string", "enum": ["compact", "classic", "banner"] }, "lead": { "type": "string", "enum": ["split", "stacked", "editorial"] }, "important": { "type": "string", "enum": ["ruled", "minimal", "contrast"] }, "normal": { "type": "string", "enum": ["compact", "minimal", "accent"] } } },
+      "ThemeUsage": { "type": "object", "additionalProperties": false, "required": ["home", "publications"], "properties": { "home": { "type": "boolean" }, "publications": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["publicationId", "name", "mode", "status"], "properties": { "publicationId": { "type": "string" }, "name": { "type": "string" }, "mode": { "type": "string", "enum": ["inherit", "override"] }, "status": { "type": "string", "enum": ["active", "inactive"] } } } } } },
+      "ThemeSummary": { "type": "object", "additionalProperties": false, "required": ["themeId", "name", "source", "revision", "usage"], "properties": { "themeId": { "type": "string" }, "name": { "type": "string" }, "source": { "type": "string", "enum": ["official", "custom"] }, "revision": { "type": "integer", "minimum": 1 }, "usage": { "$ref": "#/components/schemas/ThemeUsage" } } },
+      "ThemeContextResponse": { "type": "object", "additionalProperties": false, "required": ["themeSchema", "constraints", "themes", "requestId"], "properties": { "themeSchema": { "type": "object" }, "constraints": { "type": "object", "additionalProperties": false, "required": ["customThemeLimit", "customThemeCount", "officialThemesReadOnly", "selectionManagedInBrowser", "baseRevisionRequiredForUpdateAndDelete"], "properties": { "customThemeLimit": { "type": "integer", "minimum": 1 }, "customThemeCount": { "type": "integer", "minimum": 0 }, "officialThemesReadOnly": { "const": true }, "selectionManagedInBrowser": { "const": true }, "baseRevisionRequiredForUpdateAndDelete": { "const": true } } }, "themes": { "type": "array", "items": { "$ref": "#/components/schemas/ThemeSummary" } }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "ThemeResponse": { "type": "object", "additionalProperties": false, "required": ["themeId", "name", "source", "revision", "usage", "definition", "requestId"], "properties": { "themeId": { "type": "string" }, "name": { "type": "string" }, "source": { "type": "string", "enum": ["official", "custom"] }, "revision": { "type": "integer", "minimum": 1 }, "usage": { "$ref": "#/components/schemas/ThemeUsage" }, "definition": { "type": "object" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "CreateThemeRequest": { "type": "object", "additionalProperties": false, "required": ["theme"], "properties": { "theme": { "$ref": "#/components/schemas/ThemeDefinition" } } },
+      "UpdateThemeRequest": { "type": "object", "additionalProperties": false, "required": ["baseRevision", "theme"], "properties": { "baseRevision": { "type": "integer", "minimum": 1 }, "theme": { "$ref": "#/components/schemas/ThemeDefinition" } } },
+      "ThemeMutationResponse": { "type": "object", "additionalProperties": false, "required": ["result", "themeId", "revision", "affected", "requestId"], "properties": { "result": { "type": "string", "enum": ["created", "updated", "unchanged", "deleted"] }, "themeId": { "type": "string" }, "revision": { "type": "integer", "minimum": 1 }, "affected": { "$ref": "#/components/schemas/ThemeUsage" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } },
+      "Error": { "type": "object", "additionalProperties": false, "required": ["error"], "properties": { "error": { "type": "object", "additionalProperties": false, "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["invalid_request", "schema_invalid", "future_date_not_allowed", "invalid_token", "target_not_found", "idempotency_conflict", "revision_conflict", "explicit_confirmation_required", "publication_inactive", "todo_disabled", "theme_conflict", "theme_read_only", "theme_in_use", "theme_limit_reached", "payload_too_large", "rate_limited", "service_unavailable"] }, "message": { "type": "string" }, "requestId": { "$ref": "#/components/schemas/RequestId" } } } } }
     },
     "responses": {
       "BadRequest": { "description": "Invalid request, schema, or future date", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Unauthorized": { "description": "Missing, invalid, provisioning, rotated, or revoked PAT", "headers": { "WWW-Authenticate": { "schema": { "type": "string", "const": "Bearer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "Target is missing or belongs to another Space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "Conflict": { "description": "Idempotency, revision, confirmation, inactive Publication, or disabled Todo conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Conflict": { "description": "Idempotency, revision, confirmation, inactive Publication, disabled Todo, or Theme mutation conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "PayloadTooLarge": { "description": "Request body exceeds the configured limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "RateLimited": { "description": "Persistent PAT or IP rate limit, or concurrent write limit", "headers": { "Retry-After": { "schema": { "type": "integer", "minimum": 1 } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Unavailable": { "description": "Recoverable service failure; retry the exact request with the same idempotency key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }

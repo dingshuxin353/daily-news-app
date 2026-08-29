@@ -229,7 +229,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         instructions: [
           "先识别客户端是否支持远程 Streamable HTTP、Bearer Secret 与定时任务，再向用户索要页面当前显示的配对码；不支持的能力必须明确说明。",
           "使用配对码认领连接；长期凭证只会在认领成功时返回一次，必须安全保存且不得输出到回复、日志或项目文件。",
-          "使用 provisioning 凭证完成只读验证；验证成功后通过 MCP（或 JSON API 回退）先读取默认日报与 Todo 上下文。",
+          "使用 provisioning 凭证完成只读验证；验证成功后通过 MCP（或 JSON API 回退）先读取默认日报、Todo 与主题上下文。",
           "继续询问用户长期关注内容与更新时间，把相对时间复述为明确时间和时区；仅在客户端支持时于 Agent 自己的运行环境建立或更新定时任务，并立即生成第一份日报供用户确认。",
         ],
         security: {

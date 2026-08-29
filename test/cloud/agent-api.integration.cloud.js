@@ -18,6 +18,7 @@ import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-acce
 import { AgentOperationsService } from "../../.cloud-dist/src/modules/agent-access/operations.js";
 import { AgentRequestError } from "../../.cloud-dist/src/modules/agent-access/request-policy.js";
 import { keyedDigest } from "../../.cloud-dist/src/modules/identity/security.js";
+import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationsDirectory = path.join(projectRoot, "db", "migrations");
@@ -68,6 +69,18 @@ function candidate(date, suffix = "one") {
   return issue;
 }
 
+function theme(themeId = "fictional-blue", accent = "#2457A7") {
+  return {
+    schemaVersion: 1,
+    id: themeId,
+    name: "虚构深蓝",
+    description: "只用于 M4-B 集成测试的虚构主题。",
+    extends: "newspaper-default",
+    tokens: { colors: { accent }, density: "compact" },
+    recipes: { normal: "accent" },
+  };
+}
+
 async function fixture(options = {}) {
   const tenancy = new PostgresTenancyStore(pool);
   const tenant = await tenancy.ensureSpaceForUser(options.userId ?? "agent-api-user", defaults);
@@ -110,7 +123,8 @@ async function fixture(options = {}) {
     concurrentWriteLimitPerSpace: options.concurrentWriteLimitPerSpace ?? 2,
     writeLeaseTtlSeconds: 300,
     submissionRetentionDays: 90,
-  }, () => new Date("2026-08-27T04:00:00Z"));
+    customThemeLimit: options.customThemeLimit ?? 24,
+  }, createFileThemeStorage({ rootDir: projectRoot }), () => new Date("2026-08-27T04:00:00Z"));
   const app = createCloudApp({
     basePath: "",
     readinessCheck: async () => {},
@@ -503,6 +517,169 @@ test("Todo API keeps disabled state private and uses clientRunId independently f
   const todoBody = await todo.json();
   assert.equal(todoBody.revision, 2);
   assert.equal(todoBody.state.items.length, 2);
+});
+
+test("Theme JSON API and MCP share validation, idempotency, revision, usage, and deletion transactions", async () => {
+  const { app, headers, token, tenant } = await fixture();
+  const firstTheme = theme();
+  const create = await postJson(
+    app,
+    "https://dailynews.test/api/v1/themes",
+    headers,
+    "theme-create-0001",
+    { theme: firstTheme },
+  );
+  assert.equal(create.status, 200);
+  const created = await create.json();
+  assert.equal(created.result, "created");
+  assert.equal(created.revision, 1);
+  assertDocumentedResponseFields("ThemeMutationResponse", created);
+
+  const client = await createMcpClient(app, token, "modern");
+  try {
+    const listed = await client.listTools();
+    assert.ok(listed.tools.some(({ name }) => name === "get_theme_context"));
+    assert.ok(listed.tools.some(({ name }) => name === "delete_theme"));
+    const replay = await client.callTool({
+      name: "create_theme",
+      arguments: { clientRunId: "theme-create-0001", theme: structuredClone(firstTheme) },
+    });
+    assert.equal(replay.structuredContent.result, "created");
+    assert.equal(replay.structuredContent.revision, 1);
+
+    const changedRetry = await client.callTool({
+      name: "create_theme",
+      arguments: { clientRunId: "theme-create-0001", theme: theme("fictional-blue", "#315D9B") },
+    });
+    assert.equal(changedRetry.isError, true);
+    assert.equal(changedRetry.structuredContent.error.code, "idempotency_conflict");
+
+    const context = await client.callTool({ name: "get_theme_context", arguments: {} });
+    assert.equal(context.structuredContent.constraints.customThemeCount, 1);
+    assert.ok(context.structuredContent.themes.some(({ themeId, source }) => (
+      themeId === "fictional-blue" && source === "custom"
+    )));
+
+    const updatedTheme = theme("fictional-blue", "#315D9B");
+    const updated = await client.callTool({
+      name: "update_theme",
+      arguments: {
+        themeId: "fictional-blue",
+        clientRunId: "theme-update-0001",
+        baseRevision: 1,
+        theme: updatedTheme,
+      },
+    });
+    assert.equal(updated.structuredContent.result, "updated");
+    assert.equal(updated.structuredContent.revision, 2);
+    const read = await client.callTool({ name: "get_theme", arguments: { themeId: "fictional-blue" } });
+    assert.equal(read.structuredContent.revision, 2);
+    assert.equal(read.structuredContent.definition.tokens.colors.accent, "#315D9B");
+
+    const stale = await client.callTool({
+      name: "update_theme",
+      arguments: {
+        themeId: "fictional-blue",
+        clientRunId: "theme-update-stale-0001",
+        baseRevision: 1,
+        theme: theme("fictional-blue", "#123456"),
+      },
+    });
+    assert.equal(stale.isError, true);
+    assert.equal(stale.structuredContent.error.code, "revision_conflict");
+
+    await pool.query(
+      `UPDATE app.theme_selections SET theme_id = 'fictional-blue'
+       WHERE space_id = $1 AND target_type = 'home'`,
+      [tenant.spaceId],
+    );
+    const inUse = await client.callTool({
+      name: "delete_theme",
+      arguments: { themeId: "fictional-blue", clientRunId: "theme-delete-used-0001", baseRevision: 2 },
+    });
+    assert.equal(inUse.isError, true);
+    assert.equal(inUse.structuredContent.error.code, "theme_in_use");
+    assert.equal(inUse.structuredContent.error.requestId.startsWith("req_"), true);
+
+    const official = await client.callTool({
+      name: "delete_theme",
+      arguments: { themeId: "newspaper-default", clientRunId: "theme-delete-official-1", baseRevision: 1 },
+    });
+    assert.equal(official.isError, true);
+    assert.equal(official.structuredContent.error.code, "theme_read_only");
+  } finally {
+    await client.close();
+  }
+
+  const invalid = await postJson(
+    app,
+    "https://dailynews.test/api/v1/themes",
+    headers,
+    "theme-invalid-0001",
+    { theme: { ...theme("unsafe-theme"), css: "body { display:none }" } },
+  );
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error.code, "schema_invalid");
+  assert.equal((await pool.query(
+    "SELECT count(*)::integer AS count FROM app.custom_themes WHERE space_id = $1",
+    [tenant.spaceId],
+  )).rows[0].count, 1);
+
+  await pool.query(
+    `UPDATE app.theme_selections SET theme_id = 'newspaper-default'
+     WHERE space_id = $1 AND target_type = 'home'`,
+    [tenant.spaceId],
+  );
+  const deleted = await app.request("https://dailynews.test/api/v1/themes/fictional-blue", {
+    method: "DELETE",
+    headers: { ...headers, "idempotency-key": "theme-delete-0001", "if-match": '"2"' },
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal((await deleted.json()).result, "deleted");
+  assert.equal((await app.request("https://dailynews.test/api/v1/themes/fictional-blue", { headers })).status, 404);
+  const history = await pool.query(
+    "SELECT revision FROM app.theme_definitions WHERE space_id = $1 AND theme_id = 'fictional-blue' ORDER BY revision",
+    [tenant.spaceId],
+  );
+  assert.deepEqual(history.rows.map(({ revision }) => revision), [1, 2]);
+});
+
+test("Theme mutations serialize concurrent revisions and remain isolated by Space", async () => {
+  const first = await fixture({ userId: "theme-space-a", customThemeLimit: 1 });
+  const created = await postJson(first.app, "https://dailynews.test/api/v1/themes", first.headers, "theme-race-create-1", {
+    theme: theme("race-theme"),
+  });
+  assert.equal(created.status, 200);
+
+  const update = (key, accent) => first.app.request("https://dailynews.test/api/v1/themes/race-theme", {
+    method: "PUT",
+    headers: { ...first.headers, "content-type": "application/json", "idempotency-key": key },
+    body: JSON.stringify({ baseRevision: 1, theme: theme("race-theme", accent) }),
+  });
+  const raced = await Promise.all([
+    update("theme-race-update-a", "#315D9B"),
+    update("theme-race-update-b", "#426EAC"),
+  ]);
+  assert.deepEqual(raced.map(({ status }) => status).sort(), [200, 409]);
+  const revisions = await pool.query(
+    "SELECT revision FROM app.theme_definitions WHERE space_id = $1 AND theme_id = 'race-theme' ORDER BY revision",
+    [first.tenant.spaceId],
+  );
+  assert.deepEqual(revisions.rows.map(({ revision }) => revision), [1, 2]);
+
+  const overLimit = await postJson(first.app, "https://dailynews.test/api/v1/themes", first.headers, "theme-limit-create-1", {
+    theme: theme("second-theme"),
+  });
+  assert.equal(overLimit.status, 409);
+  assert.equal((await overLimit.json()).error.code, "theme_limit_reached");
+
+  const second = await fixture({ userId: "theme-space-b" });
+  assert.equal((await second.app.request("https://dailynews.test/api/v1/themes/race-theme", { headers: second.headers })).status, 404);
+  const own = await postJson(second.app, "https://dailynews.test/api/v1/themes", second.headers, "theme-space-b-create", {
+    theme: theme("race-theme", "#503B8C"),
+  });
+  assert.equal(own.status, 200);
+  assert.notEqual(first.tenant.spaceId, second.tenant.spaceId);
 });
 
 test("persistent request limits, write leases, and revoked PATs fail closed", async () => {

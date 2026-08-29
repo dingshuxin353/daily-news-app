@@ -69,6 +69,7 @@ const validProductConfig = {
   },
   limits: {
     publicationsPerSpace: 8,
+    customThemesPerSpace: 24,
     activeTokensPerUser: 10,
     testDailyEmailHardLimit: 100,
     emailCooldownSeconds: 60,
@@ -884,6 +885,24 @@ function agentApiTestApp(overrides = {}) {
       calls.push({ type: "todo", input });
       return { result: "published", revision: 1 };
     },
+    async getThemeContext() {
+      return { themes: [] };
+    },
+    async getTheme(_access, themeId) {
+      return { themeId, source: "custom", revision: 1, definition: {}, usage: { home: false, publications: [] } };
+    },
+    async createTheme(_access, input) {
+      calls.push({ type: "create-theme", input });
+      return { result: "created", themeId: input.theme.id, revision: 1, affected: { home: false, publications: [] } };
+    },
+    async updateTheme(_access, input) {
+      calls.push({ type: "update-theme", input });
+      return { result: "updated", themeId: input.themeId, revision: input.baseRevision + 1, affected: { home: false, publications: [] } };
+    },
+    async deleteTheme(_access, input) {
+      calls.push({ type: "delete-theme", input });
+      return { result: "deleted", themeId: input.themeId, revision: input.baseRevision, affected: { home: false, publications: [] } };
+    },
     ...overrides.operations,
   };
   const app = createCloudApp({
@@ -1122,6 +1141,44 @@ test("JSON API validates POST media type, idempotency key, strict envelopes, and
   assert.equal((await oversized.json()).error.code, "payload_too_large");
 });
 
+test("JSON API exposes equivalent Theme reads and idempotent mutation envelopes", async () => {
+  const { app, calls } = agentApiTestApp();
+  const headers = { authorization: "Bearer valid-token" };
+  assert.equal((await app.request("https://dailynews.test/cloud/api/v1/themes/context", { headers })).status, 200);
+  assert.equal((await app.request("https://dailynews.test/cloud/api/v1/themes/example-theme", { headers })).status, 200);
+
+  const created = await app.request("https://dailynews.test/cloud/api/v1/themes", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json", "idempotency-key": "theme-create-0001" },
+    body: JSON.stringify({ theme: customTheme }),
+  });
+  assert.equal(created.status, 200);
+  assert.equal((await created.json()).themeId, "example-theme");
+
+  const updated = await app.request("https://dailynews.test/cloud/api/v1/themes/example-theme", {
+    method: "PUT",
+    headers: { ...headers, "content-type": "application/json", "idempotency-key": "theme-update-0001" },
+    body: JSON.stringify({ baseRevision: 1, theme: customTheme }),
+  });
+  assert.equal(updated.status, 200);
+
+  const invalidDelete = await app.request("https://dailynews.test/cloud/api/v1/themes/example-theme", {
+    method: "DELETE",
+    headers: { ...headers, "idempotency-key": "theme-delete-0001", "if-match": "2" },
+  });
+  assert.equal(invalidDelete.status, 400);
+
+  const deleted = await app.request("https://dailynews.test/cloud/api/v1/themes/example-theme", {
+    method: "DELETE",
+    headers: { ...headers, "idempotency-key": "theme-delete-0001", "if-match": '"2"' },
+  });
+  assert.equal(deleted.status, 200);
+  assert.ok(calls.filter(({ type }) => type === "authenticate").some(({ input }) => input.action === "write"));
+  assert.ok(calls.some(({ type }) => type === "create-theme"));
+  assert.ok(calls.some(({ type }) => type === "update-theme"));
+  assert.ok(calls.some(({ type }) => type === "delete-theme"));
+});
+
 test("JSON API omits retained Todo state when Personal Todo is disabled", async () => {
   const { app } = agentApiTestApp();
   const response = await app.request("https://dailynews.test/cloud/api/v1/todo", {
@@ -1162,10 +1219,20 @@ test("OpenAPI 3.1 stays aligned with the real routes, auth, idempotency, errors,
     assert.ok(operation.requestBody.content["application/json"].example);
     assert.ok(operation.responses["413"]);
   }
+  for (const { path: routePath, method } of AGENT_API_ROUTE_CONTRACT.filter(({ method }) => (
+    method === "put" || method === "delete"
+  ))) {
+    const operation = specification.paths[routePath][method];
+    assert.ok(operation.parameters.some(({ $ref }) => $ref === "#/components/parameters/IdempotencyKey"));
+  }
+  assert.ok(specification.paths["/themes/{themeId}"].delete.parameters.some(
+    ({ $ref }) => $ref === "#/components/parameters/ThemeRevisionMatch",
+  ));
   const errorCodes = specification.components.schemas.Error.properties.error.properties.code.enum;
   for (const code of [
     "invalid_token", "idempotency_conflict", "revision_conflict", "explicit_confirmation_required",
     "publication_inactive", "todo_disabled", "payload_too_large", "rate_limited", "service_unavailable",
+    "theme_conflict", "theme_read_only", "theme_in_use", "theme_limit_reached",
   ]) assert.ok(errorCodes.includes(code));
 
   const schemas = specification.components.schemas;
@@ -1309,6 +1376,50 @@ function agentMcpTestApp(options = {}) {
         pageUrl: "https://dailynews.test/todo/",
       };
     },
+    async getThemeContext() {
+      calls.push(["getThemeContext"]);
+      return {
+        themeSchema: {
+          schemaVersion: 1,
+          idPattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          name: { minimumVisibleCharacters: 1, maximumVisibleCharacters: 40 },
+          colors: { format: "#RRGGBB", minimumTextContrast: 4.5 },
+          enums: { density: ["compact", "balanced", "spacious"] },
+          forbidden: ["html", "css", "javascript"],
+        },
+        constraints: {
+          customThemeLimit: 24,
+          customThemeCount: 1,
+          officialThemesReadOnly: true,
+          selectionManagedInBrowser: true,
+          baseRevisionRequiredForUpdateAndDelete: true,
+        },
+        themes: [{
+          themeId: "example-theme", name: "示例主题", source: "custom", revision: 1,
+          usage: { home: false, publications: [] },
+        }],
+      };
+    },
+    async getTheme(_access, themeId) {
+      calls.push(["getTheme", themeId]);
+      return {
+        themeId, name: "示例主题", source: "custom", revision: 1,
+        definition: { schemaVersion: 1, id: themeId },
+        usage: { home: false, publications: [] },
+      };
+    },
+    async createTheme(_access, input) {
+      calls.push(["createTheme", input]);
+      return { result: "created", themeId: input.theme.id, revision: 1, affected: { home: false, publications: [] } };
+    },
+    async updateTheme(_access, input) {
+      calls.push(["updateTheme", input]);
+      return { result: "updated", themeId: input.themeId, revision: 2, affected: { home: false, publications: [] } };
+    },
+    async deleteTheme(_access, input) {
+      calls.push(["deleteTheme", input]);
+      return { result: "deleted", themeId: input.themeId, revision: input.baseRevision, affected: { home: false, publications: [] } };
+    },
   };
   const app = createCloudApp({
     basePath: "/cloud",
@@ -1370,8 +1481,17 @@ const todoCandidate = {
   operations: [{ type: "add", clientId: "draft-one", title: "提交示例周报" }],
 };
 
+const customTheme = {
+  schemaVersion: 1,
+  id: "example-theme",
+  name: "示例主题",
+  extends: "newspaper-default",
+  tokens: { colors: { accent: "#2457A7" } },
+  recipes: { normal: "accent" },
+};
+
 for (const era of ["legacy", "modern"]) {
-  test(`official MCP ${era} client discovers the same six tools and completes every operation`, async () => {
+  test(`official MCP ${era} client discovers the same eleven tools and completes every operation`, async () => {
     const { app, authentications, calls } = agentMcpTestApp();
     const exchanges = [];
     const { client, transport } = mcpClientFor(app, era, exchanges);
@@ -1381,9 +1501,9 @@ for (const era of ["legacy", "modern"]) {
       assert.equal(client.getInstructions(), DAILYNEWS_MCP_INSTRUCTIONS);
       assert.ok(client.getInstructions().length <= 512);
       for (const rule of [
-        /context tool before every write/, /default and availablePublications/, /explicit publicationId and date/,
-        /Never mix Daily Content and Todo Candidates/, /must not set Space, formal revision, or formal state/,
-        /Todo is disabled/, /same clientRunId/, /Historical dates and replace require explicit user confirmation/,
+        /context before every write/, /Daily defaults/, /explicit publicationId and date/,
+        /Do not mix Daily and Todo Candidates/, /set Space or formal state/,
+        /Disabled Todo/, /reuse clientRunId/, /Historical and replace writes/, /no HTML, CSS, JavaScript/,
       ]) assert.match(client.getInstructions(), rule);
       const listed = await client.listTools();
       assert.deepEqual(listed.tools.map(({ name }) => name), [
@@ -1393,6 +1513,11 @@ for (const era of ["legacy", "modern"]) {
         "get_todo_context",
         "submit_todo_candidate",
         "get_todo_state",
+        "get_theme_context",
+        "get_theme",
+        "create_theme",
+        "update_theme",
+        "delete_theme",
       ]);
       for (const tool of listed.tools) {
         assert.equal(tool.annotations.openWorldHint, false);
@@ -1405,6 +1530,7 @@ for (const era of ["legacy", "modern"]) {
       assert.equal(dailySubmitTool.annotations.destructiveHint, true);
       assert.equal(dailySubmitTool.inputSchema.properties.candidate.properties.items.maxItems, 100);
       assert.equal(todoSubmitTool.inputSchema.properties.candidate.properties.operations.maxItems, 100);
+      assert.equal(listed.tools.find(({ name }) => name === "delete_theme").annotations.destructiveHint, true);
 
       const context = await client.callTool({ name: "get_daily_context", arguments: {} });
       assert.equal(context.structuredContent.publication.publicationId, "daily-news");
@@ -1429,9 +1555,26 @@ for (const era of ["legacy", "modern"]) {
         arguments: { clientRunId: "todo-mcp-run-0001", candidate: todoCandidate },
       });
       await client.callTool({ name: "get_todo_state", arguments: {} });
+      await client.callTool({ name: "get_theme_context", arguments: {} });
+      await client.callTool({ name: "get_theme", arguments: { themeId: "example-theme" } });
+      await client.callTool({
+        name: "create_theme",
+        arguments: { clientRunId: "theme-create-0001", theme: customTheme },
+      });
+      await client.callTool({
+        name: "update_theme",
+        arguments: { themeId: "example-theme", clientRunId: "theme-update-0001", baseRevision: 1, theme: customTheme },
+      });
+      await client.callTool({
+        name: "delete_theme",
+        arguments: { themeId: "example-theme", clientRunId: "theme-delete-0001", baseRevision: 2 },
+      });
 
       assert.ok(calls.some(([name]) => name === "submitDailyCandidate"));
       assert.ok(calls.some(([name]) => name === "submitTodoCandidate"));
+      assert.ok(calls.some(([name]) => name === "createTheme"));
+      assert.ok(calls.some(([name]) => name === "updateTheme"));
+      assert.ok(calls.some(([name]) => name === "deleteTheme"));
       assert.ok(authentications.some(({ action }) => action === "read"));
       assert.ok(authentications.some(({ action }) => action === "write"));
       assert.ok(exchanges.every(({ response }) => response.headers.get("cache-control") === "private, no-store"));
@@ -1440,7 +1583,7 @@ for (const era of ["legacy", "modern"]) {
       assert.ok(exchanges.every(({ response }) => response.headers.get("access-control-allow-origin") === null));
       if (era === "modern") {
         const modernCalls = exchanges.filter(({ body }) => body.includes('"method":"tools/call"'));
-        assert.ok(modernCalls.length >= 6);
+        assert.ok(modernCalls.length >= 11);
         assert.ok(modernCalls.every(({ request }) => request.headers.get("mcp-protocol-version") === "2026-07-28"));
         assert.ok(modernCalls.every(({ request }) => request.headers.get("mcp-method") === "tools/call"));
         assert.ok(modernCalls.every(({ request }) => request.headers.get("mcp-name")));

@@ -21,15 +21,23 @@ import {
   todoContextOutputSchema,
   todoStateOutputSchema,
   todoSubmissionOutputSchema,
+  createThemeInputSchema,
+  deleteThemeInputSchema,
+  getThemeInputSchema,
+  themeContextOutputSchema,
+  themeMutationOutputSchema,
+  themeOutputSchema,
+  updateThemeInputSchema,
 } from "./schemas.js";
 
 export const DAILYNEWS_MCP_INSTRUCTIONS = [
-  "Call its context tool before every write.",
-  "With no Daily target, read default and availablePublications; write only with explicit publicationId and date.",
-  "Never mix Daily Content and Todo Candidates. A Candidate must not set Space, formal revision, or formal state.",
-  "If Todo is disabled, ask the user to enable it in settings; never enable it.",
-  "Retry an identical body with the same clientRunId; changed intent needs a new ID.",
-  "Historical dates and replace require explicit user confirmation.",
+  "Read context before every write.",
+  "Daily defaults may be read; writes need explicit publicationId and date.",
+  "Do not mix Daily and Todo Candidates or set Space or formal state.",
+  "Disabled Todo must be enabled in settings.",
+  "Exact retries reuse clientRunId; changed intent uses a new ID.",
+  "Historical and replace writes need explicit user confirmation.",
+  "Theme writes require context/current first and declarative Schema only; never mutate official Themes or selections; no HTML, CSS, JavaScript, URLs, or layout.",
 ].join(" ");
 
 const readAnnotations: ToolAnnotations = {
@@ -49,6 +57,20 @@ const dailyWriteAnnotations: ToolAnnotations = {
 const todoWriteAnnotations: ToolAnnotations = {
   readOnlyHint: false,
   destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
+const themeWriteAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
+const themeDeleteAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
   idempotentHint: true,
   openWorldHint: false,
 };
@@ -194,6 +216,66 @@ export function createAgentMcpHandler(dependencies: AgentMcpServerDependencies):
       access,
       async () => asRecord(await dependencies.operations.getTodoState(access)),
       (result) => `Formal Personal Todo State: revision ${String(result.revision)}`,
+    ));
+
+    server.registerTool("get_theme_context", {
+      title: "Get Theme context",
+      description: "Read Theme Schema constraints, official and custom Themes, current revisions, and usage relationships.",
+      inputSchema: emptyInputSchema,
+      outputSchema: themeContextOutputSchema,
+      annotations: readAnnotations,
+    }, () => runTool(
+      access,
+      async () => asRecord(await dependencies.operations.getThemeContext(access)),
+      (result) => `Theme context: ${String((result.themes as unknown[])?.length ?? 0)} visible Themes`,
+    ));
+
+    server.registerTool("get_theme", {
+      title: "Get Theme",
+      description: "Read one visible official or custom Theme definition, current revision, and usage relationships.",
+      inputSchema: getThemeInputSchema,
+      outputSchema: themeOutputSchema,
+      annotations: readAnnotations,
+    }, (input) => runTool(
+      access,
+      async () => asRecord(await dependencies.operations.getTheme(access, input.themeId)),
+      (result) => `Theme ${String(result.themeId)} revision ${String(result.revision)}`,
+    ));
+
+    server.registerTool("create_theme", {
+      title: "Create custom Theme",
+      description: "Validate and compile a declarative Theme, then atomically save its first revision. Does not change browser Theme selections.",
+      inputSchema: createThemeInputSchema,
+      outputSchema: themeMutationOutputSchema,
+      annotations: themeWriteAnnotations,
+    }, (input) => runTool(
+      access,
+      async () => asRecord(await dependencies.operations.createTheme(access, input)),
+      (result) => `Theme ${String(result.result)}: ${String(result.themeId)} revision ${String(result.revision)}`,
+    ));
+
+    server.registerTool("update_theme", {
+      title: "Update custom Theme",
+      description: "Validate and compile a custom Theme using baseRevision, then atomically advance its current revision.",
+      inputSchema: updateThemeInputSchema,
+      outputSchema: themeMutationOutputSchema,
+      annotations: themeWriteAnnotations,
+    }, (input) => runTool(
+      access,
+      async () => asRecord(await dependencies.operations.updateTheme(access, input)),
+      (result) => `Theme ${String(result.result)}: ${String(result.themeId)} revision ${String(result.revision)}`,
+    ));
+
+    server.registerTool("delete_theme", {
+      title: "Delete custom Theme",
+      description: "Remove an unused custom Theme from the current catalog using baseRevision while preserving historical revisions.",
+      inputSchema: deleteThemeInputSchema,
+      outputSchema: themeMutationOutputSchema,
+      annotations: themeDeleteAnnotations,
+    }, (input) => runTool(
+      access,
+      async () => asRecord(await dependencies.operations.deleteTheme(access, input)),
+      (result) => `Theme deleted: ${String(result.themeId)} revision ${String(result.revision)}`,
     ));
 
     return server;
