@@ -1037,15 +1037,14 @@ test("inactive owned Publications retain private access to existing formal Daily
       if (/SELECT 1\s+FROM app\.publications/.test(sql)) {
         return values[1] === "daily-news" ? { rows: [{ "?column?": 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
-      if (/SELECT space_id, publication_id, display_name, status, is_default, sort_order/.test(sql)) {
+      if (/SELECT space_id, publication_id, display_name, status, sort_order/.test(sql)) {
         return {
           rows: [{
             space_id: "space-reader",
             publication_id: "daily-news",
             display_name: "DailyNews",
             status: "inactive",
-            is_default: true,
-            sort_order: 0,
+            sort_order: null,
           }],
           rowCount: 1,
         };

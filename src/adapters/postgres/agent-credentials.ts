@@ -496,7 +496,9 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
          JOIN app.publication_configs pc
            ON pc.space_id = p.space_id AND pc.publication_id = p.publication_id
          JOIN app.todo_profiles tp ON tp.space_id = p.space_id
-         WHERE p.space_id = $1 AND p.is_default`,
+         WHERE p.space_id = $1 AND p.status = 'active'
+         ORDER BY p.sort_order
+         LIMIT 1`,
         [credential.space_id],
       );
       const context = contextResult.rows[0];

@@ -78,6 +78,7 @@ test("tenant, identity, and Agent access migrations create the bounded app table
     "agent_pairing_sessions",
     "agent_rate_limit_events",
     "audit_events",
+    "custom_themes",
     "home_profiles",
     "login_mail_deliveries",
     "login_rate_locks",
@@ -88,6 +89,7 @@ test("tenant, identity, and Agent access migrations create the bounded app table
     "spaces",
     "theme_selections",
     "todo_profiles",
+    "user_profiles",
   ]) {
     assert.ok(tables.includes(table), `${table} must remain available`);
   }
@@ -133,14 +135,12 @@ test("concurrent bootstrap creates one ready space and one complete default obje
       publicationId: null,
       selectionMode: "override",
       themeId: "newspaper-default",
-      themeRevision: 1,
     },
     {
       targetType: "publication",
       publicationId: "daily-news",
       selectionMode: "inherit",
       themeId: null,
-      themeRevision: null,
     },
   ]);
 });
@@ -240,8 +240,8 @@ test("composite foreign keys reject cross-space publication ownership", async ()
   await assert.rejects(
     () => pool.query(
       `INSERT INTO app.theme_selections
-         (id, space_id, target_type, publication_id, selection_mode, theme_id, theme_revision)
-       VALUES ($1, $2, 'publication', 'owned-by-b', 'inherit', NULL, NULL)`,
+         (id, space_id, target_type, publication_id, selection_mode, theme_id)
+       VALUES ($1, $2, 'publication', 'owned-by-b', 'inherit', NULL)`,
       [randomUUID(), tenantA.spaceId],
     ),
     (error) => error.code === "23503",

@@ -1,13 +1,13 @@
 import type { PostgresPool } from "../../adapters/postgres/pool.js";
 import { createPostgresDailyStorage } from "../../adapters/postgres/daily.js";
 import { createPostgresTodoStorage } from "../../adapters/postgres/todo.js";
-import type { SystemThemeReader } from "../../adapters/postgres/theme.js";
+import { createPostgresThemeStorage, type SystemThemeReader } from "../../adapters/postgres/theme.js";
 import type {
   HomeProfileRecord,
   PostgresTenancyStore,
+  PublicationContext,
   PublicationRecord,
   TenantContext,
-  ThemeSelectionRecord,
   TodoProfileRecord,
 } from "../../adapters/postgres/tenancy.js";
 import { buildDailyReadingProjection } from "../../../scripts/lib/domain/daily-reading.js";
@@ -42,17 +42,6 @@ export interface DailyReading {
   };
 }
 
-function effectiveTheme(
-  home: ThemeSelectionRecord | undefined,
-  publication: ThemeSelectionRecord | undefined,
-): ReadingTheme | null {
-  if (!home || home.selectionMode !== "override" || !publication) return null;
-  const selected = publication.selectionMode === "override" ? publication : home;
-  return selected?.themeId && selected.themeRevision
-    ? { id: selected.themeId, revision: selected.themeRevision }
-    : null;
-}
-
 function dateInTimeZone(timeZone: string, now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -65,27 +54,28 @@ function dateInTimeZone(timeZone: string, now = new Date()): string {
 }
 
 async function buildReadingShell(
+  pool: PostgresPool,
   systemThemes: SystemThemeReader,
+  tenant: TenantContext,
+  publicationContext: PublicationContext,
   home: HomeProfileRecord | null,
   publication: PublicationRecord,
   todo: TodoProfileRecord | null,
-  themes: ThemeSelectionRecord[],
 ): Promise<ReadingShell> {
-  const theme = effectiveTheme(
-    themes.find((item) => item.targetType === "home"),
-    themes.find((item) => item.targetType === "publication" && item.publicationId === publication.publicationId),
-  );
-  const themeRevision = theme
-    ? await systemThemes.readThemeRevision(theme.id, theme.revision)
-    : null;
-  if (!home || !todo || !theme || !themeRevision) {
+  const effectiveTheme = await createPostgresThemeStorage(
+    pool,
+    tenant,
+    systemThemes,
+    publicationContext,
+  ).resolveEffectiveTheme();
+  if (!home || !todo) {
     throw new Error("private reading bootstrap is incomplete");
   }
   return {
     spaceName: home.displayName,
     timeZone: home.timeZone,
     publication,
-    theme,
+    theme: { id: effectiveTheme.themeId, revision: effectiveTheme.revision },
     todoEnabled: todo.enabled,
   };
 }
@@ -100,17 +90,18 @@ export class PrivateReadingService {
 
   async readShell(tenant: TenantContext): Promise<ReadingShell> {
     const repository = this.tenancy.forTenant(tenant);
-    const [home, publications, todo, themes] = await Promise.all([
+    const [home, publications, todo] = await Promise.all([
       repository.getHomeProfile(),
       repository.listPublications(),
       repository.getTodoProfile(),
-      repository.listThemeSelections(),
     ]);
     const publication = publications.find((item) => item.isDefault && item.status === "active");
     if (!publication) {
       throw new Error("private reading bootstrap is incomplete");
     }
-    return buildReadingShell(this.systemThemes, home, publication, todo, themes);
+    const publicationContext = await this.tenancy.resolvePublicationContext(tenant, publication.publicationId);
+    if (!publicationContext) throw new Error("private reading bootstrap is incomplete");
+    return buildReadingShell(this.pool, this.systemThemes, tenant, publicationContext, home, publication, todo);
   }
 
   async readPublicationShell(tenant: TenantContext, publicationId: string): Promise<ReadingShell | null> {
@@ -118,14 +109,21 @@ export class PrivateReadingService {
     if (!publicationContext) return null;
     const tenantRepository = this.tenancy.forTenant(tenant);
     const publicationRepository = this.tenancy.forPublication(publicationContext);
-    const [publication, home, todo, themes] = await Promise.all([
+    const [publication, home, todo] = await Promise.all([
       publicationRepository.getPublication(),
       tenantRepository.getHomeProfile(),
       tenantRepository.getTodoProfile(),
-      tenantRepository.listThemeSelections(),
     ]);
     if (!publication) return null;
-    return buildReadingShell(this.systemThemes, home, publication, todo, themes);
+    return buildReadingShell(
+      this.pool,
+      this.systemThemes,
+      tenant,
+      publicationContext,
+      home,
+      publication,
+      todo,
+    );
   }
 
   async readDaily(tenant: TenantContext, publicationId: string, requestedDate?: string): Promise<DailyReading | null> {
