@@ -12,6 +12,10 @@ import { createIdentityService } from "../../.cloud-dist/src/modules/identity/au
 import { keyedDigest } from "../../.cloud-dist/src/modules/identity/security.js";
 import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
 import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
+import { UserProfileService } from "../../.cloud-dist/src/modules/identity/profile-service.js";
+import { SiteManagementService } from "../../.cloud-dist/src/modules/site-management/service.js";
+import { SiteThemeCatalogService } from "../../.cloud-dist/src/modules/site-management/theme-catalog.js";
+import { PostgresSiteManagementRepository } from "../../.cloud-dist/src/adapters/postgres/site-management.js";
 import { compileIssue } from "../../scripts/lib/compiler.js";
 import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
@@ -118,7 +122,13 @@ function createHarness(options = {}) {
   const mail = new FakeMailAdapter();
   const identity = createIdentityService({ config, appPool, authPool, mailAdapter: mail });
   const tenancy = new PostgresTenancyStore(appPool);
-  const privateReading = new PrivateReadingService(appPool, tenancy, systemThemes, () => new Date("2026-08-27T08:00:00+08:00"));
+  const profiles = new UserProfileService(appPool);
+  const privateReading = new PrivateReadingService(appPool, tenancy, systemThemes, () => new Date("2026-08-27T08:00:00+08:00"), profiles);
+  const siteManagement = new SiteManagementService(
+    new PostgresSiteManagementRepository(appPool, systemThemes),
+    config.product.defaults,
+    config.product.limits.publicationsPerSpace,
+  );
   const agentAccess = new AgentCredentialService(
     new PostgresAgentAccessRepository(appPool, {
       rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
@@ -160,6 +170,15 @@ function createHarness(options = {}) {
       activeCredentialLimit: config.product.limits.activeTokensPerUser,
       requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
     },
+    siteSettings: {
+      origin: config.origin,
+      csrfSecret: config.identity.authSecret,
+      service: siteManagement,
+      themes: new SiteThemeCatalogService(appPool, systemThemes),
+      profiles,
+      publicationLimit: config.product.limits.publicationsPerSpace,
+      requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
+    },
   });
   const harness = {
     app,
@@ -167,8 +186,10 @@ function createHarness(options = {}) {
     authPool,
     mail,
     agentAccess,
+    profiles,
     tenancy,
     privateReading,
+    siteManagement,
     async close() {
       openHarnesses.delete(harness);
       await Promise.all([appPool.end(), authPool.end()]);
@@ -209,7 +230,7 @@ async function verifyPairing(app, token, headers = {}) {
   });
 }
 
-async function signIn(harness, email) {
+async function signIn(harness, email, completeProfile = true) {
   assert.equal((await post(harness.app, "/api/auth/email-otp/send-verification-otp", {
     email,
     type: "sign-in",
@@ -220,6 +241,10 @@ async function signIn(harness, email) {
   assert.equal(response.status, 200);
   const setCookie = response.headers.get("set-cookie");
   assert.ok(setCookie);
+  if (completeProfile) {
+    const user = await controlPool.query('SELECT "id" FROM auth."user" WHERE "email" = $1', [email]);
+    await harness.profiles.setNickname(user.rows[0].id, "测试用户");
+  }
   return setCookie.split(";", 1)[0];
 }
 
@@ -231,6 +256,14 @@ async function getJson(app, pathname, headers = {}) {
 async function mutate(app, pathname, cookie, csrfToken, body = {}, headers = {}) {
   const response = await post(app, pathname, { ...body, _csrf: csrfToken }, { cookie, ...headers });
   return { response, body: await response.json() };
+}
+
+async function browserForm(app, pathname, cookie, fields, headers = {}) {
+  return appRequest(app, `https://dailynews.test${pathname}`, {
+    method: "POST",
+    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded", ...headers },
+    body: new URLSearchParams(fields).toString(),
+  });
 }
 
 async function waitForBlockedTransactions(blockerPid, minimum) {
@@ -269,7 +302,7 @@ after(async () => {
 
 test("private product journey keeps onboarding, sample replacement, formal Daily, and Todo projection on one tenant", async () => {
   const harness = createHarness();
-  const cookie = await signIn(harness, "reader@example.com");
+  const cookie = await signIn(harness, "reader@example.com", false);
 
   const publicPage = await appRequest(harness.app, "https://dailynews.test/", {
     headers: { cookie, accept: "text/html" },
@@ -282,6 +315,32 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   });
   assert.equal(destination.status, 303);
   assert.equal(destination.headers.get("location"), "/onboarding");
+
+  const nicknameStep = await appRequest(harness.app, "https://dailynews.test/onboarding", {
+    headers: { cookie, accept: "text/html" },
+  });
+  assert.equal(nicknameStep.status, 200);
+  const nicknameHtml = await nicknameStep.text();
+  assert.match(nicknameHtml, /先写下你的称呼/);
+  assert.doesNotMatch(nicknameHtml, /把这段话发给你的 Agent|data-copy-source="pairing"/);
+  const nicknameCsrf = /name="_csrf" value="([^"]+)"/.exec(nicknameHtml)?.[1];
+  assert.ok(nicknameCsrf);
+  const blockedAgent = await appRequest(harness.app, "https://dailynews.test/settings/agent", { headers: { cookie, accept: "text/html" } });
+  assert.equal(blockedAgent.status, 303);
+  assert.equal(blockedAgent.headers.get("location"), "/onboarding");
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_pairing_sessions")).rows[0].count, 0);
+  const invalidNickname = await browserForm(harness.app, "/onboarding/nickname", cookie, { _csrf: nicknameCsrf, nickname: "这是一个明显超过二十四个可见字符的昵称输入需要被完整保留" });
+  assert.equal(invalidNickname.status, 400);
+  const invalidNicknameHtml = await invalidNickname.text();
+  assert.match(invalidNicknameHtml, /value="这是一个明显超过二十四个可见字符的昵称输入需要被完整保留"/);
+  assert.doesNotMatch(invalidNicknameHtml, /data-copy-source="pairing"/);
+  const nicknameSaved = await appRequest(harness.app, "https://dailynews.test/onboarding/nickname", {
+    method: "POST",
+    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ _csrf: nicknameCsrf, nickname: "丁丁" }).toString(),
+  });
+  assert.equal(nicknameSaved.status, 303);
+  assert.equal(nicknameSaved.headers.get("location"), "/onboarding");
 
   const anchoredLogin = await appRequest(harness.app, "https://dailynews.test/login?returnTo=%2Ftodo%2F%23todo-1234abcd", {
     headers: { accept: "text/html" },
@@ -328,6 +387,7 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.match(sampleHtml, /示例日报/);
   assert.match(sampleHtml, /\/assets\/themes\/newspaper-default\/1\.css/);
   assert.doesNotMatch(sampleHtml, /下次更新时间|负责 Agent|调度健康|迟到/);
+  assert.match(sampleHtml, /账户：丁丁/);
   assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.issues")).rows[0].count, 0);
   assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.daily_candidates")).rows[0].count, 0);
   const themeAsset = await appRequest(harness.app, "https://dailynews.test/assets/themes/newspaper-default/1.css");
@@ -398,14 +458,14 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.doesNotMatch(await nonexistent.text(), /正式主标题/);
 
   const agentSettings = await getJson(harness.app, "/settings/agent", { cookie });
-  const disabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/todo?reason=todo-disabled", {
+  const disabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites?reason=todo-disabled", {
     headers: { cookie, accept: "text/html" },
   });
   assert.equal(disabledSettings.status, 200);
   const disabledSettingsHtml = await disabledSettings.text();
-  assert.match(disabledSettingsHtml, /个人待办尚未启用/);
+  assert.match(disabledSettingsHtml, /Personal Todo 尚未启用/);
   assert.doesNotMatch(disabledSettingsHtml, /今天的正式任务/);
-  const enabled = await appRequest(harness.app, "https://dailynews.test/settings/todo/enable", {
+  const enabled = await appRequest(harness.app, "https://dailynews.test/settings/sites/todo/enable", {
     method: "POST",
     headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ _csrf: agentSettings.body.csrfToken }).toString(),
@@ -431,28 +491,29 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   for (const heading of ["已逾期", "今天", "接下来", "暂无日期", "今天已完成"]) assert.match(todoHtml, new RegExp(heading));
   assert.match(todoHtml, /今天的正式任务/);
 
-  const enabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/todo", {
+  const enabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites", {
     headers: { cookie, accept: "text/html" },
   });
   const enabledSettingsHtml = await enabledSettings.text();
-  assert.match(enabledSettingsHtml, /当前共有 1 项，其中 1 项未完成/);
+  assert.match(enabledSettingsHtml, /已保留正式 Todo 数据/);
   assert.doesNotMatch(enabledSettingsHtml, /今天的正式任务/);
-  const disableConfirmation = await appRequest(harness.app, "https://dailynews.test/settings/todo/disable", {
+  const disableConfirmation = await appRequest(harness.app, "https://dailynews.test/settings/sites/todo/disable", {
     headers: { cookie, accept: "text/html" },
   });
   assert.equal(disableConfirmation.status, 200);
-  assert.match(await disableConfirmation.text(), /已有任务会完整保留/);
+  assert.match(await disableConfirmation.text(), /已有正式内容会完整保留/);
   assert.equal((await controlPool.query("SELECT enabled FROM app.todo_profiles WHERE space_id = $1", [space.id])).rows[0].enabled, true);
 
-  const disabled = await appRequest(harness.app, "https://dailynews.test/settings/todo/disable", {
+  const disabled = await appRequest(harness.app, "https://dailynews.test/settings/sites/todo/disable", {
     method: "POST",
     headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ _csrf: agentSettings.body.csrfToken }).toString(),
   });
   assert.equal(disabled.status, 303);
+  assert.equal(disabled.headers.get("location"), "/settings/sites?updated=todo-disabled#personal-todo");
   const hiddenTodo = await appRequest(harness.app, "https://dailynews.test/todo/", { headers: { cookie, accept: "text/html" } });
   assert.equal(hiddenTodo.status, 303);
-  assert.equal(hiddenTodo.headers.get("location"), "/settings/todo?reason=todo-disabled");
+  assert.equal(hiddenTodo.headers.get("location"), "/settings/sites?reason=todo-disabled#personal-todo");
   assert.equal((await controlPool.query("SELECT state_payload FROM app.todo_states WHERE space_id = $1", [space.id])).rowCount, 1);
 
   await controlPool.query(
@@ -480,6 +541,133 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   });
   assert.equal(incompleteTheme.status, 503);
   assert.doesNotMatch(await incompleteTheme.text(), /正式主标题|今天的正式任务/);
+});
+
+test("M4 browser settings complete the five-section site, theme, and account journey", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "settings@example.com");
+
+  const settingsRoot = await appRequest(harness.app, "https://dailynews.test/settings", { headers: { cookie, accept: "text/html" } });
+  assert.equal(settingsRoot.status, 303);
+  assert.equal(settingsRoot.headers.get("location"), "/settings/sites");
+
+  const sitesResponse = await appRequest(harness.app, "https://dailynews.test/settings/sites", { headers: { cookie, accept: "text/html" } });
+  assert.equal(sitesResponse.status, 200);
+  const sitesHtml = await sitesResponse.text();
+  for (const label of ["日报站点", "主题库", "Agent 授权", "账户与安全", "高级接入"]) assert.match(sitesHtml, new RegExp(`>${label}<`));
+  assert.match(sitesHtml, /Home 固定在最前/);
+  assert.match(sitesHtml, /id="personal-todo"/);
+  assert.match(sitesHtml, /theme-preview--site/);
+  assert.match(sitesHtml, /现代报纸/);
+  assert.doesNotMatch(sitesHtml, /任务标题|settings\/todo/);
+  const csrf = /name="_csrf" value="([^"]+)"/.exec(sitesHtml)?.[1];
+  assert.ok(csrf);
+
+  const catalogResponse = await appRequest(harness.app, "https://dailynews.test/settings/themes", { headers: { cookie, accept: "text/html" } });
+  assert.equal(catalogResponse.status, 200);
+  const catalogHtml = await catalogResponse.text();
+  for (const name of ["现代报纸", "瑞士编辑", "午夜技术"]) assert.match(catalogHtml, new RegExp(name));
+  assert.match(catalogHtml, /theme-preview/);
+  assert.doesNotMatch(catalogHtml, /· revision|<code>newspaper-default|<code>swiss-editorial|<code>midnight-tech/);
+  assert.doesNotMatch(catalogHtml, /<form|创建主题|编辑主题|删除主题/);
+
+  const homeSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites/home", { headers: { cookie, accept: "text/html" } });
+  assert.equal(homeSettings.status, 200);
+  assert.match(await homeSettings.text(), /配置 Home|固定路径|\/home/);
+  const homeUpdated = await browserForm(harness.app, "/settings/sites/home", cookie, { _csrf: csrf, name: "每日总览", themeMode: "override:swiss-editorial" });
+  assert.equal(homeUpdated.status, 303);
+
+  const crossOrigin = await browserForm(harness.app, "/settings/sites/new", cookie, { _csrf: csrf, name: "Cross Origin", publicationId: "cross-origin", themeMode: "inherit" }, { origin: "https://attacker.example" });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.publications WHERE publication_id = 'cross-origin'")).rows[0].count, 0);
+
+  const invalid = await browserForm(harness.app, "/settings/sites/new", cookie, { _csrf: csrf, name: "  保留输入  ", publicationId: "Invalid_Path", themeMode: "inherit" });
+  assert.equal(invalid.status, 400);
+  const invalidHtml = await invalid.text();
+  assert.match(invalidHtml, /value="  保留输入  "/);
+  assert.match(invalidHtml, /value="Invalid_Path"/);
+  assert.match(invalidHtml, /请检查名称、地址和主题选择/);
+
+  const created = await browserForm(harness.app, "/settings/sites/new", cookie, { _csrf: csrf, name: "产品观察", publicationId: "product-watch", themeMode: "inherit" });
+  assert.equal(created.status, 303);
+  assert.equal(created.headers.get("location"), "/settings/sites?created=product-watch");
+  const createdPage = await appRequest(harness.app, "https://dailynews.test/settings/sites?created=product-watch", { headers: { cookie, accept: "text/html" } });
+  const createdHtml = await createdPage.text();
+  assert.match(createdHtml, /把下一步交给已有 Agent/);
+  assert.match(createdHtml, /data-copy-source="site-instruction"/);
+  assert.match(createdHtml, /产品观察.*\/p\/product-watch\//s);
+  assert.doesNotMatch(createdHtml, /配对码/);
+
+  const configured = await browserForm(harness.app, "/settings/sites/product-watch", cookie, { _csrf: csrf, name: "产品与安全", publicationId: "product-watch", themeMode: "override:midnight-tech" });
+  assert.equal(configured.status, 303);
+  const tenant = await harness.tenancy.resolveTenantContextForUser((await controlPool.query('SELECT "id" FROM auth."user" WHERE "email" = $1', ["settings@example.com"])).rows[0].id);
+  assert.deepEqual((await harness.siteManagement.read(tenant)).home, { name: "每日总览", themeId: "swiss-editorial" });
+  const afterConfigure = await harness.siteManagement.read(tenant);
+  assert.equal(afterConfigure.publications.find(({ publicationId }) => publicationId === "product-watch").name, "产品与安全");
+  assert.deepEqual(afterConfigure.publications.find(({ publicationId }) => publicationId === "product-watch").theme, { mode: "override", themeId: "midnight-tech" });
+
+  const moved = await browserForm(harness.app, "/settings/sites/product-watch/move", cookie, { _csrf: csrf, direction: "up" });
+  assert.equal(moved.status, 303);
+  assert.equal(moved.headers.get("location"), "/settings/sites?updated=moved#site-product-watch");
+  assert.equal((await harness.siteManagement.read(tenant)).publications.find(({ isPrimary }) => isPrimary).publicationId, "product-watch");
+  const movedPage = await appRequest(harness.app, "https://dailynews.test/settings/sites?updated=moved", { headers: { cookie, accept: "text/html" } });
+  assert.match(await movedPage.text(), /日报顺序已更新/);
+
+  const disablePage = await appRequest(harness.app, "https://dailynews.test/settings/sites/product-watch/status/disable", { headers: { cookie, accept: "text/html" } });
+  assert.equal(disablePage.status, 200);
+  assert.match(await disablePage.text(), /已有正式日报仍可从原地址阅读/);
+  const disabled = await browserForm(harness.app, "/settings/sites/product-watch/status/disable", cookie, { _csrf: csrf });
+  assert.equal(disabled.status, 303);
+  assert.equal(disabled.headers.get("location"), "/settings/sites?updated=disabled#site-product-watch");
+  assert.equal((await harness.siteManagement.read(tenant)).publications.find(({ publicationId }) => publicationId === "product-watch").status, "inactive");
+  const restored = await browserForm(harness.app, "/settings/sites/product-watch/status/restore", cookie, { _csrf: csrf });
+  assert.equal(restored.status, 303);
+  assert.equal(restored.headers.get("location"), "/settings/sites?updated=restored#site-product-watch");
+  assert.equal((await harness.siteManagement.read(tenant)).publications.find(({ publicationId }) => publicationId === "product-watch").status, "active");
+
+  const accountResponse = await appRequest(harness.app, "https://dailynews.test/settings/account", { headers: { cookie, accept: "text/html" } });
+  const accountHtml = await accountResponse.text();
+  assert.equal(accountResponse.status, 200);
+  assert.match(accountHtml, /settings@example\.com/);
+  assert.match(accountHtml, /邮箱验证码/);
+  const invalidNickname = await browserForm(harness.app, "/settings/account/nickname", cookie, { _csrf: csrf, nickname: "line\nbreak" });
+  assert.equal(invalidNickname.status, 400);
+  assert.match(await invalidNickname.text(), /昵称需要是 1–24 个可见字符/);
+  assert.equal((await browserForm(harness.app, "/settings/account/nickname", cookie, { _csrf: csrf, nickname: "新昵称" })).status, 303);
+  assert.equal((await harness.profiles.read(tenant.userId)).nickname, "新昵称");
+  assert.equal((await harness.siteManagement.read(tenant)).home.name, "每日总览");
+
+  const other = await harness.tenancy.ensureSpaceForUser("settings-other-user", product.defaults);
+  await harness.siteManagement.createPublication(other, { publicationId: "hidden-settings", name: "Hidden Settings", theme: { mode: "inherit" } });
+  const hiddenSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites/hidden-settings", { headers: { cookie, accept: "text/html" } });
+  assert.equal(hiddenSettings.status, 404);
+  assert.doesNotMatch(await hiddenSettings.text(), /Hidden Settings/);
+
+  for (let index = 2; index <= 7; index += 1) {
+    await harness.siteManagement.createPublication(tenant, {
+      publicationId: `limit-${index}`,
+      name: `Limit ${index}`,
+      theme: { mode: "inherit" },
+    });
+  }
+  const limitPage = await appRequest(harness.app, "https://dailynews.test/settings/sites/new", { headers: { cookie, accept: "text/html" } });
+  assert.equal(limitPage.status, 409);
+  const limitHtml = await limitPage.text();
+  assert.match(limitHtml, /无法新建日报站点/);
+  assert.match(limitHtml, /停用项也计入上限/);
+  assert.doesNotMatch(limitHtml, /disabled/);
+
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/settings/todo", { headers: { cookie, accept: "text/html" } })).status, 404);
+  assert.equal((await appRequest(harness.app, "https://dailynews.test/settings/agent/manual-tokens", { headers: { cookie, accept: "text/html" } })).status, 404);
+  const pat = await harness.agentAccess.issueManualCredential(
+    tenant,
+    { name: "PAT only", operationId: randomUUID() },
+    `req_${randomUUID().replaceAll("-", "")}`,
+    keyedDigest("agent-access-pairing-digest-at-least-32-characters", "browser-test"),
+  );
+  const patOnly = await appRequest(harness.app, "https://dailynews.test/settings/sites", { headers: { authorization: `Bearer ${pat.token}`, accept: "text/html" } });
+  assert.equal(patOnly.status, 303);
+  assert.match(patOnly.headers.get("location"), /^\/login\?returnTo=/);
 });
 
 test("bootstrap pairing refreshes, claims once, verifies once, and persists no plaintext secret", async () => {
@@ -602,12 +790,12 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
 test("manual token operations are CSRF-safe, one-time, tenant-bound, and independently revocable", async () => {
   const harness = createHarness();
   const cookieA = await signIn(harness, "manual-a@example.com");
-  const settingsA = await getJson(harness.app, "/settings/agent/manual-tokens", { cookie: cookieA });
+  const settingsA = await getJson(harness.app, "/settings/advanced", { cookie: cookieA });
   assert.equal(settingsA.response.status, 200);
 
   const crossOrigin = await mutate(
     harness.app,
-    "/settings/agent/manual-tokens",
+    "/settings/advanced/tokens",
     cookieA,
     settingsA.body.csrfToken,
     { name: "跨站请求", operationId: randomUUID() },
@@ -618,7 +806,7 @@ test("manual token operations are CSRF-safe, one-time, tenant-bound, and indepen
   const operationId = randomUUID();
   const created = await mutate(
     harness.app,
-    "/settings/agent/manual-tokens",
+    "/settings/advanced/tokens",
     cookieA,
     settingsA.body.csrfToken,
     { name: "自动化脚本", operationId },
@@ -627,7 +815,7 @@ test("manual token operations are CSRF-safe, one-time, tenant-bound, and indepen
   assert.match(created.body.token, /^dnpat_/);
   const repeated = await mutate(
     harness.app,
-    "/settings/agent/manual-tokens",
+    "/settings/advanced/tokens",
     cookieA,
     settingsA.body.csrfToken,
     { name: "自动化脚本", operationId },
@@ -637,7 +825,7 @@ test("manual token operations are CSRF-safe, one-time, tenant-bound, and indepen
   assert.equal(repeated.body.token, null);
   const conflict = await mutate(
     harness.app,
-    "/settings/agent/manual-tokens",
+    "/settings/advanced/tokens",
     cookieA,
     settingsA.body.csrfToken,
     { name: "另一项请求", operationId },
@@ -656,13 +844,13 @@ test("manual token operations are CSRF-safe, one-time, tenant-bound, and indepen
 
   const rotatePage = await getJson(
     harness.app,
-    `/settings/agent/manual-tokens/${created.body.credential.id}/rotate`,
+    `/settings/advanced/tokens/${created.body.credential.id}/rotate`,
     { cookie: cookieA },
   );
   assert.equal(rotatePage.response.status, 200);
   const rotated = await mutate(
     harness.app,
-    `/settings/agent/manual-tokens/${created.body.credential.id}/rotate`,
+    `/settings/advanced/tokens/${created.body.credential.id}/rotate`,
     cookieA,
     rotatePage.body.csrfToken,
     { name: "自动化脚本（新）", operationId: rotatePage.body.operationId },
@@ -671,7 +859,7 @@ test("manual token operations are CSRF-safe, one-time, tenant-bound, and indepen
   assert.match(rotated.body.token, /^dnpat_/);
   const repeatedRotation = await mutate(
     harness.app,
-    `/settings/agent/manual-tokens/${created.body.credential.id}/rotate`,
+    `/settings/advanced/tokens/${created.body.credential.id}/rotate`,
     cookieA,
     rotatePage.body.csrfToken,
     { name: "自动化脚本（新）", operationId: rotatePage.body.operationId },
@@ -694,7 +882,7 @@ test("manual token operations are CSRF-safe, one-time, tenant-bound, and indepen
   assert.deepEqual(statuses.rows.map(({ status }) => status), ["rotated", "active"]);
   const revoked = await mutate(
     harness.app,
-    `/settings/agent/manual-tokens/${rotated.body.credential.id}/revoke`,
+    `/settings/advanced/tokens/${rotated.body.credential.id}/revoke`,
     cookieA,
     rotatePage.body.csrfToken,
   );
@@ -713,7 +901,7 @@ test("credential quota serializes concurrent creation and pairing refresh consum
   const pairing = settings.body.pairings[0];
   const attempts = await Promise.all(Array.from({ length: 12 }, (_, index) => mutate(
     harness.app,
-    "/settings/agent/manual-tokens",
+    "/settings/advanced/tokens",
     cookie,
     settings.body.csrfToken,
     { name: `Agent ${index + 1}`, operationId: randomUUID() },

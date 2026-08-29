@@ -563,7 +563,7 @@ export class AgentOperationsService {
           schemaVersion: 1,
           maximumOperations: this.config.todoOperationLimit,
         },
-        settingsUrl: this.absolutePath("/settings/todo"),
+        settingsUrl: this.absolutePath("/settings/sites#personal-todo"),
       };
       return snapshot.enabled ? { ...base, revision: revisionOf(snapshot.state) } : base;
     } catch (error) {
@@ -597,7 +597,7 @@ export class AgentOperationsService {
           schemaVersion: 1,
           maximumOperations: this.config.todoOperationLimit,
         },
-        settingsUrl: this.absolutePath("/settings/todo"),
+        settingsUrl: this.absolutePath("/settings/sites#personal-todo"),
       };
       if (!snapshot.enabled) return base;
       return {

@@ -15,6 +15,7 @@ export type AgentAccessErrorCode =
   | "invalid_request"
   | "request_forbidden"
   | "authentication_failed"
+  | "profile_incomplete"
   | "pairing_unavailable"
   | "pairing_in_progress"
   | "credential_limit_reached"

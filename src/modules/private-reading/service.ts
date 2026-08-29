@@ -26,6 +26,11 @@ export interface ReadingShell {
   publication: PublicationRecord;
   theme: ReadingTheme;
   todoEnabled: boolean;
+  nickname?: string | null;
+}
+
+interface ProfileReader {
+  read(userId: string): Promise<{ nickname: string | null } | null>;
 }
 
 export interface DailyReading {
@@ -61,6 +66,7 @@ async function buildReadingShell(
   home: HomeProfileRecord | null,
   publication: PublicationRecord,
   todo: TodoProfileRecord | null,
+  nickname: string | null,
 ): Promise<ReadingShell> {
   const effectiveTheme = await createPostgresThemeStorage(
     pool,
@@ -77,6 +83,7 @@ async function buildReadingShell(
     publication,
     theme: { id: effectiveTheme.themeId, revision: effectiveTheme.revision },
     todoEnabled: todo.enabled,
+    nickname,
   };
 }
 
@@ -86,14 +93,16 @@ export class PrivateReadingService {
     private readonly tenancy: PostgresTenancyStore,
     private readonly systemThemes: SystemThemeReader,
     private readonly now: () => Date = () => new Date(),
+    private readonly profiles?: ProfileReader,
   ) {}
 
   async readShell(tenant: TenantContext): Promise<ReadingShell> {
     const repository = this.tenancy.forTenant(tenant);
-    const [home, publications, todo] = await Promise.all([
+    const [home, publications, todo, profile] = await Promise.all([
       repository.getHomeProfile(),
       repository.listPublications(),
       repository.getTodoProfile(),
+      this.profiles?.read(tenant.userId) ?? Promise.resolve(null),
     ]);
     const publication = publications.find((item) => item.isDefault && item.status === "active");
     if (!publication) {
@@ -101,7 +110,7 @@ export class PrivateReadingService {
     }
     const publicationContext = await this.tenancy.resolvePublicationContext(tenant, publication.publicationId);
     if (!publicationContext) throw new Error("private reading bootstrap is incomplete");
-    return buildReadingShell(this.pool, this.systemThemes, tenant, publicationContext, home, publication, todo);
+    return buildReadingShell(this.pool, this.systemThemes, tenant, publicationContext, home, publication, todo, profile?.nickname ?? null);
   }
 
   async readPublicationShell(tenant: TenantContext, publicationId: string): Promise<ReadingShell | null> {
@@ -109,10 +118,11 @@ export class PrivateReadingService {
     if (!publicationContext) return null;
     const tenantRepository = this.tenancy.forTenant(tenant);
     const publicationRepository = this.tenancy.forPublication(publicationContext);
-    const [publication, home, todo] = await Promise.all([
+    const [publication, home, todo, profile] = await Promise.all([
       publicationRepository.getPublication(),
       tenantRepository.getHomeProfile(),
       tenantRepository.getTodoProfile(),
+      this.profiles?.read(tenant.userId) ?? Promise.resolve(null),
     ]);
     if (!publication) return null;
     return buildReadingShell(
@@ -123,6 +133,7 @@ export class PrivateReadingService {
       home,
       publication,
       todo,
+      profile?.nickname ?? null,
     );
   }
 

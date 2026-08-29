@@ -15,6 +15,10 @@ import { keyedDigest } from "../modules/identity/security.js";
 import { AgentCredentialService } from "../modules/agent-access/credential-service.js";
 import { AgentOperationsService } from "../modules/agent-access/operations.js";
 import { PrivateReadingService } from "../modules/private-reading/service.js";
+import { UserProfileService } from "../modules/identity/profile-service.js";
+import { SiteManagementService } from "../modules/site-management/service.js";
+import { SiteThemeCatalogService } from "../modules/site-management/theme-catalog.js";
+import { PostgresSiteManagementRepository } from "../adapters/postgres/site-management.js";
 import { AgentRequestAuthenticator } from "./agent-context.js";
 import { createCloudApp } from "./app.js";
 import { loadCloudConfig, type CloudRuntimeConfig } from "./config.js";
@@ -105,6 +109,13 @@ export async function startCloudServer(options: {
       },
     );
     const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
+    const profiles = new UserProfileService(pool);
+    const privateReading = new PrivateReadingService(pool, tenancy, systemThemes, undefined, profiles);
+    const siteManagement = new SiteManagementService(
+      new PostgresSiteManagementRepository(pool, systemThemes),
+      config.product.defaults,
+      config.product.limits.publicationsPerSpace,
+    );
     const agentOperations = new AgentOperationsService(pool, tenancy, agentRequestPolicy, {
       origin: config.origin,
       basePath: config.basePath,
@@ -119,7 +130,7 @@ export async function startCloudServer(options: {
       basePath: config.basePath,
       identity,
       tenancy,
-      privateReading: new PrivateReadingService(pool, tenancy, systemThemes),
+      privateReading,
       defaults: config.product.defaults,
       agentSettings: {
         origin: config.origin,
@@ -132,6 +143,15 @@ export async function startCloudServer(options: {
         apiBaseUrl: config.agentAccess.apiBaseUrl,
         mcpUrl: config.agentAccess.mcpUrl,
         activeCredentialLimit: config.product.limits.activeTokensPerUser,
+        requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
+      },
+      siteSettings: {
+        origin: config.origin,
+        csrfSecret: config.identity.authSecret,
+        service: siteManagement,
+        themes: new SiteThemeCatalogService(pool, systemThemes),
+        profiles,
+        publicationLimit: config.product.limits.publicationsPerSpace,
         requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
       },
       agentApi: {

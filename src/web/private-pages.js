@@ -14,7 +14,7 @@ for (const button of document.querySelectorAll("[data-copy]")) {
     if (!source) return;
     try {
       await navigator.clipboard.writeText(source.textContent || "");
-      if (status) status.textContent = key === "pairing" ? "配对码已复制。" : "设置话术已复制。";
+      if (status) status.textContent = key === "pairing" ? "配对码已复制。" : key === "secret" ? "令牌已复制。" : "设置话术已复制。";
     } catch {
       const selection = window.getSelection();
       const range = document.createRange();
@@ -26,9 +26,44 @@ for (const button of document.querySelectorAll("[data-copy]")) {
   });
 }
 
+for (const form of document.querySelectorAll("[data-settings-form]")) {
+  if (!(form instanceof HTMLFormElement)) continue;
+  const status = form.querySelector("[data-form-status]");
+  const visibleText = (value) => {
+    const normalized = value.trim();
+    return normalized.length > 0 && !/[\u0000-\u001f\u007f-\u009f]/u.test(normalized);
+  };
+  const validate = (input) => {
+    if (!(input instanceof HTMLInputElement) || input.readOnly || input.type === "hidden" || input.type === "radio") return true;
+    const maximum = input.name === "nickname" ? 24 : input.name === "name" ? 40 : undefined;
+    const value = input.value.trim();
+    const valid = visibleText(value)
+      && (maximum === undefined || [...value].length <= maximum)
+      && (input.name !== "publicationId" || /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value));
+    input.setCustomValidity(valid ? "" : input.name === "publicationId" ? "请使用小写字母、数字和单个连字符。" : `请输入不超过 ${maximum} 个可见字符。`);
+    input.toggleAttribute("aria-invalid", !valid);
+    return valid;
+  };
+  for (const input of form.querySelectorAll("input")) {
+    input.addEventListener("blur", () => {
+      if (!validate(input)) input.reportValidity();
+    });
+    input.addEventListener("input", () => validate(input));
+  }
+  form.addEventListener("submit", (event) => {
+    const valid = [...form.querySelectorAll("input")].every(validate) && form.checkValidity();
+    if (!valid) {
+      event.preventDefault();
+      form.reportValidity();
+      if (status) status.textContent = "请先修正标出的内容。";
+      return;
+    }
+  });
+}
+
 const oneTimeSecret = document.querySelector('[data-copy-source="secret"]');
 if (oneTimeSecret instanceof HTMLElement) {
-  window.history.replaceState(null, "", `${basePath}/settings/agent/manual-tokens`);
+  window.history.replaceState(null, "", `${basePath}/settings/advanced`);
   window.addEventListener("pagehide", () => {
     oneTimeSecret.textContent = "";
   }, { once: true });
@@ -71,13 +106,13 @@ if (pairingRoot instanceof HTMLElement && pairingRoot.dataset.pairingStatus !== 
   }, 5000);
 }
 
-if (window.location.hash && body.dataset.page === "todo") {
+if (window.location.hash) {
   const target = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
   const status = document.querySelector("[data-anchor-status]");
   if (target instanceof HTMLElement) {
     target.focus({ preventScroll: true });
     target.scrollIntoView({ block: "center" });
-  } else if (status instanceof HTMLElement) {
+  } else if (body.dataset.page === "todo" && status instanceof HTMLElement) {
     status.hidden = false;
     status.focus();
   }

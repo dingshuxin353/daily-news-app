@@ -2,6 +2,7 @@ import { compileIssue } from "../../scripts/lib/compiler.js";
 import { buildDailyReadingProjection } from "../../scripts/lib/domain/daily-reading.js";
 import type { DailyReading, ReadingShell } from "../modules/private-reading/service.js";
 import type { CredentialRecord, PairingRecord } from "../modules/agent-access/credential-service.js";
+import type { UserProfile } from "../modules/identity/profile-service.js";
 
 type PageName = "public" | "login" | "onboarding" | "home" | "daily" | "todo" | "settings" | "agent-settings" | "pairing";
 
@@ -11,7 +12,7 @@ interface PageShellOptions {
   page: PageName;
   body: string;
   privatePage?: boolean;
-  nav?: { publicationId: string; publicationName: string; todoEnabled: boolean; current: string; themeId: string; themeRevision: number };
+  nav?: { publicationId: string; publicationName: string; todoEnabled: boolean; current: string; themeId: string; themeRevision: number; nickname?: string | null };
   returnTo?: string;
 }
 
@@ -35,9 +36,12 @@ function navigation(basePath: string, nav: NonNullable<PageShellOptions["nav"]>)
     ...(nav.todoEnabled ? [{ key: "todo", href: path(basePath, "/todo/"), label: "个人待办" }] : []),
     { key: "settings", href: path(basePath, "/settings"), label: "编辑部设置" },
   ];
-  return `<nav class="product-nav" aria-label="私人空间">
+  const account = nav.nickname
+    ? `<a class="product-account" href="${escapeHtml(path(basePath, "/settings/account"))}" aria-label="账户：${escapeHtml(nav.nickname)}"><span aria-hidden="true">${escapeHtml([...nav.nickname][0] ?? "你")}</span><strong>${escapeHtml(nav.nickname)}</strong></a>`
+    : "";
+  return `<div class="product-navigation"><nav class="product-nav" aria-label="私人空间">
         ${links.map((link) => `<a href="${escapeHtml(link.href)}"${nav.current === link.key ? ' aria-current="page"' : ""}>${escapeHtml(link.label)}</a>`).join("\n        ")}
-      </nav>
+      </nav>${account}</div>
       <label class="product-nav-select">
         <span>前往</span>
         <select data-page-select>
@@ -198,7 +202,46 @@ function pageNav(shellInput: ReadingShell, current: string) {
     current,
     themeId: shellInput.theme.id,
     themeRevision: shellInput.theme.revision,
+    nickname: shellInput.nickname,
   };
+}
+
+export type SettingsSection = "sites" | "themes" | "agent" | "account" | "advanced";
+
+function settingsNavigation(basePath: string, current: SettingsSection): string {
+  const links: Array<{ key: SettingsSection; href: string; label: string }> = [
+    { key: "sites", href: "/settings/sites", label: "日报站点" },
+    { key: "themes", href: "/settings/themes", label: "主题库" },
+    { key: "agent", href: "/settings/agent", label: "Agent 授权" },
+    { key: "account", href: "/settings/account", label: "账户与安全" },
+    { key: "advanced", href: "/settings/advanced", label: "高级接入" },
+  ];
+  return `<nav class="settings-index" aria-label="设置分类">
+    ${links.map((link, index) => `<a href="${escapeHtml(path(basePath, link.href))}"${current === link.key ? ' aria-current="page"' : ""}><span>${String(index + 1).padStart(2, "0")}</span>${escapeHtml(link.label)}</a>`).join("")}
+  </nav>`;
+}
+
+export function renderSettingsDocument(input: {
+  basePath: string;
+  shell: ReadingShell;
+  current: SettingsSection;
+  title: string;
+  kicker: string;
+  summary: string;
+  content: string;
+}): string {
+  return shell({
+    basePath: input.basePath,
+    title: input.title,
+    page: input.current === "agent" || input.current === "advanced" ? "agent-settings" : "settings",
+    privatePage: true,
+    nav: pageNav(input.shell, "settings"),
+    body: `<main class="settings-main settings-main--indexed" id="content">
+      <header class="settings-heading"><p>${escapeHtml(input.kicker)}</p><h1>${escapeHtml(input.title)}</h1><p>${escapeHtml(input.summary)}</p></header>
+      ${settingsNavigation(input.basePath, input.current)}
+      <div class="settings-workspace">${input.content}</div>
+    </main>`,
+  });
 }
 
 function dailyModule(module: Record<string, any>, index: number): string {
@@ -301,40 +344,6 @@ export function renderTodoPage(input: { basePath: string; shell: ReadingShell; p
   });
 }
 
-export function renderSettingsPage(input: { basePath: string; shell: ReadingShell; csrfToken: string; todoCounts?: { total: number; open: number } }): string {
-  return shell({
-    basePath: input.basePath,
-    title: "编辑部设置",
-    page: "settings",
-    privatePage: true,
-    nav: pageNav(input.shell, "settings"),
-    body: `<main class="settings-main" id="content">
-      <header class="settings-heading"><p>你的私人编辑部</p><h1>编辑部设置</h1><p>这里只显示浏览器能够确认的站点、Todo、授权和账户事实。</p></header>
-      <section class="settings-section" aria-labelledby="settings-publication"><h2 id="settings-publication">日报站点</h2><dl><div><dt>站点名称</dt><dd>${escapeHtml(input.shell.publication.displayName)}</dd></div><div><dt>私有路径</dt><dd>/p/${escapeHtml(input.shell.publication.publicationId)}/</dd></div><div><dt>当前主题</dt><dd>${escapeHtml(input.shell.theme.id)} · ${input.shell.theme.revision}</dd></div></dl><a class="button button--quiet" href="${escapeHtml(path(input.basePath, `/p/${encodeURIComponent(input.shell.publication.publicationId)}/`))}">打开站点</a></section>
-      <section class="settings-section" aria-labelledby="settings-todo"><h2 id="settings-todo">Personal Todo</h2><p class="paper-label">${input.shell.todoEnabled ? "已启用" : "未启用"}</p><p>${input.shell.todoEnabled ? "关闭后 Agent 新写入会失败；现有任务会保留。" : "启用后 Agent 才能保存个人任务。"}</p>${input.todoCounts ? `<p>当前共有 ${input.todoCounts.total} 项，其中 ${input.todoCounts.open} 项未完成。</p>` : ""}${input.shell.todoEnabled ? `<a class="button button--danger" href="${escapeHtml(path(input.basePath, "/settings/todo/disable"))}">关闭 Personal Todo</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/todo/"))}">查看个人待办 →</a>` : `<form method="post" action="${escapeHtml(path(input.basePath, "/settings/todo/enable"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><button class="button" type="submit">启用并继续</button></form>`}</section>
-      <section class="settings-section" aria-labelledby="settings-agents"><h2 id="settings-agents">Agent 授权</h2><p>管理每条独立授权与新的 Agent 连接。</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/settings/agent"))}">管理 Agent 授权</a></section>
-      <section class="settings-section" aria-labelledby="settings-account"><h2 id="settings-account">账户与安全</h2><p>浏览器会话与 Agent 授权彼此独立。</p><form data-logout-form><button class="text-link" type="submit">退出登录</button></form></section>
-      <section class="settings-section" aria-labelledby="settings-advanced"><h2 id="settings-advanced">高级接入</h2><p>脚本与特殊客户端可以使用手动 Token、JSON API 和 OpenAPI 契约。</p><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent/manual-tokens"))}">进入手动接入 →</a></section>
-    </main>`,
-  });
-}
-
-export function renderTodoSettingsPage(input: { basePath: string; shell: ReadingShell; csrfToken: string; todoCounts?: { total: number; open: number }; reason?: string }): string {
-  return shell({
-    basePath: input.basePath,
-    title: "Personal Todo 设置",
-    page: "settings",
-    privatePage: true,
-    nav: pageNav(input.shell, "settings"),
-    body: `<main class="settings-main" id="content">
-      <header class="settings-heading"><p>编辑部设置</p><h1>Personal Todo</h1><p>个人待办只读取正式 Todo State，所有修改仍由你的 Agent 完成。</p></header>
-      ${input.reason === "todo-disabled" ? '<p class="form-status" role="status">个人待办尚未启用。确认启用后，再回到 Agent 继续刚才的任务。</p>' : ""}
-      <section class="settings-section" aria-labelledby="todo-status"><h2 id="todo-status">当前状态</h2><p class="paper-label">${input.shell.todoEnabled ? "已启用" : "未启用"}</p><p>${input.shell.todoEnabled ? "Agent 可以读取和提交个人任务。关闭后新写入会失败，但已有任务仍会保留。" : "启用后 Agent 才能保存个人任务；启用操作不会自动创建任务。"}</p>${input.todoCounts ? `<p>当前共有 ${input.todoCounts.total} 项，其中 ${input.todoCounts.open} 项未完成。这里不展示任务标题。</p>` : ""}${input.shell.todoEnabled ? `<a class="button button--danger" href="${escapeHtml(path(input.basePath, "/settings/todo/disable"))}">关闭 Personal Todo</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/todo/"))}">查看个人待办 →</a>` : `<form method="post" action="${escapeHtml(path(input.basePath, "/settings/todo/enable"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><button class="button" type="submit">启用并继续</button></form>`}</section>
-      <a class="text-link" href="${escapeHtml(path(input.basePath, "/settings"))}">返回编辑部设置</a>
-    </main>`,
-  });
-}
-
 function instruction(setupUrl: string): string {
   return `请帮我把 DailyNews 用起来。\n请只从 ${setupUrl} 读取当前接入说明，并按说明帮我完成配置。\n读完后先向我要页面当前显示的配对码，不要让我手工配置 PAT、MCP、API、Cron 或完整提示词。\n连接成功后，继续问我想长期关注什么、希望什么时候更新；由你在自己的运行环境中建立定时任务，并立即生成第一份日报让我确认。\n不要在回复、日志或项目文件中输出长期凭证；只询问真正缺失的信息，其他使用安全默认值。`;
 }
@@ -369,7 +378,7 @@ export function renderOnboardingPage(input: { basePath: string; shell: ReadingSh
       <header class="onboarding-heading"><p>${input.firstUse === false ? "新增独立授权" : "第一次连接"}</p><h1>${input.firstUse === false ? "连接另一个 Agent" : "把这段话发给你的 Agent"}</h1><p>先复制完整话术。等 Agent 读完官方说明并主动索要时，再单独发送当前配对码。</p></header>
       <section class="onboarding-step" aria-labelledby="instruction-title"><div class="step-number">1</div><div><h2 id="instruction-title">复制设置话术</h2><pre data-copy-source="instruction">${escapeHtml(text)}</pre><button class="button" type="button" data-copy="instruction">复制给 Agent</button><p class="copy-status" data-copy-status="instruction" aria-live="polite"></p></div></section>
       <section class="onboarding-step" aria-labelledby="pairing-title"><div class="step-number">2</div><div><h2 id="pairing-title">等 Agent 向你索要配对码</h2><p class="paper-label" data-pairing-label>${escapeHtml(pairingStatus(input.pairing.status))}</p>${pairingBody}${cancelForm}<p class="security-note">配对码短时有效，只能准备这一条连接；它不包含长期 PAT，也不能读取你的数据。</p></div></section>
-      <section class="onboarding-finish"><h2>${input.pairing.status === "verified" ? "Agent 已通过验证" : "连接后继续留在 Agent 对话里"}</h2><p>${input.pairing.status === "verified" ? "现在回到 Agent，继续告诉它长期关注什么，以及希望什么时候更新。" : "授权只是第一步。Agent 完成验证后，还会继续询问关注内容和更新时间，并立即生成第一份日报。"}</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/home"))}">先看看示例日报</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent/manual-tokens"))}">无法自动连接？查看手动步骤</a></section>
+      <section class="onboarding-finish"><h2>${input.pairing.status === "verified" ? "Agent 已通过验证" : "连接后继续留在 Agent 对话里"}</h2><p>${input.pairing.status === "verified" ? "现在回到 Agent，继续告诉它长期关注什么，以及希望什么时候更新。" : "授权只是第一步。Agent 完成验证后，还会继续询问关注内容和更新时间，并立即生成第一份日报。"}</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/home"))}">先看看示例日报</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">无法自动连接？查看手动步骤</a></section>
     </main>`,
   });
 }
@@ -377,24 +386,26 @@ export function renderOnboardingPage(input: { basePath: string; shell: ReadingSh
 export function renderAgentSettingsPage(input: { basePath: string; shell: ReadingShell; credentials: CredentialRecord[]; pairings: Array<PairingRecord & { code?: string | null }>; csrfToken: string; operationId: string; activeLimit: number }): string {
   const active = input.credentials.filter((item) => item.status === "active");
   const pending = input.pairings.find((item) => item.status !== "verified" && item.status !== "cancelled");
-  return shell({
+  return renderSettingsDocument({
     basePath: input.basePath,
+    shell: input.shell,
+    current: "agent",
     title: "Agent 授权",
-    page: "agent-settings",
-    privatePage: true,
-    nav: pageNav(input.shell, "settings"),
-    body: `<main class="settings-main" id="content"><header class="settings-heading"><p>Agent Access</p><h1>Agent 授权</h1><p>这里只显示服务端能够确认的授权与最近请求，不判断 Agent 是否在线。</p></header><section class="settings-section"><div class="section-heading"><h2>当前授权</h2><span>${active.length} / ${input.activeLimit}</span></div>${active.length ? `<div class="agent-list">${active.map((item) => `<article><div><p class="paper-label">已授权</p><h3>${escapeHtml(item.name)}</h3><p>创建于 ${escapeHtml(displayTime(item.createdAt, input.shell.timeZone))}</p></div><dl><dt>最近一次请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/agent/connections/${item.id}/remove`))}">移除 Agent</a></article>`).join("")}</div>` : "<p>还没有已授权的 Agent。</p>"}</section><section class="settings-section"><h2>连接另一个 Agent</h2>${active.length >= input.activeLimit ? "<p>授权数量已达上限，请先移除不再使用的 Agent。</p>" : pending ? `<a class="button" href="${escapeHtml(path(input.basePath, `/settings/agent/connections/${pending.id}/pair`))}">继续当前连接</a>` : `<form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/agent/connections"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="connection-name">连接名称</label><input class="auth-form__input" id="connection-name" name="name" value="我的 Agent" maxlength="80" required><button class="button" type="submit">开始连接</button></form>`}</section><section class="settings-section"><h2>高级接入</h2><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent/manual-tokens"))}">手动 Token 与接口地址 →</a></section></main>`,
+    kicker: "Agent Access",
+    summary: "这里只显示服务端能够确认的授权与最近请求，不判断 Agent 是否在线。",
+    content: `<section class="settings-section"><div class="section-heading"><h2>当前授权</h2><span>${active.length} / ${input.activeLimit}</span></div>${active.length ? `<div class="agent-list">${active.map((item) => `<article><div><p class="paper-label">已授权</p><h3>${escapeHtml(item.name)}</h3><p>创建于 ${escapeHtml(displayTime(item.createdAt, input.shell.timeZone))}</p></div><dl><dt>最近一次请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/agent/connections/${item.id}/remove`))}">移除 Agent</a></article>`).join("")}</div>` : "<p>还没有已授权的 Agent。</p>"}</section><section class="settings-section"><h2>连接另一个 Agent</h2>${active.length >= input.activeLimit ? "<p>授权数量已达上限，请先移除不再使用的 Agent。</p>" : pending ? `<a class="button" href="${escapeHtml(path(input.basePath, `/settings/agent/connections/${pending.id}/pair`))}">继续当前连接</a>` : `<form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/agent/connections"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="connection-name">连接名称</label><input class="auth-form__input" id="connection-name" name="name" value="我的 Agent" maxlength="80" required><button class="button" type="submit">开始连接</button></form>`}</section><section class="settings-section"><h2>高级接入</h2><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">手动 Token 与接口地址 →</a></section>`,
   });
 }
 
 export function renderAdvancedAccessPage(input: { basePath: string; shell: ReadingShell; credentials: CredentialRecord[]; csrfToken: string; operationId: string; apiBaseUrl: string; mcpUrl: string }): string {
-  return shell({
+  return renderSettingsDocument({
     basePath: input.basePath,
+    shell: input.shell,
+    current: "advanced",
     title: "手动接入",
-    page: "agent-settings",
-    privatePage: true,
-    nav: pageNav(input.shell, "settings"),
-    body: `<main class="settings-main" id="content"><header class="settings-heading"><p>Advanced Access</p><h1>手动接入</h1><p>仅用于自己的脚本或不能自动配置的客户端。普通 Agent 接入不需要这里的内容。</p></header><section class="settings-section"><h2>接口地址</h2><dl><div><dt>JSON API</dt><dd><code>${escapeHtml(input.apiBaseUrl)}</code></dd></div><div><dt>MCP</dt><dd><code>${escapeHtml(input.mcpUrl)}</code></dd></div></dl><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent/openapi.yaml"))}">下载 OpenAPI 契约 →</a></section><section class="settings-section"><h2>创建个人访问令牌</h2><p>完整令牌只在本次成功响应中显示一次。每个客户端使用独立令牌，便于单独撤销。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/agent/manual-tokens"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="token-name">连接名称</label><input class="auth-form__input" id="token-name" name="name" maxlength="80" required><button class="button" type="submit">创建令牌</button></form></section><section class="settings-section"><h2>令牌记录</h2>${input.credentials.length ? `<div class="agent-list">${input.credentials.map((item) => `<article><div><p class="paper-label">${escapeHtml(item.status)}</p><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.tokenHint)}</p></div><dl><dt>最近请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl>${item.status === "active" ? `<div class="record-actions"><a href="${escapeHtml(path(input.basePath, `/settings/agent/manual-tokens/${item.id}/rotate`))}">轮换</a><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/agent/manual-tokens/${item.id}/revoke`))}">撤销</a></div>` : ""}</article>`).join("")}</div>` : "<p>还没有手动令牌。</p>"}</section></main>`,
+    kicker: "Advanced Access",
+    summary: "仅用于自己的脚本或不能自动配置的客户端。普通 Agent 接入不需要这里的内容。",
+    content: `<section class="settings-section"><h2>接口地址</h2><dl><div><dt>JSON API</dt><dd><code>${escapeHtml(input.apiBaseUrl)}</code></dd></div><div><dt>MCP</dt><dd><code>${escapeHtml(input.mcpUrl)}</code></dd></div></dl><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced/openapi.yaml"))}">下载 OpenAPI 契约 →</a></section><section class="settings-section"><h2>创建个人访问令牌</h2><p>完整令牌只在本次成功响应中显示一次。每个客户端使用独立令牌，便于单独撤销。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/advanced/tokens"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="token-name">连接名称</label><input class="auth-form__input" id="token-name" name="name" maxlength="80" required><button class="button" type="submit">创建令牌</button></form></section><section class="settings-section"><h2>令牌记录</h2>${input.credentials.length ? `<div class="agent-list">${input.credentials.map((item) => `<article><div><p class="paper-label">${escapeHtml(item.status)}</p><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.tokenHint)}</p></div><dl><dt>最近请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl>${item.status === "active" ? `<div class="record-actions"><a href="${escapeHtml(path(input.basePath, `/settings/advanced/tokens/${item.id}/rotate`))}">轮换</a><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/advanced/tokens/${item.id}/revoke`))}">撤销</a></div>` : ""}</article>`).join("")}</div>` : "<p>还没有手动令牌。</p>"}</section>`,
   });
 }
 
@@ -405,7 +416,45 @@ export function renderCredentialSecretPage(input: { basePath: string; shell: Rea
     page: "agent-settings",
     privatePage: true,
     nav: pageNav(input.shell, "settings"),
-    body: `<main class="empty-reading secret-page" id="content"><p>一次性凭证</p><h1>${escapeHtml(input.title)}</h1>${input.token ? `<p>这是唯一一次显示完整令牌。请立即保存到客户端的安全凭证存储，不要发送到聊天、日志或项目文件。</p><code class="secret-value" data-copy-source="secret">${escapeHtml(input.token)}</code><button class="button" type="button" data-copy="secret">复制令牌</button><p class="copy-status" data-copy-status="secret" aria-live="polite"></p>` : "<p>这个操作已经处理过。为避免重放明文，DailyNews 不会再次显示之前的令牌；如未保存，请重新创建或轮换。</p>"}<a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent/manual-tokens"))}">我已处理，返回高级接入 →</a></main>`,
+    body: `<main class="empty-reading secret-page" id="content"><p>一次性凭证</p><h1>${escapeHtml(input.title)}</h1>${input.token ? `<p>这是唯一一次显示完整令牌。请立即保存到客户端的安全凭证存储，不要发送到聊天、日志或项目文件。</p><code class="secret-value" data-copy-source="secret">${escapeHtml(input.token)}</code><button class="button" type="button" data-copy="secret">复制令牌</button><p class="copy-status" data-copy-status="secret" aria-live="polite"></p>` : "<p>这个操作已经处理过。为避免重放明文，DailyNews 不会再次显示之前的令牌；如未保存，请重新创建或轮换。</p>"}<a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">我已处理，返回高级接入 →</a></main>`,
+  });
+}
+
+export function renderNicknameOnboardingPage(input: {
+  basePath: string;
+  shell: ReadingShell;
+  csrfToken: string;
+  nickname?: string;
+  error?: string;
+}): string {
+  return shell({
+    basePath: input.basePath,
+    title: "先写下你的称呼",
+    page: "onboarding",
+    privatePage: true,
+    nav: pageNav(input.shell, ""),
+    body: `<main class="onboarding-main onboarding-main--profile" id="content"><header class="onboarding-heading"><p>第一次使用</p><h1>先写下你的称呼</h1><p>之后的私人编辑部会用这个昵称称呼你。它不会从邮箱地址猜测。</p></header><form class="settings-form" method="post" action="${escapeHtml(path(input.basePath, "/onboarding/nickname"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><div class="form-field"><label for="nickname">昵称</label><input class="auth-form__input" id="nickname" name="nickname" value="${escapeHtml(input.nickname ?? "")}" maxlength="24" aria-describedby="nickname-help nickname-error"${input.error ? ' aria-invalid="true"' : ""} required autofocus><p id="nickname-help" class="form-helper">1–24 个可见字符，保存后仍可在账户设置中修改。</p>${input.error ? `<p id="nickname-error" class="form-error" role="alert">${escapeHtml(input.error)}</p>` : '<p id="nickname-error" class="form-error" aria-live="polite"></p>'}</div><button class="button" type="submit">保存并继续连接 Agent</button><p class="form-status" data-form-status aria-live="polite"></p></form></main>`,
+  });
+}
+
+export function renderAccountSettingsPage(input: {
+  basePath: string;
+  shell: ReadingShell;
+  csrfToken: string;
+  profile: UserProfile;
+  nickname?: string;
+  error?: string;
+  saved?: boolean;
+}): string {
+  const nickname = input.nickname ?? input.profile.nickname ?? "";
+  return renderSettingsDocument({
+    basePath: input.basePath,
+    shell: input.shell,
+    current: "account",
+    title: "账户与安全",
+    kicker: "Account",
+    summary: "管理浏览器账户的称呼与当前登录会话。Agent 授权在单独的栏目中管理。",
+    content: `${input.saved ? '<p class="form-status" role="status">昵称已保存。</p>' : ""}<section class="settings-section"><h2>个人资料</h2><form class="settings-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/account/nickname"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><div class="form-field"><label for="account-nickname">昵称</label><input class="auth-form__input" id="account-nickname" name="nickname" value="${escapeHtml(nickname)}" maxlength="24" aria-describedby="account-nickname-help account-nickname-error"${input.error ? ' aria-invalid="true"' : ""} required><p id="account-nickname-help" class="form-helper">1–24 个可见字符。</p>${input.error ? `<p id="account-nickname-error" class="form-error" role="alert">${escapeHtml(input.error)}</p>` : '<p id="account-nickname-error" class="form-error" aria-live="polite"></p>'}</div><button class="button" type="submit">保存昵称</button><p class="form-status" data-form-status aria-live="polite"></p></form></section><section class="settings-section settings-section--spec"><h2>登录身份</h2><dl><div><dt>邮箱</dt><dd>${escapeHtml(input.profile.email)}</dd></div><div><dt>认证方式</dt><dd>邮箱验证码</dd></div></dl></section><section class="settings-section"><h2>当前会话</h2><p>退出只结束当前浏览器会话，不会撤销 Agent 的独立授权。</p><form data-logout-form><button class="button button--quiet" type="submit">退出当前会话</button></form></section>`,
   });
 }
 
