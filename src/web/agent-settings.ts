@@ -4,6 +4,7 @@ import type { CloudFileConfig } from "../cloud/config.js";
 import type { PostgresTenancyStore, TenantContext } from "../adapters/postgres/tenancy.js";
 import type { PrivateReadingService } from "../modules/private-reading/service.js";
 import type { IdentityService } from "../modules/identity/auth.js";
+import type { UserProfileService } from "../modules/identity/profile-service.js";
 import {
   AgentAccessError,
   type AgentCredentialService,
@@ -24,6 +25,7 @@ export interface AgentSettingsDependencies {
   origin: string;
   csrfSecret: string;
   identity: IdentityService;
+  profiles?: UserProfileService;
   tenancy: PostgresTenancyStore;
   privateReading?: PrivateReadingService;
   defaults: CloudFileConfig["defaults"];
@@ -79,10 +81,15 @@ function responseError(context: Context, error: unknown, currentRequestId: strin
     ? error
     : new AgentAccessError(503, "service_unavailable", "服务暂时不可用，请稍后重试。");
   if (safe.status === 401 && context.req.method === "GET" && context.req.header("accept")?.includes("text/html")) {
-    const settingsIndex = context.req.path.indexOf("/settings/agent");
+    const settingsIndex = context.req.path.indexOf("/settings/");
     const basePath = settingsIndex >= 0 ? context.req.path.slice(0, settingsIndex) : "";
     const target = `${context.req.path}${new URL(context.req.url).search}`;
     return context.redirect(`${basePath}/login?returnTo=${encodeURIComponent(target)}`, 303);
+  }
+  if (safe.code === "profile_incomplete" && context.req.method === "GET" && context.req.header("accept")?.includes("text/html")) {
+    const settingsIndex = context.req.path.indexOf("/settings/");
+    const basePath = settingsIndex >= 0 ? context.req.path.slice(0, settingsIndex) : "";
+    return context.redirect(`${basePath}/onboarding`, 303);
   }
   if (safe.status === 401 && context.req.path.endsWith("/agent-pairing/v1/verify")) {
     context.header("WWW-Authenticate", "Bearer");
@@ -116,6 +123,9 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
   async function browserAccess(context: Context, currentRequestId: string): Promise<BrowserAccessContext> {
     const session = await dependencies.identity.getSession(context.req.raw, dependencies.clientIpResolver(context));
     if (!session) throw new AgentAccessError(401, "authentication_failed", "请先登录后再继续。");
+    if (dependencies.profiles && !(await dependencies.profiles.read(session.user.id))?.complete) {
+      throw new AgentAccessError(409, "profile_incomplete", "请先填写昵称后再连接 Agent。");
+    }
     const tenant = await dependencies.tenancy.ensureSpaceForUser(session.user.id, dependencies.defaults);
     const actorDigest = dependencies.digestActor("session", `${session.session.id}:${session.user.id}`);
     await dependencies.agentAccess.ensureBootstrapPairing(tenant, currentRequestId, actorDigest);
@@ -277,7 +287,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     return context.json({ credential: credentialSummary(credential), requestId: currentRequestId });
   }));
 
-  app.get(route("/settings/agent/manual-tokens"), (context) => run(context, async (currentRequestId) => {
+  app.get(route("/settings/advanced"), (context) => run(context, async (currentRequestId) => {
     const access = await browserAccess(context, currentRequestId);
     const credentials = await dependencies.agentAccess.listCredentials(access.tenant);
     const operationId = randomUUID();
@@ -302,7 +312,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     });
   }));
 
-  app.post(route("/settings/agent/manual-tokens"), (context) => run(context, async (currentRequestId) => {
+  app.post(route("/settings/advanced/tokens"), (context) => run(context, async (currentRequestId) => {
     const { access, body } = await browserMutation(context, currentRequestId);
     const result = await dependencies.agentAccess.issueManualCredential(
       access.tenant,
@@ -326,7 +336,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     }, result.repeated ? 200 : 201);
   }));
 
-  app.get(route("/settings/agent/manual-tokens/:id/rotate"), (context) => run(context, async (currentRequestId) => {
+  app.get(route("/settings/advanced/tokens/:id/rotate"), (context) => run(context, async (currentRequestId) => {
     const access = await browserAccess(context, currentRequestId);
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
@@ -338,7 +348,8 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
         shell: await dependencies.privateReading.readShell(access.tenant),
         title: `轮换 ${credential.name}？`,
         description: "旧令牌会立即失效，新令牌只显示一次。请先确认客户端能够安全保存新凭证。",
-        action: route(`/settings/agent/manual-tokens/${credential.id}/rotate`),
+        action: route(`/settings/advanced/tokens/${credential.id}/rotate`),
+        cancelPath: "/settings/advanced",
         csrfToken: access.csrfToken,
         submitLabel: "轮换并显示新令牌",
         hidden: { name: credential.name, operationId },
@@ -352,7 +363,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     });
   }));
 
-  app.post(route("/settings/agent/manual-tokens/:id/rotate"), (context) => run(context, async (currentRequestId) => {
+  app.post(route("/settings/advanced/tokens/:id/rotate"), (context) => run(context, async (currentRequestId) => {
     const { access, body } = await browserMutation(context, currentRequestId);
     const result = await dependencies.agentAccess.rotateCredential(
       access.tenant,
@@ -377,7 +388,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     }, result.repeated ? 200 : 201);
   }));
 
-  app.get(route("/settings/agent/manual-tokens/:id/revoke"), (context) => run(context, async (currentRequestId) => {
+  app.get(route("/settings/advanced/tokens/:id/revoke"), (context) => run(context, async (currentRequestId) => {
     const access = await browserAccess(context, currentRequestId);
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
@@ -388,7 +399,8 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
         shell: await dependencies.privateReading.readShell(access.tenant),
         title: `撤销 ${credential.name}？`,
         description: "这个令牌会立即失效；它已经提交的正式内容不会删除。",
-        action: route(`/settings/agent/manual-tokens/${credential.id}/revoke`),
+        action: route(`/settings/advanced/tokens/${credential.id}/revoke`),
+        cancelPath: "/settings/advanced",
         csrfToken: access.csrfToken,
         submitLabel: "撤销令牌",
       }));
@@ -396,7 +408,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     return context.json({ credential: credentialSummary(credential, true), csrfToken: access.csrfToken, requestId: currentRequestId });
   }));
 
-  app.post(route("/settings/agent/manual-tokens/:id/revoke"), (context) => run(context, async (currentRequestId) => {
+  app.post(route("/settings/advanced/tokens/:id/revoke"), (context) => run(context, async (currentRequestId) => {
     const { access } = await browserMutation(context, currentRequestId);
     const credential = await dependencies.agentAccess.revokeCredential(
       access.tenant,
@@ -404,7 +416,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       currentRequestId,
       access.actorDigest,
     );
-    if (wantsHtml(context)) return context.redirect(route("/settings/agent/manual-tokens"), 303);
+    if (wantsHtml(context)) return context.redirect(route("/settings/advanced"), 303);
     return context.json({ credential: credentialSummary(credential, true), requestId: currentRequestId });
   }));
 

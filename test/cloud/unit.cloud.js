@@ -24,6 +24,8 @@ import {
 import {
   renderHomePage,
   renderLoginPage,
+  renderAccountSettingsPage,
+  renderNicknameOnboardingPage,
   renderPublicPage,
 } from "../../.cloud-dist/src/web/private-pages.js";
 import {
@@ -331,6 +333,36 @@ test("M3 public and sample Home pages keep confirmed copy, privacy boundaries, a
   assert.match(homeHtml, /设置自动日报/);
   assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
   assert.match(homeHtml, /data-theme-id="newspaper-default"/);
+});
+
+test("M4 settings shell exposes exactly five sections and keeps nickname independent from site names", () => {
+  const shell = {
+    spaceName: "Home 名称",
+    timeZone: "Asia/Shanghai",
+    publication: { publicationId: "daily-news", displayName: "日报名称", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
+    theme: { id: "newspaper-default", revision: 1 },
+    todoEnabled: false,
+    nickname: "丁丁",
+  };
+  const account = renderAccountSettingsPage({
+    basePath: "/cloud",
+    shell,
+    csrfToken: "csrf-placeholder",
+    profile: { userId: "user", email: "reader@example.test", nickname: "丁丁", complete: true },
+  });
+  for (const label of ["日报站点", "主题库", "Agent 授权", "账户与安全", "高级接入"]) {
+    assert.match(account, new RegExp(`>${label}<`));
+  }
+  assert.equal((account.match(/class="settings-index"/g) ?? []).length, 1);
+  assert.match(account, /aria-label="账户：丁丁"/);
+  assert.match(account, /reader@example\.test/);
+  assert.match(account, /邮箱验证码/);
+  assert.doesNotMatch(account, /settings\/todo|manual-tokens|Home 名称|日报名称.*昵称/);
+
+  const onboarding = renderNicknameOnboardingPage({ basePath: "/cloud", shell: { ...shell, nickname: null }, csrfToken: "csrf-placeholder", nickname: " 保留输入 " , error: "昵称需要是 1–24 个可见字符。" });
+  assert.match(onboarding, /value=" 保留输入 "/);
+  assert.match(onboarding, /昵称需要是 1–24 个可见字符/);
+  assert.doesNotMatch(onboarding, /配对码|PAT|MCP/);
 });
 
 test("PG_SSL_MODE is the authoritative pg Pool TLS setting", async () => {
@@ -873,10 +905,10 @@ function agentApiTestApp(overrides = {}) {
       return { publicationId, date, revision: 1 };
     },
     async getTodoContext() {
-      return { enabled: false, settingsUrl: "https://dailynews.test/settings/todo" };
+      return { enabled: false, settingsUrl: "https://dailynews.test/settings/sites#personal-todo" };
     },
     async getTodo() {
-      return { enabled: false, settingsUrl: "https://dailynews.test/settings/todo" };
+      return { enabled: false, settingsUrl: "https://dailynews.test/settings/sites#personal-todo" };
     },
     async getTodoState() {
       throw new Error("disabled Todo must not be read");
@@ -1346,7 +1378,7 @@ function agentMcpTestApp(options = {}) {
       return {
         enabled: true,
         candidateRules: { schemaVersion: 1, maximumOperations: 100 },
-        settingsUrl: "https://dailynews.test/settings/todo",
+        settingsUrl: "https://dailynews.test/settings/sites#personal-todo",
         revision: 0,
       };
     },

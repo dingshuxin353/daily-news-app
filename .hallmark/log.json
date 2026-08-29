@@ -12,5 +12,12 @@
     "theme": "Newsprint",
     "enrichment": "approved transparent private-newsroom illustration",
     "brief": "M3-C public entry, onboarding, private Daily reading, Todo, and settings"
+  },
+  {
+    "date": "2026-08-29",
+    "macrostructure": "Index-First",
+    "theme": "Newsprint",
+    "enrichment": "none",
+    "brief": "M4-C five-section settings, multi-publication controls, theme catalog, and account experience"
   }
 ]

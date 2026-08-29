@@ -294,6 +294,44 @@ export class PostgresSiteManagementRepository implements SiteManagementRepositor
     });
   }
 
+  updatePublication(
+    tenant: TenantContext,
+    publicationId: string,
+    input: { name: string; theme: { mode: "inherit" } | { mode: "override"; themeId: string } },
+  ): Promise<SiteManagementSnapshot> {
+    return this.transaction(tenant, async (client) => {
+      if (input.theme.mode === "override") {
+        await this.assertThemeAvailable(client, tenant, input.theme.themeId);
+      }
+      const publication = await client.query(
+        `UPDATE app.publications
+         SET display_name = $3, updated_at = clock_timestamp()
+         WHERE space_id = $1 AND publication_id = $2`,
+        [tenant.spaceId, publicationId, input.name],
+      );
+      if (publication.rowCount !== 1) {
+        throw new SiteManagementError("SITE_TARGET_NOT_FOUND", "publication is unavailable");
+      }
+      const selection = await client.query(
+        `UPDATE app.theme_selections
+         SET selection_mode = $3,
+             theme_id = $4,
+             updated_at = clock_timestamp()
+         WHERE space_id = $1 AND publication_id = $2 AND target_type = 'publication'`,
+        [
+          tenant.spaceId,
+          publicationId,
+          input.theme.mode,
+          input.theme.mode === "override" ? input.theme.themeId : null,
+        ],
+      );
+      if (selection.rowCount !== 1) {
+        throw new SiteManagementError("SITE_TARGET_NOT_FOUND", "publication is unavailable");
+      }
+      return readSnapshot(client, tenant);
+    });
+  }
+
   reorderPublications(tenant: TenantContext, publicationIds: string[]): Promise<SiteManagementSnapshot> {
     return this.transaction(tenant, async (client) => {
       const current = await activePublicationIds(client, tenant.spaceId);
@@ -304,6 +342,25 @@ export class PostgresSiteManagementRepository implements SiteManagementRepositor
         throw new SiteManagementError("SITE_INPUT_INVALID", "publication order must contain every active publication");
       }
       await rewriteActiveOrder(client, tenant.spaceId, publicationIds);
+      return readSnapshot(client, tenant);
+    });
+  }
+
+  movePublication(
+    tenant: TenantContext,
+    publicationId: string,
+    direction: "up" | "down",
+  ): Promise<SiteManagementSnapshot> {
+    return this.transaction(tenant, async (client) => {
+      const current = await activePublicationIds(client, tenant.spaceId);
+      const index = current.indexOf(publicationId);
+      if (index < 0) {
+        throw new SiteManagementError("SITE_TARGET_NOT_FOUND", "publication is unavailable");
+      }
+      const nextIndex = direction === "up" ? index - 1 : index + 1;
+      if (nextIndex < 0 || nextIndex >= current.length) return readSnapshot(client, tenant);
+      [current[index], current[nextIndex]] = [current[nextIndex], current[index]];
+      await rewriteActiveOrder(client, tenant.spaceId, current);
       return readSnapshot(client, tenant);
     });
   }

@@ -12,6 +12,7 @@ import { createPostgresThemeStorage } from "../../.cloud-dist/src/adapters/postg
 import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/tenancy.js";
 import { ProfileError, UserProfileService } from "../../.cloud-dist/src/modules/identity/profile-service.js";
 import { SiteManagementError, SiteManagementService } from "../../.cloud-dist/src/modules/site-management/service.js";
+import { SiteThemeCatalogService } from "../../.cloud-dist/src/modules/site-management/theme-catalog.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationsDirectory = path.join(projectRoot, "db", "migrations");
@@ -224,6 +225,59 @@ test("Publication create serializes conflicts and rolls every dependent row back
   assert.deepEqual(rollbackFacts, { publication_count: 0, config_count: 0, selection_count: 0 });
 });
 
+test("browser-facing Publication save is atomic and locked moves never lose an active item", async () => {
+  const tenant = await createTenant("m4-browser-save-user");
+  await sites.createPublication(tenant, { publicationId: "alpha", name: "Alpha", theme: { mode: "inherit" } });
+  await sites.createPublication(tenant, { publicationId: "beta", name: "Beta", theme: { mode: "inherit" } });
+
+  const updated = await sites.updatePublication(tenant, "alpha", {
+    name: "Alpha Updated",
+    theme: { mode: "override", themeId: "swiss-editorial" },
+  });
+  assert.deepEqual(updated.publications.find(({ publicationId }) => publicationId === "alpha"), {
+    publicationId: "alpha",
+    name: "Alpha Updated",
+    status: "active",
+    sortOrder: 1,
+    isPrimary: false,
+    theme: { mode: "override", themeId: "swiss-editorial" },
+  });
+
+  await pool.query(`
+    CREATE FUNCTION app.reject_m4_browser_theme_update() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.publication_id = 'alpha' AND NEW.theme_id = 'midnight-tech' THEN
+        RAISE EXCEPTION 'injected browser theme failure';
+      END IF;
+      RETURN NEW;
+    END
+    $$;
+    CREATE TRIGGER reject_m4_browser_theme_update BEFORE UPDATE ON app.theme_selections
+      FOR EACH ROW EXECUTE FUNCTION app.reject_m4_browser_theme_update();
+  `);
+  await assert.rejects(
+    () => sites.updatePublication(tenant, "alpha", {
+      name: "Must Roll Back",
+      theme: { mode: "override", themeId: "midnight-tech" },
+    }),
+    (error) => error instanceof SiteManagementError && error.code === "SITE_STORAGE_FAILED",
+  );
+  const afterFailure = (await sites.read(tenant)).publications.find(({ publicationId }) => publicationId === "alpha");
+  assert.equal(afterFailure.name, "Alpha Updated");
+  assert.deepEqual(afterFailure.theme, { mode: "override", themeId: "swiss-editorial" });
+
+  const moves = await Promise.all([
+    sites.movePublication(tenant, "beta", "up"),
+    sites.movePublication(tenant, "daily-news", "down"),
+  ]);
+  for (const snapshot of moves) {
+    assert.deepEqual(new Set(snapshot.publications.filter(({ status }) => status === "active").map(({ publicationId }) => publicationId)), new Set(["daily-news", "alpha", "beta"]));
+  }
+  const final = (await sites.read(tenant)).publications.filter(({ status }) => status === "active");
+  assert.deepEqual(final.map(({ sortOrder }) => sortOrder), [0, 1, 2]);
+  assert.equal(final.filter(({ isPrimary }) => isPrimary).length, 1);
+});
+
 test("Site management and custom theme reads remain scoped to the resolved Space", async () => {
   const first = await createTenant("m4-isolation-a");
   const second = await createTenant("m4-isolation-b");
@@ -269,6 +323,18 @@ test("Theme selections follow current revisions while official IDs cannot be sha
   const official = await homeThemes.readCurrentTheme("newspaper-default");
   assert.equal(official.source, "official");
   assert.ok(!(await homeThemes.listThemes()).some(({ themeId, source }) => themeId === "newspaper-default" && source === "custom"));
+});
+
+test("browser theme catalog returns fixed safe previews without compiled CSS", async () => {
+  const tenant = await createTenant("m4-browser-theme-user");
+  const catalog = await new SiteThemeCatalogService(pool, systemThemes).list(tenant);
+  assert.deepEqual(catalog.map(({ themeId }) => themeId), ["midnight-tech", "newspaper-default", "swiss-editorial"]);
+  for (const theme of catalog) {
+    assert.equal(theme.source, "official");
+    assert.match(theme.preview.background, /^#[0-9A-F]{6}$/i);
+    assert.deepEqual(Object.keys(theme.preview).sort(), ["accent", "background", "muted", "rule", "text"]);
+    assert.doesNotMatch(JSON.stringify(theme), /compiledCss|compiled_css|:root/);
+  }
 });
 
 test("Todo formal-data projection and explicit nicknames preserve independent facts atomically", async () => {

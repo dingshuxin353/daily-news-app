@@ -52,7 +52,16 @@ export interface SiteManagementRepository {
     publicationLimit: number;
   }): Promise<SiteManagementSnapshot>;
   renamePublication(tenant: TenantContext, publicationId: string, name: string): Promise<SiteManagementSnapshot>;
+  updatePublication(tenant: TenantContext, publicationId: string, input: {
+    name: string;
+    theme: { mode: "inherit" } | { mode: "override"; themeId: string };
+  }): Promise<SiteManagementSnapshot>;
   reorderPublications(tenant: TenantContext, publicationIds: string[]): Promise<SiteManagementSnapshot>;
+  movePublication(
+    tenant: TenantContext,
+    publicationId: string,
+    direction: "up" | "down",
+  ): Promise<SiteManagementSnapshot>;
   setPublicationStatus(
     tenant: TenantContext,
     publicationId: string,
@@ -151,6 +160,18 @@ export class SiteManagementService {
     );
   }
 
+  updatePublication(
+    tenant: TenantContext,
+    publicationId: unknown,
+    input: { name: unknown; theme: unknown },
+  ): Promise<SiteManagementSnapshot> {
+    requireTenantContext(tenant);
+    return this.repository.updatePublication(tenant, requirePublicationId(publicationId), {
+      name: normalizeVisibleName(input.name, 40, "publication name"),
+      theme: normalizeTheme(input.theme),
+    });
+  }
+
   reorderPublications(tenant: TenantContext, publicationIds: unknown): Promise<SiteManagementSnapshot> {
     requireTenantContext(tenant);
     if (
@@ -162,6 +183,18 @@ export class SiteManagementService {
       throw new SiteManagementError("SITE_INPUT_INVALID", "publication order is invalid");
     }
     return this.repository.reorderPublications(tenant, publicationIds);
+  }
+
+  movePublication(
+    tenant: TenantContext,
+    publicationId: unknown,
+    direction: unknown,
+  ): Promise<SiteManagementSnapshot> {
+    requireTenantContext(tenant);
+    if (direction !== "up" && direction !== "down") {
+      throw new SiteManagementError("SITE_INPUT_INVALID", "publication move direction is invalid");
+    }
+    return this.repository.movePublication(tenant, requirePublicationId(publicationId), direction);
   }
 
   setPublicationStatus(

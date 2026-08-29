@@ -10,26 +10,23 @@ import type { AgentCredentialService } from "../modules/agent-access/credential-
 import type { AgentRequestAuthenticator } from "./agent-context.js";
 import type { AgentOperationsService } from "../modules/agent-access/operations.js";
 import type { PrivateReadingService } from "../modules/private-reading/service.js";
+import type { SiteManagementService } from "../modules/site-management/service.js";
+import type { SiteThemeCatalogService } from "../modules/site-management/theme-catalog.js";
+import type { UserProfileService } from "../modules/identity/profile-service.js";
 import type { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
 import { renderSpacePage } from "../web/cloud-pages.js";
 import {
   renderDailyPage,
-  renderConfirmPage,
   renderHomePage,
   renderLoginPage,
+  renderNicknameOnboardingPage,
   renderOnboardingPage,
   renderPublicPage,
-  renderSettingsPage,
-  renderTodoSettingsPage,
   renderTodoPage,
 } from "../web/private-pages.js";
 import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
-import {
-  assertBrowserMutation,
-  createSettingsCsrfToken,
-  readSettingsBody,
-  resolveTrustedExternalOrigin,
-} from "../web/settings-security.js";
+import { registerSiteSettingsRoutes } from "../web/site-settings.js";
+import { createSettingsCsrfToken, resolveTrustedExternalOrigin } from "../web/settings-security.js";
 import { registerAgentApiRoutes } from "../protocols/http-api/routes.js";
 import { registerAgentMcpRoute } from "../protocols/mcp/routes.js";
 
@@ -50,6 +47,15 @@ export interface CloudAppDependencies {
     apiBaseUrl: string;
     mcpUrl: string;
     activeCredentialLimit: number;
+    requestBodyLimitBytes: number;
+  };
+  siteSettings?: {
+    origin: string;
+    csrfSecret: string;
+    service: SiteManagementService;
+    themes: SiteThemeCatalogService;
+    profiles: UserProfileService;
+    publicationLimit: number;
     requestBodyLimitBytes: number;
   };
   agentApi?: {
@@ -110,7 +116,11 @@ function safeReturnTo(raw: string | undefined, basePath: string): { path: string
   if (/^\/p\/[a-z0-9]+(?:-[a-z0-9]+)*\/$/.test(localPath) && (!url.search || /^\?date=\d{4}-\d{2}-\d{2}$/.test(url.search))) {
     return { path: `${basePath}${localPath}${url.search}`, label: url.search ? `${url.search.slice(6)} 日报` : "私人日报" };
   }
-  if (localPath === "/settings" || localPath === "/settings/agent" || localPath === "/settings/todo" || localPath === "/onboarding") {
+  if (
+    localPath === "/settings"
+    || /^\/settings\/(?:sites(?:\/home|\/new|\/[a-z0-9]+(?:-[a-z0-9]+)*)?|themes|agent|account|advanced)$/.test(localPath)
+    || localPath === "/onboarding"
+  ) {
     return { path: `${basePath}${localPath}`, label: localPath === "/onboarding" ? "首次使用" : "编辑部设置" };
   }
   return null;
@@ -313,7 +323,10 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         if (!session) return context.redirect(route("/login"), 303);
         const existing = await tenancy.resolveTenantContextForUser(session.user.id);
         const tenant = await tenancy.ensureSpaceForUser(session.user.id, defaults);
-        if (dependencies.agentSettings) {
+        const profile = dependencies.siteSettings
+          ? await dependencies.siteSettings.profiles.read(session.user.id)
+          : null;
+        if (dependencies.agentSettings && (!dependencies.siteSettings || profile?.complete)) {
           await dependencies.agentSettings.service.ensureBootstrapPairing(
             tenant,
             `req_${randomUUID().replaceAll("-", "")}`,
@@ -321,7 +334,9 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
           );
         }
         const target = safeReturnTo(context.req.query("returnTo"), dependencies.basePath);
-        return context.redirect(existing ? target?.path ?? route("/home") : route("/onboarding"), 303);
+        return context.redirect(existing && (!dependencies.siteSettings || profile?.complete)
+          ? target?.path ?? route("/home")
+          : route("/onboarding"), 303);
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
       }
@@ -373,7 +388,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         if (!dependencies.privateReading) return context.text("服务暂时不可用，请稍后重试。", 503);
         const readingShell = await dependencies.privateReading.readShell(access.tenant);
         const todo = await dependencies.privateReading.readTodo(access.tenant);
-        if (!todo.enabled || !todo.projection) return context.redirect(`${route("/settings/todo")}?reason=todo-disabled`, 303);
+        if (!todo.enabled || !todo.projection) return context.redirect(`${route("/settings/sites")}?reason=todo-disabled#personal-todo`, 303);
         return context.html(renderTodoPage({ basePath: dependencies.basePath, shell: readingShell, projection: todo.projection }));
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
@@ -381,104 +396,21 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
     });
 
     if (dependencies.agentSettings && dependencies.privateReading) {
-      app.get(route("/settings"), async (context) => {
-        try {
-          const access = await requirePrivateAccess(context);
-          if (access instanceof Response) return access;
-          const readingShell = await dependencies.privateReading!.readShell(access.tenant);
-          const todo = await dependencies.privateReading!.readTodo(access.tenant);
-          return context.html(renderSettingsPage({
-            basePath: dependencies.basePath,
-            shell: readingShell,
-            csrfToken: createSettingsCsrfToken(dependencies.agentSettings!.csrfSecret, access.session.session.id, access.session.user.id),
-            todoCounts: todo.counts ?? undefined,
-          }));
-        } catch {
-          return context.text("服务暂时不可用，请稍后重试。", 503);
-        }
-      });
-
-      app.get(route("/settings/todo"), async (context) => {
-        try {
-          const access = await requirePrivateAccess(context);
-          if (access instanceof Response) return access;
-          const readingShell = await dependencies.privateReading!.readShell(access.tenant);
-          const todo = await dependencies.privateReading!.readTodo(access.tenant);
-          return context.html(renderTodoSettingsPage({
-            basePath: dependencies.basePath,
-            shell: readingShell,
-            csrfToken: createSettingsCsrfToken(dependencies.agentSettings!.csrfSecret, access.session.session.id, access.session.user.id),
-            todoCounts: todo.counts ?? undefined,
-            reason: context.req.query("reason"),
-          }));
-        } catch {
-          return context.text("服务暂时不可用，请稍后重试。", 503);
-        }
-      });
-
-      app.get(route("/settings/todo/disable"), async (context) => {
-        try {
-          const access = await requirePrivateAccess(context);
-          if (access instanceof Response) return access;
-          const readingShell = await dependencies.privateReading!.readShell(access.tenant);
-          if (!readingShell.todoEnabled) return context.redirect(route("/settings/todo"), 303);
-          return context.html(renderConfirmPage({
-            basePath: dependencies.basePath,
-            shell: readingShell,
-            title: "关闭 Personal Todo？",
-            description: "关闭后 Agent 的新写入会失败，Todo 页面停止展示；已有任务会完整保留，再次启用后恢复。",
-            action: route("/settings/todo/disable"),
-            csrfToken: createSettingsCsrfToken(dependencies.agentSettings!.csrfSecret, access.session.session.id, access.session.user.id),
-            submitLabel: "确认关闭",
-            cancelPath: "/settings/todo",
-            cancelLabel: "保留并返回",
-          }));
-        } catch {
-          return context.text("服务暂时不可用，请稍后重试。", 503);
-        }
-      });
-
-      app.get(route("/settings/agent/openapi.yaml"), async (context) => {
-        try {
-          const access = await requirePrivateAccess(context);
-          if (access instanceof Response) return access;
-          const content = await readFile(new URL("docs/openapi-v1.yaml", `file://${projectRoot}/`), "utf8");
-          return context.body(content, 200, {
-            "Content-Type": "application/yaml; charset=utf-8",
-            "Content-Disposition": 'attachment; filename="dailynews-openapi-v1.yaml"',
-          });
-        } catch {
-          return context.text("服务暂时不可用，请稍后重试。", 503);
-        }
-      });
-
-      for (const [pathname, enabled] of [["/settings/todo/enable", true], ["/settings/todo/disable", false]] as const) {
-        app.post(route(pathname), async (context) => {
-          try {
-            const access = await privateAccess(context);
-            if (!access) return context.redirect(route("/login"), 303);
-            const body = await readSettingsBody(context.req.raw, dependencies.agentSettings!.requestBodyLimitBytes);
-            assertBrowserMutation({
-              request: context.req.raw,
-              requestOrigin: resolveNodeRequestOrigin(context, dependencies.agentSettings!.origin),
-              configuredOrigin: dependencies.agentSettings!.origin,
-              csrfSecret: dependencies.agentSettings!.csrfSecret,
-              sessionId: access.session.session.id,
-              userId: access.session.user.id,
-              body,
-            });
-            await dependencies.privateReading!.setTodoEnabled(access.tenant, enabled);
-            return context.redirect(enabled ? route("/todo/") : route("/settings/todo"), 303);
-          } catch {
-            return context.text("请求未通过安全检查或服务暂时不可用。", 403);
-          }
-        });
-      }
-
       app.get(route("/onboarding"), async (context) => {
         try {
           const access = await requirePrivateAccess(context);
           if (access instanceof Response) return access;
+          if (dependencies.siteSettings) {
+            const profile = await dependencies.siteSettings.profiles.read(access.session.user.id);
+            if (!profile?.complete) {
+              const readingShell = await dependencies.privateReading!.readShell(access.tenant);
+              return context.html(renderNicknameOnboardingPage({
+                basePath: dependencies.basePath,
+                shell: readingShell,
+                csrfToken: createSettingsCsrfToken(dependencies.siteSettings.csrfSecret, access.session.session.id, access.session.user.id),
+              }));
+            }
+          }
           const actor = dependencies.agentSettings!.digestActor("session", `${access.session.session.id}:${access.session.user.id}`);
           const bootstrap = await dependencies.agentSettings!.service.ensureBootstrapPairing(access.tenant, `req_${randomUUID().replaceAll("-", "")}`, actor);
           const pairings = await dependencies.agentSettings!.service.listPairings(access.tenant, `req_${randomUUID().replaceAll("-", "")}`, actor);
@@ -491,6 +423,41 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
             csrfToken: createSettingsCsrfToken(dependencies.agentSettings!.csrfSecret, access.session.session.id, access.session.user.id),
             setupUrl: `${dependencies.agentSettings!.origin}${route("/.well-known/dailynews-agent-setup.json")}`,
           }));
+        } catch {
+          return context.text("服务暂时不可用，请稍后重试。", 503);
+        }
+      });
+    }
+
+    if (dependencies.siteSettings && dependencies.privateReading) {
+      registerSiteSettingsRoutes(app, {
+        basePath: dependencies.basePath,
+        origin: dependencies.siteSettings.origin,
+        csrfSecret: dependencies.siteSettings.csrfSecret,
+        identity,
+        tenancy,
+        privateReading: dependencies.privateReading,
+        defaults,
+        service: dependencies.siteSettings.service,
+        themes: dependencies.siteSettings.themes,
+        profiles: dependencies.siteSettings.profiles,
+        publicationLimit: dependencies.siteSettings.publicationLimit,
+        clientIpResolver: clientIp,
+        requestOriginResolver: (context) => resolveNodeRequestOrigin(context, dependencies.siteSettings!.origin),
+        requestBodyLimitBytes: dependencies.siteSettings.requestBodyLimitBytes,
+      });
+    }
+
+    if (dependencies.agentSettings) {
+      app.get(route("/settings/advanced/openapi.yaml"), async (context) => {
+        try {
+          const access = await requirePrivateAccess(context);
+          if (access instanceof Response) return access;
+          const content = await readFile(new URL("docs/openapi-v1.yaml", `file://${projectRoot}/`), "utf8");
+          return context.body(content, 200, {
+            "Content-Type": "application/yaml; charset=utf-8",
+            "Content-Disposition": 'attachment; filename="dailynews-openapi-v1.yaml"',
+          });
         } catch {
           return context.text("服务暂时不可用，请稍后重试。", 503);
         }
@@ -515,6 +482,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         origin: dependencies.agentSettings.origin,
         csrfSecret: dependencies.agentSettings.csrfSecret,
         identity,
+        profiles: dependencies.siteSettings?.profiles,
         tenancy,
         privateReading: dependencies.privateReading,
         defaults,
