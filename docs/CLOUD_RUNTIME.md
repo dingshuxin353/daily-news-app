@@ -2,7 +2,7 @@
 
 状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B / M3-C / M3-D 与 M4-A 研发能力，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期、M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API、M3-C 的公开与私有页面、M3-D 的双时代远程 MCP，以及 M4-A 的 Publication / 昵称 / 主题 current revision 数据合同。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、Agent 配对和凭证生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4-A / M4-B 的 Publication、昵称和 Agent 自定义主题合同。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 
@@ -52,12 +52,13 @@ Migration Runner 先持有固定的 PostgreSQL 会话级 advisory lock，再在�
 - `0101_create_agent_access.sql`：建立 Agent Pairing、摘要凭证、持久配对限流与最小脱敏审计表。数据库不保存配对码或 PAT 明文。
 - `0102_create_agent_request_layer.sql`：扩展持久 PAT / IP 读写限流，建立跨进程 Space 写入租约，并为 Todo Submission 增加 JSON API / MCP 共用的 `client_run_id`；已有记录一次性生成稳定的 `legacy-<digest>` 键，之后协议幂等键与领域 `candidate_id` 保持独立。
 - `0103_create_m4_domain_contract.sql`：建立显式 `user_profiles` 昵称事实和 `custom_themes` current revision 目录；Publication 改为活动排序派生首要项、停用项无排序，主题选择改为 ID / `inherit` 且读取时解析 current revision；移除云端 `theme_candidates`、固定 `theme_revision` 和激活清单旧字段。
+- `0104_create_theme_agent_operations.sql`：建立 JSON API / MCP 共用的主题写入幂等回执；定义本身继续写入既有不可变 `theme_definitions` 历史表。
 
 `PostgresTenancyStore` 只接受服务端认证得到的用户 ID 来解析或幂等建立唯一 Space。初始化在单一事务中建立 Home、默认 Publication、Publication Config、Home 主题、Publication 继承选择和默认关闭的 Todo Profile；失败会整体回滚，后续调用可以安全重试。面向业务读取的 Repository 必须绑定已解析的 `TenantContext` 或 `PublicationContext`，不提供按任意 `space_id` 进行全表查询的入口。
 
 M2-C 的 `PostgresDailyStorage`、`PostgresTodoStorage` 和 `PostgresThemeStorage` 同样只能由已解析的上下文创建。Daily Coordinator 以 `clientRunId` 和规范化内容摘要实现幂等，并通过 Publication 日期行锁串行化同一天的正式写入；Todo Coordinator 通过 Space 的 Todo Profile 行锁保护状态版本。Candidate、正式状态、编译结果和幂等回执在各自单一事务中提交，编译或最终持久化失败会整体回滚。M4-A 后，主题系统 revision 仍由只读文件 Reader 提供；Space 自定义历史 revision 与 current 指针进入 PostgreSQL，Home / Publication 只保存主题 ID 或 `inherit`。官方主题优先且不能被同 ID 的 Space 数据遮蔽。
 
-Coordinator 只负责把 M1 Application Service 接到 PostgreSQL 事务边界和幂等摘要，不复制或改变 M1 的候选校验、编排、编译和 Todo 冲突规则。M4-A Theme Adapter 只负责官方 / 自定义 current revision 与目标选择解析；云端不再实现 Theme Candidate、Preview、Active Manifest 或网页确认存储路径。M4-B 才会在同一 Validator / Compiler 上增加原子主题写入事务。
+Coordinator 只负责把 M1 Application Service 接到 PostgreSQL 事务边界和幂等摘要，不复制或改变 M1 的候选校验、编排、编译和 Todo 冲突规则。M4-B 复用同一 Theme Validator / Compiler，并通过 Space → Credential → Custom Theme 的锁序原子创建、修改或软删除 current 目录项；非法定义、过期 revision、使用中删除、幂等冲突和持久化失败都不会改变 current revision。云端不实现 Theme Candidate、Preview、Active Manifest 或网页确认存储路径。
 
 M3-B 的 `/api/v1` 只接受活动 PAT。统一请求层从摘要凭证解析唯一 Space，再在该 Space 内二次解析 Publication；请求参数和 Candidate 不能指定或覆盖 `userId` / `spaceId`。读写分别执行持久 PAT / 受信 IP 限流，写入额外受每 Space 的短时跨进程租约限制。GET 不要求请求 `Content-Type`；POST 在完整 JSON 解析前执行 256 KiB 大小检查，并要求 `application/json` 与 `Idempotency-Key`。
 
@@ -67,7 +68,7 @@ M3-C 的私有阅读服务只从 Session 解析出的 Space 进入 PostgreSQL Re
 
 Personal Todo 仍默认关闭。设置页只读取开关与非归档数量，不展示任务标题；关闭时 `/todo/` 不读取保留的 State 正文，直接引导回设置。启用后，Todo 页面只读展示正式 State，并固定按已逾期、今天、接下来、暂无日期和今天已完成分组；浏览器不能直接修改任务。
 
-M3-D 精确锁定 `@modelcontextprotocol/server@2.0.0`、`@modelcontextprotocol/client@2.0.0` 与 `zod@4.2.0`。`POST /mcp` 通过一个 `createMcpHandler` Server Factory 同时服务现代 `2026-07-28` 和无状态兼容 `2025-11-25`，不生成协议 Session，也不注册 GET / DELETE 流。六个工具共享 M3-B 的 `AgentRequestAuthenticator`、`AgentOperationsService`、PostgreSQL 事务、限流、写入租约和 `clientRunId` 幂等状态，不存在第二套 Token 或业务数据路径。
+MCP 精确锁定 `@modelcontextprotocol/server@2.0.0`、`@modelcontextprotocol/client@2.0.0` 与 `zod@4.2.0`。`POST /mcp` 通过一个 `createMcpHandler` Server Factory 同时服务现代 `2026-07-28` 和无状态兼容 `2025-11-25`，不生成协议 Session，也不注册 GET / DELETE 流。十一项 Daily、Todo 与 Theme 工具共享 `AgentRequestAuthenticator`、`AgentOperationsService`、PostgreSQL 事务、限流、写入租约和各领域跨协议幂等状态，不存在第二套 Token 或业务数据路径。
 
 MCP 在解析前按独立的 256 KiB 上限读取请求克隆；原请求保留给官方 SDK。真实 Host、请求目标 Host、Socket 协议、回环 TLS 终止代理和可选浏览器 `Origin` 都必须与 `CLOUD_ORIGIN` 一致，连接元数据不可得时失败关闭。回环 HTTP Origin 还要求进程只绑定回环地址，并在运行时独立拒绝所有非回环连接来源；即使请求 Host 与 Origin 字面一致也不能绕过该边界。现代请求还必须携带 `MCP-Protocol-Version`；其版本、`Mcp-Method`、`Mcp-Name` 与正文一致性由官方 SDK 校验。PAT 在每个 POST 前重新认证并按实际工具区分读写额度；传入 SDK 的认证对象只含脱敏占位 Token 与内部请求上下文，不把原始 PAT 暴露给工具回调。
 
@@ -103,7 +104,7 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
 - `GET /api/v1/publications`、`GET /api/v1/publications/:id/daily-context`、`POST /api/v1/publications/:id/daily-candidates` 与 `GET /api/v1/publications/:id/issues/:date` 提供 Content 正式读写闭环。
 - `GET /api/v1/todo` 与 `POST /api/v1/todo/candidates` 提供 Todo 状态、正式 State 与受控写入；Todo 关闭时不读取保留正文。
-- `POST /mcp` 提供六个 Daily / Todo MCP 工具；只接受 Bearer PAT 与 `application/json`。`GET /mcp`、`DELETE /mcp` 和其他方法固定返回 `405 Allow: POST`。
+- `POST /mcp` 提供十一项 Daily / Todo / Theme MCP 工具；只接受 Bearer PAT 与 `application/json`。`GET /mcp`、`DELETE /mcp` 和其他方法固定返回 `405 Allow: POST`。
 
 所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用独立核对实际 `Host`、HTTP 请求目标中的 Host、Socket 实际传输协议与 `CLOUD_ORIGIN`，只在两个 Host 都严格一致、直接上游地址为回环且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。连接或 Socket 元数据不可得时直接视为不可信；来自非回环地址、缺失或多值的代理协议、absolute-form 请求目标与 `Host` 不一致、Host 不匹配及浏览器 `Origin` 不匹配都会继续拒绝，不能用任意 Origin 或伪造请求目标绕过 CSRF。
 
@@ -129,6 +130,6 @@ M3-B 集成测试覆盖活动 / 撤销 PAT、`last_used_at` 节流触达、PAT �
 
 M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与配对码分离、系统示例不落库、第一份正式日报替换示例、Compiled Edition 顺序和层级、指定日期 404、Todo 浏览器启停、正式 State 五组投影、关闭后不披露保留正文、主题选择链不完整时失败关闭，以及动态 Agent 名称的 HTML 转义。云端单元测试同时验证可见页面使用统一品牌外壳、资源入口和无用户数据的公开边界。
 
-M3-D 协议自动化使用官方 `@modelcontextprotocol/client@2.0.0` 分别执行现代 Discover 和兼容 Initialize，核对同一组六个工具的 `tools/list`、全部 `tools/call`、Instructions、Schema、Annotations、结构化错误、无 Session 与私有响应头。负向测试覆盖 Method、Content-Type、流式超限、Cookie / PAT 混淆、跨 Origin、现代协议版本与方法 / 工具名 Header 错配，以及真实 Node HTTP Adapter 下的 Host、absolute-form 请求目标、回环 TLS 终止和无 Socket 失败关闭。PostgreSQL 集成测试使用同一 PAT 跨 MCP / JSON API 复用相同 Daily `clientRunId`，核对只产生一个正式 revision，并验证轮换后旧 Token 失败、新 Token 同时恢复两种协议。Inspector 基线与客户端配置见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+协议自动化使用官方 `@modelcontextprotocol/client@2.0.0` 分别执行现代 Discover 和兼容 Initialize，核对同一组十一项工具的 `tools/list`、全部 `tools/call`、Instructions、Schema、Annotations、结构化错误、无 Session 与私有响应头。负向测试继续覆盖 Method、Content-Type、流式超限、Cookie / PAT 混淆、跨 Origin、现代协议 Header，以及真实 Node HTTP Adapter 的传输边界。PostgreSQL 集成测试还使用同一 PAT 跨 MCP / JSON API 复用主题 `clientRunId`，覆盖 revision 并发、官方 / 使用中删除拒绝、历史保留、配额和跨 Space 隔离。Inspector 基线与客户端配置见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 M4-A PostgreSQL 集成测试覆盖空库与精确 M3 Schema 升级、Migration 幂等、8 份 Publication 上限、同 Space 名称 / 地址冲突、并发创建、活动排序派生首要项、停用 / 恢复与最后活动项保护、跨 Space 隔离、依赖行写入失败整体回滚、主题 current revision 传播、官方 ID 防遮蔽、Todo 正式数据与开关独立投影，以及昵称写入与身份名称同步的原子性。本地 `npm test` 继续作为文件模式回归。

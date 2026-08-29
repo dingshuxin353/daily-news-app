@@ -1,13 +1,13 @@
 # DailyNews Agent JSON API 与远程 MCP
 
-状态：`v1.0.0` M3-B / M3-D 研发契约，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M4-B 研发契约，不代表云端产品已经发布或部署。
 
 DailyNews 的 Agent JSON API 与远程 MCP 使用设置页一次性签发的同一枚 Personal Access Token（PAT）。浏览器 Cookie 不能代替 PAT，PAT 也不能打开浏览器私有页面。请从 DailyNews 设置中读取真实 API Base URL 与 MCP URL；下面的域名、Token 和内容都是假数据。
 
 ## 安全与重试
 
 - 请求头使用 `Authorization: Bearer <PAT>`；不要把 PAT 放进 URL、Candidate、日志、项目文件或聊天回复。
-- GET 不需要请求 `Content-Type`。POST 只接受 `application/json`，并且必须带 `Idempotency-Key`。
+- GET 与 DELETE 不需要请求 `Content-Type`。POST / PUT 只接受 `application/json`；所有写入都必须带 `Idempotency-Key`。
 - 同一次网络重试复用同一个 key 和完全相同的 JSON；新的用户意图使用新 key。相同 key 携带不同正文会返回 `409 idempotency_conflict`。
 - 响应中的私有页面链接不含凭证；用户打开时仍需自己的浏览器 Session。
 - `401 invalid_token` 不区分错误、过期、轮换或撤销；创建或轮换目标连接密钥后重试。
@@ -19,7 +19,7 @@ DailyNews 的 Agent JSON API 与远程 MCP 使用设置页一次性签发的同�
 
 MCP 端点是设置页或配对结果返回的绝对 `mcpUrl`，路径通常为 `/mcp`。它使用官方 `@modelcontextprotocol/server@2.0.0` 的单一 Server Factory，同时服务现代 `2026-07-28` 与无状态兼容 `2025-11-25`；不会生成 `Mcp-Session-Id`，也不提供 GET 事件流。PAT 是 DailyNews 自定义 Bearer 凭证，不是 MCP OAuth Token。
 
-六个工具由两代协议共用同一业务和幂等状态：
+十一个工具由两代协议共用同一业务和幂等状态：
 
 | 工具 | 作用 |
 | --- | --- |
@@ -29,8 +29,13 @@ MCP 端点是设置页或配对结果返回的绝对 `mcpUrl`，路径通常为 
 | `get_todo_context` | 读取 Todo 是否启用、当前 revision 和 Candidate 限制 |
 | `submit_todo_candidate` | 校验 Candidate，并更新正式 Todo State |
 | `get_todo_state` | 读取最新正式 Todo State；未启用时返回 `todo_disabled` |
+| `get_theme_context` | 读取 Theme Schema、约束、官方 / 自定义主题及使用关系 |
+| `get_theme` | 读取一个可见主题的 current definition、revision 与使用关系 |
+| `create_theme` | 校验、编译并原子创建自定义主题 revision 1 |
+| `update_theme` | 使用 `baseRevision` 原子推进自定义主题 current revision |
+| `delete_theme` | 删除未使用的自定义主题当前目录项，保留历史 revision |
 
-所有工具都返回严格 `outputSchema`、`structuredContent`、简短文本摘要和 `requestId`。读取工具声明为只读且不产生业务副作用；两个提交工具声明为幂等写入。Daily 的 `replace` 可能移除原有条目，因此还声明为可能产生破坏性变化。
+所有工具都返回严格 `outputSchema`、`structuredContent`、简短文本摘要和 `requestId`。读取工具声明为只读且不产生业务副作用；Daily、Todo 与主题写入工具都声明为幂等。Daily 的 `replace` 与主题删除声明为可能产生破坏性变化。
 
 ### 客户端配置
 
@@ -48,7 +53,7 @@ bearer_token_env_var = "DAILYNEWS_PAT"
 export DAILYNEWS_PAT='dnpat_example_only_never_use_this_value'
 ```
 
-连接后先执行 `get_daily_context` 和 `get_todo_context`。未指定日报时，`get_daily_context` 会解析默认项并返回小规模 `availablePublications`；后续写入仍必须使用明确的 `publicationId` 与绝对日期。Content Candidate 与 Todo Candidate 不能混用，也不能指定 Space、正式 revision 或正式 State。
+连接后先执行 `get_daily_context`、`get_todo_context`；处理主题时先执行 `get_theme_context`。未指定日报时，`get_daily_context` 会解析默认项并返回小规模 `availablePublications`；后续写入仍必须使用明确的 `publicationId` 与绝对日期。Content Candidate、Todo Candidate 与主题定义不能混用，也不能指定 Space 或直接写正式状态。
 
 ### 版本化 Agent 接入说明
 
@@ -199,8 +204,12 @@ JSON
 
 Todo 的 `candidateId` 仍是领域标识；`Idempotency-Key` 会规范化为跨 JSON API / MCP 共用的 `clientRunId`。两者不能互相冒充。出现 `409 revision_conflict` 时，重新 GET `/todo`，用最新 `baseRevision` 生成新的 Candidate，并为新意图使用新 key。
 
+## 自定义主题闭环
+
+先读取 `/themes/context`，再按需读取 `/themes/{themeId}`。创建、修改、删除的声明式 Schema、`baseRevision`、`If-Match`、假数据示例与稳定错误处理见根目录 [`AGENT_THEME_GUIDE.md`](../AGENT_THEME_GUIDE.md)。云端没有 Theme Candidate、预览或网页确认路径；Agent 不能修改官方主题或 Home / Publication 的浏览器选择。
+
 ## 当前固定限制
 
-`config/cloud.json` 固定首个部署默认值：JSON API 与 MCP 请求体各 256 KiB；两种协议共用每枚 PAT 每小时读取 600 次、写入 120 次，以及每个受信客户端 IP 每小时读取 1200 次、写入 240 次；每个 Content Candidate 最多 100 条内容，每个 Todo Candidate 最多 100 个操作；每个 Space 最多 2 个并发 Agent 写入。限流事件保留 24 小时，Candidate / Submission 幂等回执保留 90 天，写入租约最长 5 分钟，`last_used_at` 最多每 5 分钟节流更新一次。
+`config/cloud.json` 固定首个部署默认值：JSON API 与 MCP 请求体各 256 KiB；两种协议共用每枚 PAT 每小时读取 600 次、写入 120 次，以及每个受信客户端 IP 每小时读取 1200 次、写入 240 次；每个 Content Candidate 最多 100 条内容，每个 Todo Candidate 最多 100 个操作；每个 Space 最多 24 个当前自定义主题、2 个并发 Agent 写入。限流事件保留 24 小时，Candidate / Submission 幂等回执保留 90 天，写入租约最长 5 分钟，`last_used_at` 最多每 5 分钟节流更新一次。
 
 这些数值属于部署边界，不改变 Candidate、Writer、Compiler 或正式数据语义。

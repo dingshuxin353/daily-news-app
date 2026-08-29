@@ -13,6 +13,10 @@ export type AgentRequestErrorCode =
   | "explicit_confirmation_required"
   | "publication_inactive"
   | "todo_disabled"
+  | "theme_conflict"
+  | "theme_read_only"
+  | "theme_in_use"
+  | "theme_limit_reached"
   | "payload_too_large"
   | "rate_limited"
   | "service_unavailable";

@@ -29,6 +29,11 @@ const API_ROUTES = Object.freeze({
   },
   todo: { method: "get", honoPath: "/todo", path: "/todo" },
   todoCandidates: { method: "post", honoPath: "/todo/candidates", path: "/todo/candidates" },
+  themeContext: { method: "get", honoPath: "/themes/context", path: "/themes/context" },
+  theme: { method: "get", honoPath: "/themes/:themeId", path: "/themes/{themeId}" },
+  createTheme: { method: "post", honoPath: "/themes", path: "/themes" },
+  updateTheme: { method: "put", honoPath: "/themes/:themeId", path: "/themes/{themeId}" },
+  deleteTheme: { method: "delete", honoPath: "/themes/:themeId", path: "/themes/{themeId}" },
 } as const);
 
 export const AGENT_API_ROUTE_CONTRACT = Object.freeze(
@@ -66,7 +71,7 @@ function isDate(value: unknown): value is string {
 async function readJsonBody(request: Request, limit: number): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (contentType !== "application/json") {
-    throw new AgentRequestError(400, "invalid_request", "POST 请求必须使用 application/json。");
+    throw new AgentRequestError(400, "invalid_request", "写入请求必须使用 application/json。");
   }
   const declaredLength = request.headers.get("content-length");
   if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > limit) {
@@ -162,6 +167,29 @@ function parseTodoEnvelope(body: Record<string, unknown>) {
     throw new AgentRequestError(400, "invalid_request", "请求缺少 Todo Candidate。");
   }
   return { candidate: body.candidate };
+}
+
+function parseCreateThemeEnvelope(body: Record<string, unknown>) {
+  requireExactKeys(body, ["theme"]);
+  if (!("theme" in body)) throw new AgentRequestError(400, "invalid_request", "请求缺少主题定义。");
+  return { theme: body.theme };
+}
+
+function parseUpdateThemeEnvelope(body: Record<string, unknown>) {
+  requireExactKeys(body, ["baseRevision", "theme"]);
+  if (!Number.isInteger(body.baseRevision) || (body.baseRevision as number) < 1 || !("theme" in body)) {
+    throw new AgentRequestError(400, "invalid_request", "请求缺少合法的 baseRevision 或主题定义。");
+  }
+  return { baseRevision: body.baseRevision as number, theme: body.theme };
+}
+
+function readBaseRevision(context: Context): number {
+  const value = context.req.header("if-match");
+  const match = value ? /^"([1-9]\d*)"$/.exec(value) : null;
+  if (!match) {
+    throw new AgentRequestError(400, "invalid_request", "If-Match 必须使用带双引号的正整数 revision。");
+  }
+  return Number(match[1]);
 }
 
 function requireSingleDateQuery(context: Context): string | undefined {
@@ -270,6 +298,43 @@ export function registerAgentApiRoutes(app: Hono, dependencies: AgentApiRouteDep
     const clientRunId = readIdempotencyKey(context);
     const envelope = parseTodoEnvelope(await readJsonBody(context.req.raw, dependencies.requestBodyLimitBytes));
     return dependencies.operations.submitTodoCandidate(access, { clientRunId, ...envelope });
+  }));
+
+  app.get(route(API_ROUTES.themeContext.honoPath), (context) => run(context, "read", (access) => {
+    assertNoQuery(context);
+    return dependencies.operations.getThemeContext(access);
+  }));
+
+  app.get(route(API_ROUTES.theme.honoPath), (context) => run(context, "read", (access) => {
+    assertNoQuery(context);
+    return dependencies.operations.getTheme(access, requirePathParameter(context, "themeId"));
+  }));
+
+  app.post(route(API_ROUTES.createTheme.honoPath), (context) => run(context, "write", async (access) => {
+    assertNoQuery(context);
+    const clientRunId = readIdempotencyKey(context);
+    const envelope = parseCreateThemeEnvelope(await readJsonBody(context.req.raw, dependencies.requestBodyLimitBytes));
+    return dependencies.operations.createTheme(access, { clientRunId, ...envelope });
+  }));
+
+  app.put(route(API_ROUTES.updateTheme.honoPath), (context) => run(context, "write", async (access) => {
+    assertNoQuery(context);
+    const clientRunId = readIdempotencyKey(context);
+    const envelope = parseUpdateThemeEnvelope(await readJsonBody(context.req.raw, dependencies.requestBodyLimitBytes));
+    return dependencies.operations.updateTheme(access, {
+      themeId: requirePathParameter(context, "themeId"),
+      clientRunId,
+      ...envelope,
+    });
+  }));
+
+  app.delete(route(API_ROUTES.deleteTheme.honoPath), (context) => run(context, "write", (access) => {
+    assertNoQuery(context);
+    return dependencies.operations.deleteTheme(access, {
+      themeId: requirePathParameter(context, "themeId"),
+      clientRunId: readIdempotencyKey(context),
+      baseRevision: readBaseRevision(context),
+    });
   }));
 
   const unmatched = (context: Context) => run(

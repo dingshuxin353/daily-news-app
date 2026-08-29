@@ -8,7 +8,13 @@ import type { AgentRequestAction } from "../../modules/agent-access/request-poli
 import { AgentRequestError } from "../../modules/agent-access/request-policy.js";
 import { createAgentMcpAuthInfo, createAgentMcpHandler } from "./server.js";
 
-const WRITE_TOOLS = new Set(["submit_daily_candidate", "submit_todo_candidate"]);
+const WRITE_TOOLS = new Set([
+  "submit_daily_candidate",
+  "submit_todo_candidate",
+  "create_theme",
+  "update_theme",
+  "delete_theme",
+]);
 
 export interface AgentMcpRouteDependencies {
   basePath: string;

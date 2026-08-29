@@ -1,164 +1,58 @@
 # DailyNews AI Agent 主题使用指南
 
-指南版本：1.3
-适用产品版本：0.12.1
+指南版本：2.0
+
+适用产品版本：云端 `1.0.0`；本地文件模式 `0.12.1`
+
 Theme Schema：1
-更新日期：2026-08-24
+更新日期：2026-08-29
 
-这份指南告诉外部 AI Agent 如何查看、切换、新增和修改 DailyNews 主题。它只规定 Agent 需要读取的信息、需要生成的文件和主题边界，不要求 Agent 运行主题处理命令或操作浏览器。
+这份指南告诉外部 AI Agent 如何查询和维护 DailyNews 主题。主题只能改变声明式视觉 Token 与 Recipe，不能修改日报内容、布局骨架、页面源码或浏览器主题选择。
 
-如果任务是生成或更新日报内容，请改读 [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md)。主题操作不能修改日报内容和布局。
+开始前先判断宿主提供的是哪一种接入方式：
 
-站点与当前主题配置的说明见 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md)。
+- 云端 `1.0.0`：使用远程 MCP 或 HTTPS JSON API。自定义主题由服务端校验、编译并在一个 PostgreSQL 事务中保存；没有 Theme Candidate、网页预览或确认步骤。
+- 本地文件模式 `0.12.1`：继续使用仓库内 Theme Candidate、预览和用户确认流程。不要把这套文件路径或命令用于云端。
 
-## 1. 先判断任务类型
+生成日报内容请改读 [`AGENT_CONTENT_GUIDE.md`](./AGENT_CONTENT_GUIDE.md)。
 
-| 用户意图 | 正确操作 | 是否创建 Theme Revision |
+## 1. 云端主题能力
+
+优先使用 MCP。宿主只提供 HTTPS JSON API 时，使用设置页给出的 API Base URL 与独立 PAT；不要把 PAT 写入聊天、日志、截图、命令历史或项目文件。
+
+| 意图 | MCP | JSON API |
 | --- | --- | --- |
-| 查看有哪些主题 | 读取当前配置与已保存 Definition | 否 |
-| 切换到已有主题 | 确定目标主题 ID 与 revision | 否 |
-| 新增一个主题 | 使用新 ID 生成 Candidate | 由后续流程创建 |
-| 修改已有主题 | 使用原 ID 生成 Candidate | 由后续流程增加 |
-| 回到上一次选择 | 确定上一次主题 ID 与 revision | 否 |
-| 参考图片调整风格 | 先拆解视觉意图并判断现有主题能力 | 视是否需要 Candidate 而定 |
+| 读取 Schema、主题库和使用关系 | `get_theme_context` | `GET /themes/context` |
+| 读取当前主题定义 | `get_theme` | `GET /themes/{themeId}` |
+| 创建自定义主题 | `create_theme` | `POST /themes` |
+| 修改自定义主题 | `update_theme` | `PUT /themes/{themeId}` |
+| 删除未使用的自定义主题 | `delete_theme` | `DELETE /themes/{themeId}` |
 
-切换不是覆盖：所有正式主题都保存在 `themes/definitions/<theme-id>/<revision>.json`，旧主题和旧 revision 不会因为切换而删除。
+云端主题写入与日报、Todo 共用同一 PAT 鉴权、Space 归属、请求限流和并发写入边界。浏览器 Session 不能替代 PAT。
 
-### 从用户语言解析主题意图
+### 操作顺序
 
-Agent 能读取主题库时，应自己解析主题 ID 和 revision，不要求普通用户提供技术值：
+1. 每次写入前调用 `get_theme_context`，确认 Theme Schema、官方 Preset、配额和使用关系。
+2. 修改或删除前再调用 `get_theme`，保存当前 `revision` 作为 `baseRevision`。
+3. 把用户的视觉意图压缩到 Theme Schema 1 的 Token 与 Recipe；不能提交 HTML、CSS、JavaScript、URL、远程字体或布局指令。
+4. 使用新的 `clientRunId` / `Idempotency-Key` 发起新意图；只有请求完全相同时才复用旧键。
+5. 写入成功后读取主题，核对 `themeId`、current `revision` 和 `affected` 使用摘要。
 
-| 用户表达 | 目标行为 |
-| --- | --- |
-| “跟首页一样”“恢复跟随首页” | 目标 Publication 显式切换为 `inherit` |
-| “这份日报单独用深色科技” | 从主题库选择合适的深色主题，并把目标 Publication 切换为 `override` |
-| “首页换成简洁风格” | 选择匹配的已有主题并切换 Home；所有 `inherit` Publications 随之变化 |
-| “换回上一个主题” | 只对用户明确的 Home 或 Publication 执行受控回滚 |
-| “做一个新的蓝色财经风格” | 生成 Theme Candidate，后续先预览，再由用户确认是否激活 |
+创建从 revision `1` 开始。修改使用乐观并发：`baseRevision` 过期时重新读取，不得盲目覆盖。修改成功会推进 current revision，所有直接或通过 Home 继承使用同一主题 ID 的页面一起生效。
 
-如果同一句话无法唯一判断目标是 Home 还是某份日报，先用人类名称确认目标。Agent 可以在确认摘要中补充解析出的主题 ID 和 revision，但不能反过来要求用户先选择它们。
+### 声明式主题示例
 
-## 2. 开始前读取当前状态
-
-开始前只读查看：
-
-- 用户或宿主明确给出的唯一目标 Publication ID。
-- `config/home.json`：Home 当前固定的主题 ID 和 revision。
-- `publications/<publication-id>/config/theme.json`：目标日报是继承 Home，还是独立覆盖固定主题。
-- `themes/presets/*.json`：Agent 创建 Candidate 时可继承的官方 Preset。
-- `themes/definitions/<theme-id>/<revision>.json`：已保存主题的只读定义。
-- `themes/candidates/<theme-id>.json`：尚在编辑的候选，如果存在。
-
-不要根据文件名猜测当前主题，也不要把 `themes/presets/` 与已经保存的主题库混为一体。
-
-如果 Agent 所在环境支持项目命令，可以使用 `npm run list-themes -- --publication <publication-id>` 辅助读取主题库；这不是完成任务的必要条件。
-
-## 3. 参考图处理与源码边界
-
-用户提供参考图、截图、设计稿、配色样例或“照这个风格做”时，只代表视觉意图，不代表允许修改源码。Agent 按以下顺序处理：
-
-1. 读取目标 Home 或唯一 Publication 当前的主题选择和继承关系。
-2. 把参考特征拆解为 Theme Schema 已支持的颜色、字体预设、字号尺度、密度、分隔方式、纸张质感、动效和内置 recipes。
-3. 先判断现有主题能否满足；不能满足时才创建或修改 Theme Candidate。
-4. Candidate 校验后先形成预览，不直接激活。
-5. 向用户说明已经实现的参考特征，以及受固定产品骨架限制、无法通过主题改变的部分。
-6. 只有用户确认预览后，宿主才可通过受控流程激活主题。
-
-参考图不能授权主题 Agent 修改：
-
-- `src/` 中的页面实现。
-- `styles.css`、`index.html`、`home.html`、`todo.html` 或其他共享页面与公共样式。
-- 页面 DOM、导航、组件结构、四格布局、内容顺序或 Todo 页面结构。
-- Validator、Writer、Compiler、构建脚本、Schema、测试或 CI。
-- 正式主题目录、Active Manifest 或编译产物。
-
-如果用户要求的布局、组件或交互超出上述主题能力，停止源码写入。先用普通人语言说明可能影响哪些页面、其他主题和手机端，以及为什么可能影响以后更新 DailyNews 新版本和使用新功能；提供不改源码的接近版本，并建议把完整效果作为功能需求提交给项目开发者评估。只有用户听完影响并明确确认修改源码后，才能结束主题配置流程，转入 [`CONTRIBUTING.md`](./CONTRIBUTING.md) 规定的开发流程。
-
-“确认激活这个主题”只授权受控激活已校验和预览的主题；“确认修改源码”只授权进入已经说明范围内的最小源码开发。任何一种确认都不授权另一种操作，也不授权推送、PR、合并、Tag、Release、部署或数据迁移。
-
-## 4. 权限边界
-
-Agent 可以直接写入的主题文件只有：
-
-```text
-themes/candidates/<theme-id>.json
-```
-
-Agent 不得直接写入或覆盖：
-
-- `publications/*/config/theme.json`
-- `publications/*/themes/active.json`
-- `themes/presets/`
-- `themes/previews/`
-- `themes/definitions/`
-- `themes/compiled/`
-
-用户可以让 Agent 完成主题切换。支持项目命令的环境可以调用受控切换入口；不支持命令的环境只需明确交付目标主题 ID 和 revision，由宿主环境完成正式切换。不要手工覆盖正式主题文件。
-
-切换和回滚都会改变正式页面。只有用户在当前任务中明确要求相应操作时，Agent 才能提交对应目标或调用受控入口。
-
-## 5. 查看与表达切换目标
-
-Effective Theme 来自 Home 固定主题和目标 Publication 的 `inherit` / `override` 选择，可用主题来自全局 `themes/definitions/`。Agent 应先确认唯一目标是 Home 还是某个 Publication，并确认目标 ID 和 revision 已存在。
-
-如果所在环境支持项目命令，可以使用：
-
-```bash
-npm run list-themes -- --publication <publication-id>
-```
-
-切换到目标主题的最新 revision：
-
-```bash
-npm run switch-theme -- --publication <publication-id> --theme <theme-id> --confirm <theme-id>
-```
-
-切换到指定历史 revision：
-
-```bash
-npm run switch-theme -- --publication <publication-id> --theme <theme-id> --revision <revision> --confirm <theme-id>
-```
-
-显式恢复 Publication 继承，或切换 Home 固定主题：
-
-```bash
-npm run inherit-theme -- --publication <publication-id> --confirm
-npm run switch-theme -- --home --theme <theme-id> --revision <revision> --confirm <theme-id>
-```
-
-命令返回：
-
-- `switched`：配置和 Active Theme 已一起切换。
-- `unchanged`：目标就是当前选择，不需要改动。
-- `rejected`：读取 `field` 和 `reason`；不要直接覆盖文件补救。
-
-不支持项目命令时，Agent 向宿主环境交付目标主题 ID 和 revision 即可。切换不需要 Candidate，也不创建新 revision。
-
-## 6. 新增或修改主题
-
-新增主题时使用新的稳定 ID；修改主题时沿用原主题 ID。两种情况都只写一个 Candidate：
-
-```text
-themes/candidates/<theme-id>.json
-```
-
-文件名必须与 `id` 完全一致。示例：
+下面内容完全虚构，只用于说明字段：
 
 ```json
 {
   "schemaVersion": 1,
-  "id": "blue-finance",
-  "name": "深蓝财经",
-  "description": "克制、紧凑的深蓝财经报纸风格。",
+  "id": "fictional-blue",
+  "name": "虚构深蓝",
+  "description": "只用于接口示例的虚构蓝色编辑主题。",
   "extends": "newspaper-default",
   "tokens": {
-    "colors": {
-      "background": "#F4F1E8",
-      "text": "#10233C",
-      "muted": "#586979",
-      "accent": "#805D18",
-      "rule": "#BCC3C9"
-    },
+    "colors": { "accent": "#2457A7" },
     "typography": {
       "headlinePreset": "serif-cn",
       "uiPreset": "sans-cn",
@@ -173,66 +67,90 @@ themes/candidates/<theme-id>.json
     "masthead": "classic",
     "lead": "split",
     "important": "ruled",
-    "normal": "minimal"
+    "normal": "accent"
   }
 }
 ```
 
-使用要求：
+`extends` 必须是 `get_theme_context` 返回的官方主题 ID。颜色只接受六位十六进制 `#RRGGBB`；主要和次要文字与背景对比度至少为 `4.5:1`。`tokens` 与 `recipes` 都必须存在，并且合计至少真正覆盖一个官方 Preset 值。
 
-- `schemaVersion` 固定为整数 `1`。
-- `id` 只使用小写字母、数字和连字符。
-- `extends` 只能引用 `themes/presets/` 中的官方 Preset，不能继承 Candidate。
-- `tokens` 和 `recipes` 都必须存在，允许部分覆盖，但合计至少实际改变一个视觉值。
-- Candidate 不包含未知字段。
-- 颜色只使用六位十六进制 `#RRGGBB`；主要文字和次要文字与背景对比度不低于 `4.5:1`。
+### JSON API 写入
 
-合法枚举：
+创建：
 
-- `headlinePreset`、`uiPreset`：`serif-cn`、`sans-cn`、`mono`
-- `headlineScale`：`restrained`、`editorial`、`poster`
-- `density`：`compact`、`balanced`、`spacious`
-- `ruleStyle`：`hairline`、`strong`、`double`
-- `surfaceStyle`：`flat`、`paper`、`soft-gradient`
-- `motion`：`none`、`subtle`
-- `masthead`：`compact`、`classic`、`banner`
-- `lead`：`split`、`stacked`、`editorial`
-- `important`：`ruled`、`minimal`、`contrast`
-- `normal`：`compact`、`minimal`、`accent`
+```bash
+curl --request POST "$DAILYNEWS_API_BASE/themes" \
+  --header "Authorization: Bearer $DAILYNEWS_PAT" \
+  --header "Content-Type: application/json" \
+  --header "Idempotency-Key: theme-create-fictional-blue-01" \
+  --data '{"theme":{"schemaVersion":1,"id":"fictional-blue","name":"虚构深蓝","extends":"newspaper-default","tokens":{"colors":{"accent":"#2457A7"}},"recipes":{"normal":"accent"}}}'
+```
 
-## 7. Agent 与宿主环境的分工
+修改请求体为 `{"baseRevision":1,"theme":{...}}`，并使用新的幂等键发送到 `PUT /themes/fictional-blue`。
 
-Agent 新增或修改主题时，只负责把完整 Candidate 保存到 `themes/candidates/<theme-id>.json`，并向用户或宿主环境报告：
+删除没有请求体；把 current revision 放进带双引号的 `If-Match`：
 
-- Candidate 路径
-- 主题 ID 与名称
-- 继承的官方 Preset
-- 本次修改的视觉方向和主要字段
+```bash
+curl --request DELETE "$DAILYNEWS_API_BASE/themes/fictional-blue" \
+  --header "Authorization: Bearer $DAILYNEWS_PAT" \
+  --header "Idempotency-Key: theme-delete-fictional-blue-01" \
+  --header 'If-Match: "2"'
+```
 
-Candidate 的后续处理、正式 revision 写入和当前主题更新由宿主应用、本地脚本、服务端任务或用户自己的工作流决定，不属于本指南的必做步骤。
+完整字段和响应以 [`docs/openapi-v1.yaml`](./docs/openapi-v1.yaml) 为准。
 
-这种分工不依赖 Agent 是否具备终端、浏览器或本地服务能力。
+### 失败恢复
 
-## 8. 禁止内容
+- `revision_conflict`：重新读取主题，用新 revision 和新幂等键表达仍然成立的意图。
+- `idempotency_conflict`：旧键已绑定另一请求；核对意图后换新键，不能改正文后复用旧键。
+- `theme_read_only`：官方主题不可修改或删除；如需变化，创建一个继承它的自定义主题。
+- `theme_in_use`：主题仍被 Home、活动或停用日报使用；请用户先在浏览器选择其他主题，再重试删除。
+- `theme_limit_reached`：当前 Space 已达到自定义主题上限；由用户先调整并删除未使用主题。
+- `schema_invalid`：修正声明式字段、官方继承、枚举或对比度；失败不会产生 revision，也不会改变正式页面。
 
-Candidate 不得包含 HTML、CSS、CSS 选择器、JavaScript、`style`、`@import`、`url()`、远程资源、字体地址、DOM、网格坐标、总栏数、模块所占栏数、断点、隐藏内容规则、负间距、绝对定位、`z-index`、revision、激活或回滚指令。
+删除成功只从当前目录与新选择中移除主题，历史 revision 仍由服务端保留。已删除 ID 不得通过“重新创建”覆盖历史。
 
-主题任务不得修改：
+## 2. 云端禁止边界
 
-- 日报内容、来源或编辑顺序
-- `editorial.priority`
-- 大、中、小模块映射
-- Layout Compiler 输出
-- `publications/*/data/issues/`、`publications/*/data/compiled/` 或 `publications/*/data/index.json`
-- 页面源码、共享样式、组件结构、构建逻辑、Schema、测试或 CI
+Agent 不能：
 
-## 9. Agent 完成条件
+- 修改或删除官方主题。
+- 修改 Home / Publication 的主题选择；选择由用户在浏览器设置中完成。
+- 提交或生成 HTML、CSS、JavaScript、选择器、`style`、`@import`、`url()`、远程资源、字体地址、DOM、网格坐标、断点、隐藏规则、负间距、绝对定位或 `z-index`。
+- 修改日报内容、来源、编辑顺序、`editorial.priority`、四格布局或 Todo 状态。
+- 直接写数据库、Theme Revision、current 指针或主题选择。
+- 把云端写入伪装成本地 Theme Candidate、预览或网页确认。
 
-按任务类型判断 Agent 是否完成：
+参考图只代表视觉意图。先映射到现有 Theme Schema；超出能力时说明限制并停止，不得因此修改共享页面源码。
 
-- **查看**：已返回主题库和当前选择。
-- **切换**：已明确目标主题 ID 和 revision；支持项目命令时可以同时返回切换结果。
-- **新增或修改**：Candidate 已保存到正确路径，并报告主题 ID、继承来源和主要变化。
-- **回滚**：已明确上一次主题 ID 和 revision；支持项目命令时可以同时返回回滚结果。
+## 3. 本地文件模式 `0.12.1`
 
-Agent 不直接覆盖配置、正式 Definition、编译产物或 Active Manifest。
+本地发布基线继续使用历史文件流程：
+
+```text
+themes/candidates/<theme-id>.json
+  → Validator / Compiler
+  → themes/previews/
+  → 用户确认
+  → themes/definitions/ 与 themes/compiled/
+```
+
+主题 Agent 只能直接写 `themes/candidates/<theme-id>.json`。不得直接写：
+
+- `config/home.json`
+- `publications/*/config/theme.json`
+- `publications/*/themes/active.json`
+- `themes/presets/`
+- `themes/previews/`
+- `themes/definitions/`
+- `themes/compiled/`
+
+支持项目命令时，可以运行 `npm run process-theme -- <candidate-path>` 生成预览；只有用户明确确认该预览后，宿主才能运行受控激活命令。本地切换、继承和回滚继续使用仓库已有命令及其 `--confirm` 闸门。云端没有这些文件路径和确认动作。
+
+## 4. 完成条件
+
+- 查询：已返回主题库、来源、current revision 和使用关系。
+- 创建：服务端返回 `created` 或完全相同重试的既有结果，并核对 revision `1`。
+- 修改：服务端返回 `updated` / `unchanged`，并核对 current revision 与受影响目标。
+- 删除：服务端返回 `deleted`，随后当前目录不再返回该主题；历史保留不由 Agent 操作。
+- 失败：说明稳定错误与下一步，确认正式主题事实未被部分改变。

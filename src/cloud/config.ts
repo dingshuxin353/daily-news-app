@@ -25,6 +25,7 @@ export interface CloudFileConfig {
   };
   limits: {
     publicationsPerSpace: number;
+    customThemesPerSpace: number;
     activeTokensPerUser: number;
     testDailyEmailHardLimit: number;
     emailCooldownSeconds: number;
@@ -163,6 +164,7 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
     },
     limits: {
       publicationsPerSpace: requireInteger(limits.publicationsPerSpace, "limits.publicationsPerSpace", 1, 100),
+      customThemesPerSpace: requireInteger(limits.customThemesPerSpace, "limits.customThemesPerSpace", 1, 100),
       activeTokensPerUser: requireInteger(limits.activeTokensPerUser, "limits.activeTokensPerUser", 1, 100),
       testDailyEmailHardLimit: requireInteger(limits.testDailyEmailHardLimit, "limits.testDailyEmailHardLimit", 1, 10000),
       emailCooldownSeconds: requireInteger(limits.emailCooldownSeconds, "limits.emailCooldownSeconds", 1, 3600),
