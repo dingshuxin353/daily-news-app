@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B / M3-C / M3-D 与 M4-A 研发能力，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2-A 至 M2-D、M3-A 至 M3-E 与 M4-A 至 M4-D 研发能力，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、Agent 配对和凭证生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4-A / M4-B 的 Publication、昵称和 Agent 自定义主题合同。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、Agent 配对和凭证生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4 的 Publication、昵称、设置、阅读和 Agent 自定义主题合同。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 

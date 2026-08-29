@@ -1,11 +1,13 @@
 # M3-E 独立集成验收记录
 
-状态：首轮真实本机试运行与非调度矩阵部分完成；认证后的私有页面和 standalone cron 调度运行仍待补齐。本报告不代表 M3-E 已通过。
+状态：最终独立验收通过；用户于 2026-08-28 确认 M3 完成，验收框架经 PR #25 合入版本线。
 
 ## 1. 验收对象
 
 - 独立分支：`test/v1-m3-integration`
 - 精确基线：`origin/version/v1.0.0@734294e80efc349dd3a824ac0bcd9eed856743c2`
+- 最终验收 head：`3e3ee2e44126ce42db917760df7eafce39452cd2`
+- 合入结果：PR #25 以 Squash Merge 进入 `version/v1.0.0@20b0409e1f058e40840f7ad5f34d232f6b84882c`
 - 基线内容：M3-A、M3-B、M3-C、M3-D 均已进入版本线；M3-D 的实际树与已验收 head 一致。
 - 应用源码范围：本分支不修改 `src/`，只增加 `test/m3-e/` 框架、框架单测、验收文档和测试入口。
 - 版本线 CI：[run 33131938811](https://github.com/dingshuxin353/daily-news-app/actions/runs/33131938811)。
@@ -45,7 +47,7 @@
 
 生成证据位于 Git 忽略的 `test-results/m3-e/`，报告和标准输出不包含 PAT、Authorization、Cookie、Session 凭证或用户正文；调度证据只保留受校验的 task/session 标识。
 
-## 4. 待真实环境执行矩阵
+## 4. 真实环境执行矩阵
 
 | 场景 | 当前状态 | 完成证据 |
 | --- | --- | --- |
@@ -54,19 +56,23 @@
 | 官方 MCP Client modern / legacy | 首轮通过 | 真实 HTTP 状态、六工具发现、Instructions 和工具调用摘要 |
 | Daily / Todo 正式写入与读取 | Daily 首轮通过；Todo disabled 通过 | requestId、正式 revision、固定结果摘要 |
 | JSON API / MCP 幂等一致性 | 首轮通过 | 同一 `clientRunId` 的单 revision 与重放结果 |
-| PAT 撤销 / 轮换 | 框架已就绪，待两份临时 PAT | 旧 PAT 被拒绝、新 PAT 成功；凭证不落盘到 Git/日志 |
-| Tenant / Publication / inactive / Todo disabled 隐私 | Todo disabled 已通过真实 MCP/JSON API；私有页面待认证会话 | 跨目标失败关闭、disabled 不读 State 的脱敏结果 |
-| 首轮立即运行 | Daily 首轮已通过；私有页面显示待认证会话 | 首轮 Agent 运行与正式日报结果 |
-| 第二次实际定时运行 | 待 `codex-standalone-cron` | 新任务/临时会话标识、scheduledAt、startedAt、requestId、正式 revision；不能人工触发 |
-| 修改要求后的下一次定时运行 | 待 `codex-standalone-cron` | 新需求 SHA-256、新任务/临时会话、下一次自动触发和变化后的正式结果 |
-| 页面用户旅程 / 深链 | 公开页、未登录深链和回跳参数已通过；认证私有页待会话 | 脱敏页面记录、日期和合法 Todo 锚点保持 |
+| PAT 撤销 / 轮换 | 通过 | 旧 PAT 被拒绝、新 PAT 成功；凭证不落盘到 Git/日志 |
+| Tenant / Publication / inactive / Todo disabled 隐私 | 通过 | 跨目标失败关闭、disabled 不读 State 的脱敏结果 |
+| 首轮立即运行 | 通过，正式 revision 1 | 首轮 Agent 运行与正式日报结果 |
+| 第二次实际定时运行 | 通过，正式 revision 2 | `codex-standalone-cron` 创建独立新任务 / 会话，记录 scheduledAt、startedAt、requestId 与 revision |
+| 修改要求后的下一次定时运行 | 通过，正式 revision 3 | 新需求 SHA-256、独立新任务 / 会话与变化后的正式结果 |
+| 页面用户旅程 / 深链 | 通过 | 认证 Home / Publication / Todo、缺失日期、合法与外部 returnTo 的脱敏记录 |
 
-## 5. 当前环境阻断
+## 5. 最终补充结果与安全清理
 
-本轮环境已由用户提供并完成只读核对；未执行清理脚本，未撤销当前 PAT，也未创建 standalone cron automation。真实 PostgreSQL、监听端点和私有 PAT 已用于首轮测试，但 PAT 内容未输出。
+- 认证后的 Home、正式 Publication、缺失日期和 Todo disabled 页面旅程均通过；桌面 / 移动响应、深链回跳和私有缓存边界有脱敏证据。
+- scheduled-repeat 与 changed-requirement 均由 `codex-standalone-cron` 到点创建独立新任务和会话，不使用人工 follow-up、固定 sleep 或模拟时钟；正式 Daily revision 依次为 2、3，同 key JSON API 重放没有增加 revision。
+- 正式凭证切换验证通过：旧 PAT 被拒绝，replacement PAT 可由官方 MCP Client 完成六工具发现与 Daily Context 读取。
+- 运行证据只保留 requestId、正式 revision、任务 / 会话标识和不可逆摘要；全量扫描未发现 PAT、Bearer、Cookie、OTP、邮箱、API key 或用户正文。
+- 验收结束后已通过正式 logout 使浏览器 Session 失效，撤销 replacement PAT，并清理隔离 PostgreSQL、Node 服务与仓库外凭证目录；数据库 active credential 为 0，回环端口不再监听。
 
-当前仍有两个边界未闭合：正式服务不提供准备阶段的测试邮件读取器且没有可复用浏览器会话，无法安全完成认证后的私有页面旅程；本轮按授权没有创建真实 standalone cron，因此第二次运行和修改要求后的下一次运行仍待独立新任务 / 临时会话触发。后续凭证必须继续通过受限本地文件或安全环境注入，不得放入任务消息、命令行、仓库或报告。
+WorkBuddy、Hermes 和其他未执行客户端继续保持未验证；本验收只证明官方 MCP Client 的 modern / legacy 两时代、真实回环 HTTP、PostgreSQL 15、JSON API 交叉幂等和 Codex standalone cron 路径。
 
 ## 6. 完成判定
 
-本报告和框架已完成 M3-E 首轮真实本机与非调度矩阵的可复查记录，但不构成最终通过。M3-E 仍需认证后的私有页面旅程、由 standalone cron 创建的新任务 / 临时会话完成首轮后的第二次定时运行及修改要求后的下一次运行，以及全部脱敏证据齐备后，才能形成最终通过结论。
+M3-E 对最终验收 head `3e3ee2e44126ce42db917760df7eafce39452cd2` 的独立验收通过；用户于 2026-08-28 确认 M3 完成。该结论不代表 `v1.0.0` 已合入 `main`、部署或发布，也不扩大到未执行的第三方客户端。
