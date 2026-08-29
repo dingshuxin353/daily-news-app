@@ -381,8 +381,8 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
 
   const otherTenant = await harness.tenancy.ensureSpaceForUser("private-reading-other-user", product.defaults);
   await controlPool.query(
-    `INSERT INTO app.publications (space_id, publication_id, display_name, status, is_default, sort_order)
-     VALUES ($1, 'private-other', '其他用户的私密日报', 'active', false, 1)`,
+    `INSERT INTO app.publications (space_id, publication_id, display_name, status, sort_order)
+     VALUES ($1, 'private-other', '其他用户的私密日报', 'active', 1)`,
     [otherTenant.spaceId],
   );
   const crossTenant = await appRequest(harness.app, "https://dailynews.test/p/private-other/?date=2026-08-27", {
@@ -455,7 +455,7 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.equal((await controlPool.query("SELECT state_payload FROM app.todo_states WHERE space_id = $1", [space.id])).rowCount, 1);
 
   await controlPool.query(
-    "UPDATE app.publications SET status = 'inactive' WHERE space_id = $1 AND publication_id = 'daily-news'",
+    "UPDATE app.publications SET status = 'inactive', sort_order = NULL WHERE space_id = $1 AND publication_id = 'daily-news'",
     [space.id],
   );
   const retainedDaily = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", {
@@ -466,12 +466,12 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.match(retainedDailyHtml, /正式主标题/);
   assert.match(retainedDailyHtml, /正式次标题/);
   await controlPool.query(
-    "UPDATE app.publications SET status = 'active' WHERE space_id = $1 AND publication_id = 'daily-news'",
+    "UPDATE app.publications SET status = 'active', sort_order = 0 WHERE space_id = $1 AND publication_id = 'daily-news'",
     [space.id],
   );
 
   await controlPool.query(
-    "UPDATE app.theme_selections SET theme_id = 'missing-theme', theme_revision = 1 WHERE space_id = $1 AND target_type = 'home'",
+    "UPDATE app.theme_selections SET theme_id = 'missing-theme' WHERE space_id = $1 AND target_type = 'home'",
     [space.id],
   );
   const incompleteTheme = await appRequest(harness.app, "https://dailynews.test/home", {

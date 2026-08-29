@@ -56,6 +56,7 @@ export function createIdentityService(options: {
   const deliveryContext = new AsyncLocalStorage<DeliveryContext>();
   const authBasePath = joinPath(config.basePath, "/api/auth");
   const sendOtpPath = joinPath(authBasePath, "/email-otp/send-verification-otp");
+  const genericUserUpdatePath = joinPath(authBasePath, "/update-user");
 
   const auth = betterAuth({
     appName: "DailyNews",
@@ -124,10 +125,14 @@ export function createIdentityService(options: {
   async function handle(request: Request, clientIp: string): Promise<Response> {
     const headers = new Headers(request.headers);
     headers.set("x-dailynews-client-ip", clientIp);
+    const pathname = new URL(request.url).pathname;
     if (isStateChangingRequest(request.method) && request.headers.get("origin") !== config.origin) {
       return Response.json({ error: { code: "request_failed" } }, { status: 403 });
     }
-    if (request.method !== "POST" || new URL(request.url).pathname !== sendOtpPath) {
+    if (request.method === "POST" && pathname === genericUserUpdatePath) {
+      return Response.json({ error: { code: "request_failed" } }, { status: 404 });
+    }
+    if (request.method !== "POST" || pathname !== sendOtpPath) {
       return auth.handler(new Request(request, { headers }));
     }
 

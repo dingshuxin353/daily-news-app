@@ -180,20 +180,44 @@ test("0102 upgrades short legacy Todo candidate IDs to independent valid clientR
   for (const migration of migrations.filter(({ sequence }) => sequence <= 101)) {
     await pool.query(migration.sql);
   }
-  const tenancy = new PostgresTenancyStore(pool);
-  const tenant = await tenancy.ensureSpaceForUser("legacy-todo-user", defaults);
+  const spaceId = randomUUID();
+  await pool.query("INSERT INTO app.spaces (id, user_id, status) VALUES ($1, 'legacy-todo-user', 'ready')", [spaceId]);
+  await pool.query(
+    "INSERT INTO app.home_profiles (space_id, display_name, time_zone) VALUES ($1, '我的日报', 'Asia/Shanghai')",
+    [spaceId],
+  );
+  await pool.query(
+    `INSERT INTO app.publications
+       (space_id, publication_id, display_name, status, is_default, sort_order)
+     VALUES ($1, 'daily-news', 'DailyNews', 'active', true, 0)`,
+    [spaceId],
+  );
+  await pool.query(
+    `INSERT INTO app.publication_configs
+       (space_id, publication_id, time_zone, priority_limits)
+     VALUES ($1, 'daily-news', 'Asia/Shanghai', '{"lead":1,"important":2,"normal":null}'::jsonb)`,
+    [spaceId],
+  );
+  await pool.query(
+    `INSERT INTO app.theme_selections
+       (id, space_id, target_type, publication_id, selection_mode, theme_id, theme_revision)
+     VALUES ($2, $1, 'home', NULL, 'override', 'newspaper-default', 1),
+            ($3, $1, 'publication', 'daily-news', 'inherit', NULL, NULL)`,
+    [spaceId, randomUUID(), randomUUID()],
+  );
+  await pool.query("INSERT INTO app.todo_profiles (space_id, enabled) VALUES ($1, false)", [spaceId]);
   await pool.query(
     `INSERT INTO app.todo_submission_runs
        (space_id, candidate_id, payload_hash, candidate_payload, result_payload)
      VALUES ($1, 'x', $2, $3::jsonb, $4::jsonb)`,
-    [tenant.spaceId, "a".repeat(64), JSON.stringify({ candidateId: "x" }), JSON.stringify({ result: "unchanged" })],
+    [spaceId, "a".repeat(64), JSON.stringify({ candidateId: "x" }), JSON.stringify({ result: "unchanged" })],
   );
   const migration = migrations.find(({ sequence }) => sequence === 102);
   assert.ok(migration);
   await pool.query(migration.sql);
   const upgraded = await pool.query(
     "SELECT candidate_id, client_run_id FROM app.todo_submission_runs WHERE space_id = $1",
-    [tenant.spaceId],
+    [spaceId],
   );
   assert.equal(upgraded.rows[0].candidate_id, "x");
   assert.match(upgraded.rows[0].client_run_id, /^legacy-[0-9a-f]{32}$/);
@@ -348,8 +372,8 @@ test("Daily API enforces future, historical, replace revision, inactive, and ten
   const first = await fixture({ userId: "daily-boundary-a" });
   const secondTenant = await first.tenancy.ensureSpaceForUser("daily-boundary-b", defaults);
   await pool.query(
-    `INSERT INTO app.publications (space_id, publication_id, display_name, status, is_default, sort_order)
-     VALUES ($1, 'private-b', 'Private B', 'active', false, 1)`,
+    `INSERT INTO app.publications (space_id, publication_id, display_name, status, sort_order)
+     VALUES ($1, 'private-b', 'Private B', 'active', 1)`,
     [secondTenant.spaceId],
   );
   await pool.query(
@@ -408,7 +432,10 @@ test("Daily API enforces future, historical, replace revision, inactive, and ten
        (SELECT max(revision)::integer FROM app.compiled_editions WHERE space_id = $1 AND publication_id = 'daily-news') AS compiled_revision`,
     [first.tenant.spaceId],
   )).rows[0];
-  await pool.query("UPDATE app.publications SET status = 'inactive' WHERE space_id = $1 AND publication_id = 'daily-news'", [first.tenant.spaceId]);
+  await pool.query(
+    "UPDATE app.publications SET status = 'inactive', sort_order = NULL WHERE space_id = $1 AND publication_id = 'daily-news'",
+    [first.tenant.spaceId],
+  );
   const inactive = await postJson(first.app, "https://dailynews.test/api/v1/publications/daily-news/daily-candidates", first.headers, "daily-inactive-run", initial);
   assert.equal(inactive.status, 409);
   assert.equal((await inactive.json()).error.code, "publication_inactive");

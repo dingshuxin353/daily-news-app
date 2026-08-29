@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { after, beforeEach } from "node:test";
@@ -7,8 +7,6 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { createDailyApplicationService } from "../../scripts/lib/application/daily-service.js";
-import { createThemeApplicationService } from "../../scripts/lib/application/theme-service.js";
-import { createThemeManifest } from "../../scripts/lib/theme-compiler.js";
 import { createTodoApplicationService } from "../../scripts/lib/application/todo-service.js";
 import { validateCandidateValue } from "../../scripts/lib/domain/content-validation.js";
 import { validateTodoCandidate, validateTodoState } from "../../scripts/lib/domain/todo-validation.js";
@@ -129,24 +127,34 @@ async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
 
-async function themeFileFixture() {
-  const root = await temporaryDirectory("dailynews-theme-equivalence-");
-  await Promise.all([
-    mkdir(path.join(root, "config"), { recursive: true }),
-    mkdir(path.join(root, "themes", "previews"), { recursive: true }),
-    cp(path.join(projectRoot, "themes", "definitions"), path.join(root, "themes", "definitions"), { recursive: true }),
-    cp(path.join(projectRoot, "themes", "compiled"), path.join(root, "themes", "compiled"), { recursive: true }),
-  ]);
-  await writeFile(path.join(root, "config", "theme.json"), `${JSON.stringify({ schemaVersion: 2, mode: "inherit" }, null, 2)}\n`);
-  await writeFile(path.join(root, "config", "home.json"), `${JSON.stringify({
-    schemaVersion: 1,
-    enabled: true,
-    name: "我的日报",
-    accentColor: "#B37721",
-    activeTheme: { id: "newspaper-default", revision: 1 },
-  }, null, 2)}\n`);
-  await cp(path.join(projectRoot, "themes", "active.json"), path.join(root, "themes", "active.json"));
-  return { root, storage: createFileThemeStorage({ rootDir: root }) };
+async function insertCustomTheme(spaceId, themeId, revisions, currentRevision = Math.max(...revisions)) {
+  for (const revision of revisions) {
+    await pool.query(
+      `INSERT INTO app.theme_definitions
+         (space_id, theme_id, revision, definition_payload, compiled_css)
+       VALUES ($1, $2, $3, $4::jsonb, $5)`,
+      [
+        spaceId,
+        themeId,
+        revision,
+        JSON.stringify({
+          schemaVersion: 1,
+          id: themeId,
+          name: `Custom ${themeId}`,
+          revision,
+          tokens: {},
+          recipes: {},
+        }),
+        `:root { --custom-revision: ${revision}; }`,
+      ],
+    );
+  }
+  await pool.query(
+    `INSERT INTO app.custom_themes
+       (space_id, theme_id, display_name, current_revision)
+     VALUES ($1, $2, $3, $4)`,
+    [spaceId, themeId, `Custom ${themeId}`, currentRevision],
+  );
 }
 
 beforeEach(resetAndMigrate);
@@ -361,52 +369,40 @@ test("Todo disabled and persistence failure both fail closed with recoverable st
   assert.equal((await coordinator.submit({ clientRunId: "todo-rollback-run", candidate, now: "2026-08-25T08:01:00+08:00" })).result, "published");
 });
 
-test("Theme PostgreSQL Adapter matches file semantics for preview and activation", async () => {
+test("Theme PostgreSQL Adapter resolves ID-only selections through the current revision", async () => {
   const { tenant, publication } = await createContext("theme-equivalence-user");
   const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
-  const postgresStorage = createPostgresThemeStorage(pool, tenant, systemThemes, createThemeManifest, publication);
-  const { storage: fileStorage } = await themeFileFixture();
-  const preset = await readJson(path.join(projectRoot, "themes", "presets", "newspaper-default.json"));
-  const candidate = {
-    schemaVersion: 1,
-    id: "postgres-theme",
-    name: "PostgreSQL Theme",
-    extends: "newspaper-default",
-    tokens: { colors: { accent: "#A23B2A" } },
-    recipes: {},
-  };
-  const resolved = {
-    ...structuredClone(preset),
-    id: candidate.id,
-    name: candidate.name,
-    extends: candidate.extends,
-    tokens: {
-      ...structuredClone(preset.tokens),
-      colors: { ...structuredClone(preset.tokens.colors), accent: "#A23B2A" },
-    },
-  };
-  const fileService = createThemeApplicationService(fileStorage);
-  const postgresService = createThemeApplicationService(postgresStorage);
-  assert.deepEqual(
-    await postgresService.preview({ candidate, resolved, usesSiteAccent: false }),
-    await fileService.preview({ candidate, resolved, usesSiteAccent: false }),
+  const storage = createPostgresThemeStorage(pool, tenant, systemThemes, publication);
+
+  assert.deepEqual(await storage.readSelection(), { schemaVersion: 3, mode: "inherit" });
+  const inherited = await storage.resolveEffectiveTheme();
+  assert.equal(inherited.themeId, "newspaper-default");
+  assert.equal(inherited.source, "official");
+  assert.equal(inherited.selectionMode, "inherit");
+
+  await insertCustomTheme(tenant.spaceId, "postgres-theme", [1, 2], 2);
+  await pool.query(
+    `UPDATE app.theme_selections
+     SET selection_mode = 'override', theme_id = 'postgres-theme'
+     WHERE space_id = $1 AND publication_id = $2`,
+    [tenant.spaceId, publication.publicationId],
   );
-  assert.deepEqual(
-    await postgresService.activate({ candidate, resolved, usesSiteAccent: false }),
-    await fileService.activate({ candidate, resolved, usesSiteAccent: false }),
+  assert.deepEqual(await storage.readSelection(), {
+    schemaVersion: 3,
+    mode: "override",
+    themeId: "postgres-theme",
+  });
+  assert.equal((await storage.resolveEffectiveTheme()).revision, 2);
+
+  await pool.query(
+    `UPDATE app.custom_themes SET current_revision = 1
+     WHERE space_id = $1 AND theme_id = 'postgres-theme'`,
+    [tenant.spaceId],
   );
-  assert.deepEqual(await postgresStorage.readThemeRevision("postgres-theme", 1), await fileStorage.readThemeRevision("postgres-theme", 1));
-  assert.deepEqual(await postgresStorage.readSelection(), await fileStorage.readSelection());
-  assert.deepEqual(await postgresStorage.readActive(), await fileStorage.readActive());
-  assert.deepEqual(await postgresService.list(), await fileService.list());
-  assert.deepEqual(
-    await postgresService.switch({ themeId: "newspaper-default", revision: 1 }),
-    await fileService.switch({ themeId: "newspaper-default", revision: 1 }),
-  );
-  assert.deepEqual(await postgresService.rollback(), await fileService.rollback());
-  assert.deepEqual(await postgresService.inherit(), await fileService.inherit());
-  assert.deepEqual(await postgresStorage.readSelection(), await fileStorage.readSelection());
-  assert.deepEqual(await postgresStorage.readActive(), await fileStorage.readActive());
+  const effective = await storage.resolveEffectiveTheme();
+  assert.equal(effective.revision, 1);
+  assert.equal(effective.source, "custom");
+  assert.match(effective.css, /custom-revision: 1/);
 });
 
 test("Daily, Todo, and Theme records remain isolated by resolved tenant context", async () => {
@@ -434,49 +430,28 @@ test("Daily, Todo, and Theme records remain isolated by resolved tenant context"
   assert.equal((await todoB.storage.readState()).revision, 0);
 
   const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
-  const themeA = createPostgresThemeStorage(pool, first.tenant, systemThemes, createThemeManifest, first.publication);
-  const themeB = createPostgresThemeStorage(pool, second.tenant, systemThemes, createThemeManifest, second.publication);
-  const manifest = {
-    schemaVersion: 1,
-    themeId: "isolated-theme",
-    revision: 0,
-    compilerVersion: "1",
-    candidateHash: "a".repeat(64),
-    inputHash: "b".repeat(64),
-    cssPath: "/themes/previews/isolated-theme.css",
-    status: "preview-ready",
-  };
-  await themeA.writePreview("isolated-theme", { manifest, css: "/* isolated */" });
-  assert.equal(await themeB.readPreview("isolated-theme"), null);
+  const themeA = createPostgresThemeStorage(pool, first.tenant, systemThemes, first.publication);
+  const themeB = createPostgresThemeStorage(pool, second.tenant, systemThemes, second.publication);
+  await insertCustomTheme(first.tenant.spaceId, "isolated-theme", [1]);
+  assert.equal((await themeA.readCurrentTheme("isolated-theme")).themeId, "isolated-theme");
+  assert.equal(await themeB.readCurrentTheme("isolated-theme"), null);
 });
 
-test("Theme storage preserves system revisions while adding a Space revision with the same ID", async () => {
+test("Theme storage retains historical custom revisions while hiding deleted current themes", async () => {
   const { tenant, publication } = await createContext("theme-system-user");
   const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
-  const storage = createPostgresThemeStorage(pool, tenant, systemThemes, createThemeManifest, publication);
-  const service = createThemeApplicationService(storage);
-  const preset = await readJson(path.join(projectRoot, "themes", "presets", "newspaper-default.json"));
-  const candidate = {
-    schemaVersion: 1,
-    id: "newspaper-default",
-    name: preset.name,
-    tokens: { colors: { accent: "#A23B2A" } },
-    recipes: {},
-  };
-  const resolved = {
-    ...structuredClone(preset),
-    tokens: {
-      ...structuredClone(preset.tokens),
-      colors: { ...structuredClone(preset.tokens.colors), accent: "#A23B2A" },
-    },
-  };
-  const systemRevision = await systemThemes.readThemeRevision("newspaper-default", 1);
-  await service.preview({ candidate, resolved, usesSiteAccent: false });
-  const result = await service.activate({ candidate, resolved, usesSiteAccent: false });
+  const storage = createPostgresThemeStorage(pool, tenant, systemThemes, publication);
+  await insertCustomTheme(tenant.spaceId, "history-theme", [1, 2], 2);
 
-  assert.equal(result.revision, 2);
-  assert.deepEqual(await storage.listRevisions("newspaper-default"), [1, 2]);
-  assert.deepEqual(await storage.readThemeRevision("newspaper-default", 1), systemRevision);
-  assert.equal((await storage.readThemeRevision("newspaper-default", 2)).definition.revision, 2);
-  assert.equal((await pool.query("SELECT count(*)::integer AS count FROM app.theme_definitions")).rows[0].count, 1);
+  assert.equal((await storage.readCurrentTheme("history-theme")).revision, 2);
+  assert.equal((await storage.readThemeRevision("history-theme", 1)).definition.revision, 1);
+  await pool.query(
+    `UPDATE app.custom_themes
+     SET status = 'deleted', deleted_at = clock_timestamp()
+     WHERE space_id = $1 AND theme_id = 'history-theme'`,
+    [tenant.spaceId],
+  );
+  assert.equal(await storage.readCurrentTheme("history-theme"), null);
+  assert.equal((await storage.readThemeRevision("history-theme", 1)).definition.revision, 1);
+  assert.ok(!(await storage.listThemes()).some(({ themeId }) => themeId === "history-theme"));
 });

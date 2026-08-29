@@ -37,7 +37,7 @@ export interface PublicationRecord {
   displayName: string;
   status: "active" | "inactive";
   isDefault: boolean;
-  sortOrder: number;
+  sortOrder: number | null;
 }
 
 export interface PublicationConfigRecord {
@@ -52,7 +52,6 @@ export interface ThemeSelectionRecord {
   publicationId: string | null;
   selectionMode: "inherit" | "override";
   themeId: string | null;
-  themeRevision: number | null;
 }
 
 export interface TodoProfileRecord {
@@ -90,8 +89,7 @@ interface PublicationRow extends QueryResultRow {
   publication_id: string;
   display_name: string;
   status: "active" | "inactive";
-  is_default: boolean;
-  sort_order: number;
+  sort_order: number | null;
 }
 
 interface PublicationConfigRow extends QueryResultRow {
@@ -106,7 +104,6 @@ interface ThemeSelectionRow extends QueryResultRow {
   publication_id: string | null;
   selection_mode: "inherit" | "override";
   theme_id: string | null;
-  theme_revision: number | null;
 }
 
 interface TodoProfileRow extends QueryResultRow {
@@ -197,7 +194,7 @@ function mapPublication(row: PublicationRow): PublicationRecord {
     publicationId: row.publication_id,
     displayName: row.display_name,
     status: row.status,
-    isDefault: row.is_default,
+    isDefault: row.status === "active" && row.sort_order === 0,
     sortOrder: row.sort_order,
   };
 }
@@ -217,7 +214,6 @@ function mapThemeSelection(row: ThemeSelectionRow): ThemeSelectionRecord {
     publicationId: row.publication_id,
     selectionMode: row.selection_mode,
     themeId: row.theme_id,
-    themeRevision: row.theme_revision,
   };
 }
 
@@ -241,15 +237,15 @@ async function insertBootstrapDefaults(
   );
   await client.query(
     `INSERT INTO app.theme_selections
-       (id, space_id, target_type, publication_id, selection_mode, theme_id, theme_revision)
-     VALUES ($1, $2, 'home', NULL, 'override', $3, $4)
+       (id, space_id, target_type, publication_id, selection_mode, theme_id)
+     VALUES ($1, $2, 'home', NULL, 'override', $3)
      ON CONFLICT (space_id) WHERE target_type = 'home' DO NOTHING`,
-    [randomUUID(), spaceId, defaults.theme.id, defaults.theme.revision],
+    [randomUUID(), spaceId, defaults.theme.id],
   );
   await client.query(
     `INSERT INTO app.theme_selections
-       (id, space_id, target_type, publication_id, selection_mode, theme_id, theme_revision)
-     VALUES ($1, $2, 'publication', $3, 'inherit', NULL, NULL)
+       (id, space_id, target_type, publication_id, selection_mode, theme_id)
+     VALUES ($1, $2, 'publication', $3, 'inherit', NULL)
      ON CONFLICT (space_id, publication_id) WHERE target_type = 'publication' DO NOTHING`,
     [randomUUID(), spaceId, publicationId],
   );
@@ -269,7 +265,9 @@ async function resolveOrCreateDefaultPublication(
   const existing = await client.query<{ publication_id: string } & QueryResultRow>(
     `SELECT publication_id
      FROM app.publications
-     WHERE space_id = $1 AND is_default
+     WHERE space_id = $1 AND status = 'active'
+     ORDER BY sort_order
+     LIMIT 1
      FOR UPDATE`,
     [spaceId],
   );
@@ -277,10 +275,9 @@ async function resolveOrCreateDefaultPublication(
 
   await client.query(
     `INSERT INTO app.publications
-       (space_id, publication_id, display_name, status, is_default, sort_order)
-     VALUES ($1, $2, $3, 'active', true, 0)
-     ON CONFLICT (space_id, publication_id) DO UPDATE
-       SET is_default = true`,
+       (space_id, publication_id, display_name, status, sort_order)
+     VALUES ($1, $2, $3, 'active', 0)
+     ON CONFLICT (space_id, publication_id) DO NOTHING`,
     [spaceId, defaults.publicationId, defaults.publicationName],
   );
   return defaults.publicationId;
@@ -449,10 +446,10 @@ class TenantRepository {
 
   async listPublications(): Promise<PublicationRecord[]> {
     const result = await this.pool.query<PublicationRow>(
-      `SELECT space_id, publication_id, display_name, status, is_default, sort_order
+      `SELECT space_id, publication_id, display_name, status, sort_order
        FROM app.publications
        WHERE space_id = $1
-       ORDER BY publication_id`,
+       ORDER BY status = 'inactive', sort_order NULLS LAST, created_at, publication_id`,
       [this.context.spaceId],
     );
     return result.rows.map(mapPublication);
@@ -471,7 +468,7 @@ class TenantRepository {
 
   async listThemeSelections(): Promise<ThemeSelectionRecord[]> {
     const result = await this.pool.query<ThemeSelectionRow>(
-      `SELECT target_type, publication_id, selection_mode, theme_id, theme_revision
+      `SELECT target_type, publication_id, selection_mode, theme_id
        FROM app.theme_selections
        WHERE space_id = $1
        ORDER BY target_type, publication_id NULLS FIRST`,
@@ -491,7 +488,7 @@ class PublicationRepository {
 
   async getPublication(): Promise<PublicationRecord | null> {
     const result = await this.pool.query<PublicationRow>(
-      `SELECT space_id, publication_id, display_name, status, is_default, sort_order
+      `SELECT space_id, publication_id, display_name, status, sort_order
        FROM app.publications
        WHERE space_id = $1 AND publication_id = $2`,
       [this.context.tenant.spaceId, this.context.publicationId],
@@ -511,7 +508,7 @@ class PublicationRepository {
 
   async getThemeSelection(): Promise<ThemeSelectionRecord | null> {
     const result = await this.pool.query<ThemeSelectionRow>(
-      `SELECT target_type, publication_id, selection_mode, theme_id, theme_revision
+      `SELECT target_type, publication_id, selection_mode, theme_id
        FROM app.theme_selections
        WHERE space_id = $1 AND publication_id = $2 AND target_type = 'publication'`,
       [this.context.tenant.spaceId, this.context.publicationId],

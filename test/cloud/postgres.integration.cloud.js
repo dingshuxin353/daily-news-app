@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -72,14 +73,15 @@ test("empty database migrates fully and a repeated run has no side effects", asy
     "0100_create_email_identity.sql",
     "0101_create_agent_access.sql",
     "0102_create_agent_request_layer.sql",
+    "0103_create_m4_domain_contract.sql",
   ]);
-  assert.equal(first.total, 6);
+  assert.equal(first.total, 7);
   assert.deepEqual(second.applied, []);
   const history = await pool.query(`
     SELECT filename, checksum_sha256, executed_at
     FROM app.schema_migrations
   `);
-  assert.equal(history.rowCount, 6);
+  assert.equal(history.rowCount, 7);
   assert.match(history.rows[0].checksum_sha256, /^[0-9a-f]{64}$/);
   assert.ok(history.rows[0].executed_at instanceof Date);
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
@@ -105,11 +107,124 @@ test("the exact M2 migration history upgrades atomically through M3-B", async ()
   assert.deepEqual(upgraded.applied, [
     "0101_create_agent_access.sql",
     "0102_create_agent_request_layer.sql",
+    "0103_create_m4_domain_contract.sql",
   ]);
   assert.equal(
     (await pool.query("SELECT to_regclass('app.agent_credentials')::text AS relation")).rows[0].relation,
     "app.agent_credentials",
   );
+  await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
+});
+
+test("the exact M3 schema and retained facts upgrade to the M4 domain contract", async () => {
+  await resetAppSchema();
+  const m3Names = [
+    "0001_initialize_app_schema.sql",
+    "0002_create_tenant_foundation.sql",
+    "0003_create_domain_storage.sql",
+    "0100_create_email_identity.sql",
+    "0101_create_agent_access.sql",
+    "0102_create_agent_request_layer.sql",
+  ];
+  const m3Files = Object.fromEntries(await Promise.all(m3Names.map(async (filename) => [
+    filename,
+    await readFile(path.join(projectMigrations, filename), "utf8"),
+  ])));
+  await withMigrations(m3Files, async (m3Directory) => {
+    assert.deepEqual((await runMigrations(pool, { migrationsDirectory: m3Directory })).applied, m3Names);
+  });
+
+  const spaceId = randomUUID();
+  const homeSelectionId = randomUUID();
+  const dailySelectionId = randomUUID();
+  const archiveSelectionId = randomUUID();
+  const otherSelectionId = randomUUID();
+  await pool.query(
+    `INSERT INTO auth."user" ("id", "name", "email", "emailVerified")
+     VALUES ('m3-user', 'm3-user@example.test', 'm3-user@example.test', true)`,
+  );
+  await pool.query("INSERT INTO app.spaces (id, user_id, status) VALUES ($1, 'm3-user', 'ready')", [spaceId]);
+  await pool.query(
+    "INSERT INTO app.home_profiles (space_id, display_name, time_zone) VALUES ($1, '  Retained Home  ', 'Asia/Shanghai')",
+    [spaceId],
+  );
+  await pool.query(
+    `INSERT INTO app.publications
+       (space_id, publication_id, display_name, status, is_default, sort_order)
+     VALUES ($1, 'daily-news', '  DailyNews  ', 'active', true, 0),
+            ($1, 'archive-news', 'Archive News', 'inactive', false, 1),
+            ($1, 'other-news', 'dailynews', 'active', false, 2)`,
+    [spaceId],
+  );
+  await pool.query(
+    `INSERT INTO app.publication_configs
+       (space_id, publication_id, time_zone, priority_limits)
+     VALUES ($1, 'daily-news', 'Asia/Shanghai', '{"lead":1,"important":2,"normal":null}'::jsonb),
+            ($1, 'archive-news', 'Asia/Shanghai', '{"lead":1,"important":2,"normal":null}'::jsonb),
+            ($1, 'other-news', 'Asia/Shanghai', '{"lead":1,"important":2,"normal":null}'::jsonb)`,
+    [spaceId],
+  );
+  await pool.query(
+    `INSERT INTO app.theme_selections
+       (id, space_id, target_type, publication_id, selection_mode, theme_id, theme_revision, active_payload)
+     VALUES ($2, $1, 'home', NULL, 'override', 'retained-theme', 2, '{}'::jsonb),
+            ($3, $1, 'publication', 'daily-news', 'inherit', NULL, NULL, NULL),
+            ($4, $1, 'publication', 'archive-news', 'override', 'retained-theme', 1, '{}'::jsonb),
+            ($5, $1, 'publication', 'other-news', 'inherit', NULL, NULL, NULL)`,
+    [spaceId, homeSelectionId, dailySelectionId, archiveSelectionId, otherSelectionId],
+  );
+  await pool.query("INSERT INTO app.todo_profiles (space_id, enabled) VALUES ($1, false)", [spaceId]);
+  await pool.query(
+    `INSERT INTO app.theme_definitions
+       (space_id, theme_id, revision, definition_payload, compiled_css)
+     VALUES ($1, 'retained-theme', 1, $2::jsonb, ':root { --revision: 1; }'),
+            ($1, 'retained-theme', 2, $3::jsonb, ':root { --revision: 2; }')`,
+    [
+      spaceId,
+      JSON.stringify({ id: "retained-theme", revision: 1, name: "Retained Theme" }),
+      JSON.stringify({ id: "retained-theme", revision: 2, name: "x".repeat(80) }),
+    ],
+  );
+  await pool.query(
+    `INSERT INTO app.theme_candidates
+       (space_id, theme_id, candidate_hash, input_hash, manifest_payload, compiled_css)
+     VALUES ($1, 'discarded-preview', $2, $3, '{"themeId":"discarded-preview"}'::jsonb, ':root {}')`,
+    [spaceId, "a".repeat(64), "b".repeat(64)],
+  );
+
+  assert.deepEqual((await runMigrations(pool, { migrationsDirectory: projectMigrations })).applied, [
+    "0103_create_m4_domain_contract.sql",
+  ]);
+  const publications = await pool.query(
+    `SELECT publication_id, display_name, status, sort_order
+     FROM app.publications WHERE space_id = $1 ORDER BY publication_id`,
+    [spaceId],
+  );
+  assert.deepEqual(publications.rows, [
+    { publication_id: "archive-news", display_name: "Archive News", status: "inactive", sort_order: null },
+    { publication_id: "daily-news", display_name: "DailyNews", status: "active", sort_order: 0 },
+    { publication_id: "other-news", display_name: "dailynews (2)", status: "active", sort_order: 1 },
+  ]);
+  assert.equal((await pool.query("SELECT display_name FROM app.home_profiles WHERE space_id = $1", [spaceId])).rows[0].display_name, "Retained Home");
+  assert.deepEqual((await pool.query(
+    "SELECT theme_id, current_revision, display_name, status FROM app.custom_themes WHERE space_id = $1",
+    [spaceId],
+  )).rows[0], {
+    theme_id: "retained-theme",
+    current_revision: 2,
+    display_name: "retained-theme",
+    status: "active",
+  });
+  const removedColumns = await pool.query(
+    `SELECT table_name, column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'app'
+       AND ((table_name = 'publications' AND column_name = 'is_default')
+         OR (table_name = 'theme_selections' AND column_name IN ('theme_revision', 'active_payload')))`,
+  );
+  assert.equal(removedColumns.rowCount, 0);
+  assert.equal((await pool.query("SELECT to_regclass('app.theme_candidates')::text AS relation")).rows[0].relation, null);
+  assert.equal((await pool.query("SELECT to_regclass('app.user_profiles')::text AS relation")).rows[0].relation, "app.user_profiles");
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
 });
 

@@ -242,6 +242,31 @@ test("Fake mode completes OTP sign-in, bootstraps one Space, persists the sessio
   assert.equal(afterSignOut.headers.get("location"), "/login?returnTo=%2Fhome");
 });
 
+test("generic Better Auth profile mutation cannot bypass the explicit nickname service", async () => {
+  const harness = createHarness();
+  const email = "nickname-boundary@example.com";
+  assert.equal((await sendOtp(harness, email)).status, 200);
+  const cookie = sessionCookie(await verifyOtp(harness, email, await latestOtp(harness, email)));
+  const before = (await controlPool.query(
+    `SELECT "id", "name", "image" FROM auth."user" WHERE "email" = $1`,
+    [email],
+  )).rows[0];
+
+  const bypass = await post(harness.app, "/api/auth/update-user", {
+    name: "Bypassed Nickname",
+    image: "https://example.test/avatar.png",
+  }, { cookie });
+  assert.equal(bypass.status, 404);
+  assert.deepEqual((await controlPool.query(
+    `SELECT "id", "name", "image" FROM auth."user" WHERE "email" = $1`,
+    [email],
+  )).rows[0], before);
+  assert.equal((await controlPool.query(
+    "SELECT count(*)::integer AS count FROM app.user_profiles WHERE user_id = $1",
+    [before.id],
+  )).rows[0].count, 0);
+});
+
 test("Better Auth retains server-side revocation of every session for the current user", async () => {
   const harness = createHarness();
   const email = "revoke-all@example.com";

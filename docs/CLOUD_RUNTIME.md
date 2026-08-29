@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B / M3-C 与 M3-D 研发能力，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2-A / M2-B / M2-C / M2-D、M3-A / M3-B / M3-C / M3-D 与 M4-A 研发能力，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与默认对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期、M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API、M3-C 的公开与私有页面，以及 M3-D 的双时代远程 MCP。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、M3-A 的 Agent 配对和凭证生命周期、M3-B 的统一 Agent Request Layer 与 Content / Todo JSON API、M3-C 的公开与私有页面、M3-D 的双时代远程 MCP，以及 M4-A 的 Publication / 昵称 / 主题 current revision 数据合同。它不包含正式部署。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 
@@ -51,12 +51,13 @@ Migration Runner 先持有固定的 PostgreSQL 会话级 advisory lock，再在�
 - `0100_create_email_identity.sql`：建立 `auth` Schema 中 Better Auth 1.7.1 所需的 User、Account、Session、Verification 与数据库限流表，并建立 `app.login_*` 邮件发送预留、摘要限流和供应商双 ID 记录。`0100` 为并行 M2-D 保留的 Migration 段，避免与 M2-C 文件名冲突。
 - `0101_create_agent_access.sql`：建立 Agent Pairing、摘要凭证、持久配对限流与最小脱敏审计表。数据库不保存配对码或 PAT 明文。
 - `0102_create_agent_request_layer.sql`：扩展持久 PAT / IP 读写限流，建立跨进程 Space 写入租约，并为 Todo Submission 增加 JSON API / MCP 共用的 `client_run_id`；已有记录一次性生成稳定的 `legacy-<digest>` 键，之后协议幂等键与领域 `candidate_id` 保持独立。
+- `0103_create_m4_domain_contract.sql`：建立显式 `user_profiles` 昵称事实和 `custom_themes` current revision 目录；Publication 改为活动排序派生首要项、停用项无排序，主题选择改为 ID / `inherit` 且读取时解析 current revision；移除云端 `theme_candidates`、固定 `theme_revision` 和激活清单旧字段。
 
 `PostgresTenancyStore` 只接受服务端认证得到的用户 ID 来解析或幂等建立唯一 Space。初始化在单一事务中建立 Home、默认 Publication、Publication Config、Home 主题、Publication 继承选择和默认关闭的 Todo Profile；失败会整体回滚，后续调用可以安全重试。面向业务读取的 Repository 必须绑定已解析的 `TenantContext` 或 `PublicationContext`，不提供按任意 `space_id` 进行全表查询的入口。
 
-M2-C 的 `PostgresDailyStorage`、`PostgresTodoStorage` 和 `PostgresThemeStorage` 同样只能由已解析的上下文创建。Daily Coordinator 以 `clientRunId` 和规范化内容摘要实现幂等，并通过 Publication 日期行锁串行化同一天的正式写入；Todo Coordinator 通过 Space 的 Todo Profile 行锁保护状态版本。Candidate、正式状态、编译结果和幂等回执在各自单一事务中提交，编译或最终持久化失败会整体回滚。主题系统 Revision 仍由只读文件 Reader 提供，Space 后续自定义 Revision、预览、选择与激活清单进入 PostgreSQL；同名 Space Revision 不会修改或覆盖系统 Revision。
+M2-C 的 `PostgresDailyStorage`、`PostgresTodoStorage` 和 `PostgresThemeStorage` 同样只能由已解析的上下文创建。Daily Coordinator 以 `clientRunId` 和规范化内容摘要实现幂等，并通过 Publication 日期行锁串行化同一天的正式写入；Todo Coordinator 通过 Space 的 Todo Profile 行锁保护状态版本。Candidate、正式状态、编译结果和幂等回执在各自单一事务中提交，编译或最终持久化失败会整体回滚。M4-A 后，主题系统 revision 仍由只读文件 Reader 提供；Space 自定义历史 revision 与 current 指针进入 PostgreSQL，Home / Publication 只保存主题 ID 或 `inherit`。官方主题优先且不能被同 ID 的 Space 数据遮蔽。
 
-Coordinator 只负责把 M1 Application Service 接到 PostgreSQL 事务边界和幂等摘要，不复制或改变 M1 的候选校验、编排、编译、Todo 冲突规则及主题语义；Theme Adapter 也通过依赖注入复用 M1 的 Active Manifest 生成函数。
+Coordinator 只负责把 M1 Application Service 接到 PostgreSQL 事务边界和幂等摘要，不复制或改变 M1 的候选校验、编排、编译和 Todo 冲突规则。M4-A Theme Adapter 只负责官方 / 自定义 current revision 与目标选择解析；云端不再实现 Theme Candidate、Preview、Active Manifest 或网页确认存储路径。M4-B 才会在同一 Validator / Compiler 上增加原子主题写入事务。
 
 M3-B 的 `/api/v1` 只接受活动 PAT。统一请求层从摘要凭证解析唯一 Space，再在该 Space 内二次解析 Publication；请求参数和 Candidate 不能指定或覆盖 `userId` / `spaceId`。读写分别执行持久 PAT / 受信 IP 限流，写入额外受每 Space 的短时跨进程租约限制。GET 不要求请求 `Content-Type`；POST 在完整 JSON 解析前执行 256 KiB 大小检查，并要求 `application/json` 与 `Idempotency-Key`。
 
@@ -73,6 +74,8 @@ MCP 在解析前按独立的 256 KiB 上限读取请求克隆；原请求保留�
 工具的严格 Zod 输入 / 输出 Schema 会由 SDK 转换为 JSON Schema；Context 返回默认目标、明确日期和写入边界，提交工具继续进入正式 Writer / Compiler。工具业务失败使用 `isError`、稳定 `error.code/message/requestId` 和脱敏短文本，协议错误由 SDK 返回 JSON-RPC 错误。Server Instructions 在前 512 字符内完整声明 Context-first、明确目标、Candidate 隔离、Todo disabled、幂等重试和用户确认规则。
 
 M2-D 精确锁定 `better-auth@1.7.1` 与 `tencentcloud-sdk-nodejs-ses@4.1.271`，并以 `uuid@11.1.1` 覆盖腾讯云 SDK 的旧传递版本。Better Auth 使用 `auth` Search Path 和数据库 Session；Email OTP 固定为 6 位、5 分钟、最多错误 3 次、摘要保存、重发轮换。应用在调用邮件 Adapter 前，以 PostgreSQL 锁并发预留单邮箱冷却、邮箱小时、IP 小时和全站每日硬上限；所有状态改变型认证请求还必须通过严格的同源 Origin 校验。
+
+M4-A 的昵称由 `UserProfileService` 作为唯一应用写入口，在同一事务中更新 `app.user_profiles` 与 Better Auth 用户显示名。Better Auth 自带的通用 `/api/auth/update-user` 被身份适配边界关闭，不能绕过昵称校验写名称或头像；M4-C 的账户页只会调用显式昵称服务，不开放邮箱、密码、头像或账户删除能力。
 
 `MAIL_MODE=fake` 不调用外部供应商。Fake OTP 读取能力只由自动化测试在构造测试 App 时显式注入；正式 `npm run start:cloud` 即使运行在 Fake 模式也不会注册测试读取路由。`MAIL_MODE=ses` 使用腾讯云 SES `SendEmail` 触发类模板；成功必须同时保存 RequestId 和 MessageId，拒绝、超时或缺失任一 ID 时返回脱敏 `503`，同一次请求不自动重试。
 
@@ -116,7 +119,7 @@ npm run build:cloud
 
 PostgreSQL 集成测试会删除并重建 `app` Schema，因此 `TEST_DATABASE_URL` 必须指向专用、可丢弃且库名包含 `test` 或 `ci` 的数据库。不得指向认证探针、用户测试库或未来生产数据库。
 
-M2-B 集成测试额外覆盖并发首次初始化、事务故障回滚、部分初始化补偿、两用户隔离、Publication 归属和 Todo Space 隔离。M2-C 集成测试覆盖文件/PostgreSQL 等价、Daily/Todo 幂等冲突与并发锁、编译及最终写入故障回滚、主题预览/激活，以及三类领域数据的租户隔离。
+M2-B 集成测试额外覆盖并发首次初始化、事务故障回滚、部分初始化补偿、两用户隔离、Publication 归属和 Todo Space 隔离。M2-C 集成测试继续覆盖文件/PostgreSQL 等价、Daily/Todo 幂等冲突与并发锁、编译及最终写入故障回滚，以及三类领域数据的租户隔离；M4-A 已用 current revision / ID-only selection 解析回归替换旧的云端主题预览/激活回归。
 
 M2-D 自动化只使用 Fake Adapter 或注入的 SES Stub，覆盖完整 OTP 登录、错误次数、重发轮换、一次性与并发消费、Session 跨新运行时保持、退出、初始化补偿、持久限流、全站并发硬上限、跨站首登拒绝、供应商失败脱敏、Cookie 属性和 Fake 测试路由隔离。真实 SES 不进入本地自检或 CI；只有用户另行授权后才能执行一次正式代码真实邮箱冒烟。
 
@@ -127,3 +130,5 @@ M3-B 集成测试覆盖活动 / 撤销 PAT、`last_used_at` 节流触达、PAT �
 M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与配对码分离、系统示例不落库、第一份正式日报替换示例、Compiled Edition 顺序和层级、指定日期 404、Todo 浏览器启停、正式 State 五组投影、关闭后不披露保留正文、主题选择链不完整时失败关闭，以及动态 Agent 名称的 HTML 转义。云端单元测试同时验证可见页面使用统一品牌外壳、资源入口和无用户数据的公开边界。
 
 M3-D 协议自动化使用官方 `@modelcontextprotocol/client@2.0.0` 分别执行现代 Discover 和兼容 Initialize，核对同一组六个工具的 `tools/list`、全部 `tools/call`、Instructions、Schema、Annotations、结构化错误、无 Session 与私有响应头。负向测试覆盖 Method、Content-Type、流式超限、Cookie / PAT 混淆、跨 Origin、现代协议版本与方法 / 工具名 Header 错配，以及真实 Node HTTP Adapter 下的 Host、absolute-form 请求目标、回环 TLS 终止和无 Socket 失败关闭。PostgreSQL 集成测试使用同一 PAT 跨 MCP / JSON API 复用相同 Daily `clientRunId`，核对只产生一个正式 revision，并验证轮换后旧 Token 失败、新 Token 同时恢复两种协议。Inspector 基线与客户端配置见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+
+M4-A PostgreSQL 集成测试覆盖空库与精确 M3 Schema 升级、Migration 幂等、8 份 Publication 上限、同 Space 名称 / 地址冲突、并发创建、活动排序派生首要项、停用 / 恢复与最后活动项保护、跨 Space 隔离、依赖行写入失败整体回滚、主题 current revision 传播、官方 ID 防遮蔽、Todo 正式数据与开关独立投影，以及昵称写入与身份名称同步的原子性。本地 `npm test` 继续作为文件模式回归。
