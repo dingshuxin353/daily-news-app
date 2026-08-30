@@ -26,6 +26,7 @@ import {
   renderTodoPage,
 } from "../web/private-pages.js";
 import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
+import { renderAgentSetupMarkdown } from "../web/agent-setup.js";
 import { registerSiteSettingsRoutes } from "../web/site-settings.js";
 import { createSettingsCsrfToken, resolveTrustedExternalOrigin } from "../web/settings-security.js";
 import { registerAgentApiRoutes } from "../protocols/http-api/routes.js";
@@ -76,6 +77,7 @@ export interface CloudAppDependencies {
 }
 
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const agentSetupSource = new URL("docs/AGENT_SETUP.md", `file://${projectRoot}/`);
 const cloudAssets = {
   "cloud.css": { url: new URL("src/web/cloud.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
   "tokens.css": { url: new URL("tokens.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
@@ -217,40 +219,29 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
     });
   }
 
+  if (dependencies.agentSettings) {
+    app.get(route("/agent-setup.md"), async (context) => {
+      try {
+        const markdown = renderAgentSetupMarkdown(
+          await readFile(agentSetupSource, "utf8"),
+          {
+            claimUrl: `${dependencies.agentSettings!.origin}${route("/agent-pairing/v1/claim")}`,
+            verifyUrl: `${dependencies.agentSettings!.origin}${route("/agent-pairing/v1/verify")}`,
+            apiBaseUrl: dependencies.agentSettings!.apiBaseUrl,
+            mcpUrl: dependencies.agentSettings!.mcpUrl,
+          },
+        );
+        return context.body(markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
+      } catch {
+        return context.text("服务暂时不可用，请稍后重试。", 503);
+      }
+    });
+  }
+
   if (dependencies.identity && dependencies.tenancy && dependencies.defaults) {
     const identity = dependencies.identity;
     const tenancy = dependencies.tenancy;
     const defaults = dependencies.defaults;
-
-    if (dependencies.agentSettings) {
-      app.get(route("/.well-known/dailynews-agent-setup.json"), (context) => context.json({
-        schemaVersion: 1,
-        instructionsVersion: "1.0.0",
-        product: "DailyNews",
-        pairing: {
-          claimUrl: `${dependencies.agentSettings!.origin}${route("/agent-pairing/v1/claim")}`,
-          verifyUrl: `${dependencies.agentSettings!.origin}${route("/agent-pairing/v1/verify")}`,
-        },
-        apiBaseUrl: dependencies.agentSettings!.apiBaseUrl,
-        mcp: {
-          url: dependencies.agentSettings!.mcpUrl,
-          transport: "streamable-http",
-          protocolVersions: ["2026-07-28", "2025-11-25"],
-          authorization: "bearer",
-        },
-        instructions: [
-          "先识别客户端是否支持远程 Streamable HTTP、Bearer Secret 与定时任务，再向用户索要页面当前显示的配对码；不支持的能力必须明确说明。",
-          "使用配对码认领连接；长期凭证只会在认领成功时返回一次，必须安全保存且不得输出到回复、日志或项目文件。",
-          "使用 provisioning 凭证完成只读验证；验证成功后通过 MCP（或 JSON API 回退）先读取默认日报、Todo 与主题上下文。",
-          "继续询问用户长期关注内容与更新时间，把相对时间复述为明确时间和时区；仅在客户端支持时于 Agent 自己的运行环境建立或更新定时任务，并立即生成第一份日报供用户确认。",
-        ],
-        security: {
-          pairingCodeIsShortLived: true,
-          pairingCodeCanReadUserData: false,
-          longLivedCredentialIsReturnedOnce: true,
-        },
-      }));
-    }
 
     app.get(route("/assets/:name"), async (context) => {
       const name = context.req.param("name") as keyof typeof cloudAssets;
@@ -454,7 +445,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
             shell: readingShell,
             pairing,
             csrfToken: createSettingsCsrfToken(dependencies.agentSettings!.csrfSecret, access.session.session.id, access.session.user.id),
-            setupUrl: `${dependencies.agentSettings!.origin}${route("/.well-known/dailynews-agent-setup.json")}`,
+            setupUrl: `${dependencies.agentSettings!.origin}${route("/agent-setup.md")}`,
           }));
         } catch {
           return context.text("服务暂时不可用，请稍后重试。", 503);

@@ -546,6 +546,57 @@ test("health routes honor the explicit base path", async () => {
   assert.equal((await app.request("http://localhost/cloud/health/live")).status, 200);
 });
 
+test("Agent setup Markdown renders the current base path and replaces the retired JSON contract", async () => {
+  const app = createCloudApp({
+    basePath: "/dailynews",
+    readinessCheck: async () => {},
+    agentSettings: {
+      origin: "https://dailynews.test",
+      csrfSecret: "agent-setup-test-secret",
+      service: {},
+      digestActor: () => "unused",
+      apiBaseUrl: "https://dailynews.test/dailynews/api/v1",
+      mcpUrl: "https://dailynews.test/dailynews/mcp",
+      activeCredentialLimit: 10,
+      requestBodyLimitBytes: 16384,
+    },
+  });
+
+  assert.equal((await app.request("https://dailynews.test/agent-setup.md")).status, 404);
+  const response = await app.request("https://dailynews.test/dailynews/agent-setup.md");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+  const markdown = await response.text();
+
+  for (const endpoint of [
+    "https://dailynews.test/dailynews/agent-pairing/v1/claim",
+    "https://dailynews.test/dailynews/agent-pairing/v1/verify",
+    "https://dailynews.test/dailynews/api/v1",
+    "https://dailynews.test/dailynews/mcp",
+  ]) {
+    assert.match(markdown, new RegExp(endpoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(markdown, /^# DailyNews Agent 接入说明/m);
+  assert.match(markdown, /接入合同版本：`2\.0\.0`/);
+  assert.doesNotMatch(markdown, /^\s*- (?:状态|实现阶段)：/m);
+  assert.doesNotMatch(markdown, /\{\{[^{}]+\}\}/);
+  assert.doesNotMatch(markdown, /dnpat_[A-Za-z0-9_-]+/);
+  assert.doesNotMatch(markdown, /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/);
+
+  const claimRequest = /POST https:\/\/dailynews\.test\/dailynews\/agent-pairing\/v1\/claim\nContent-Type: application\/json\n\n(\{[\s\S]*?\})\n```/.exec(markdown);
+  assert.ok(claimRequest);
+  assert.deepEqual(Object.keys(JSON.parse(claimRequest[1])), ["pairingCode", "clientName"]);
+  const verifyRequest = /```http\n(POST https:\/\/dailynews\.test\/dailynews\/agent-pairing\/v1\/verify\nAuthorization: Bearer <已安全保存的 DailyNews PAT>)\n```/.exec(markdown);
+  assert.ok(verifyRequest);
+  assert.doesNotMatch(verifyRequest[1], /Content-Type|\{\s*\}/);
+  assert.match(markdown, /pending.*claimed.*provisioning.*verified.*active/);
+  assert.match(markdown, /Verify 超时或响应丢失[\s\S]*活动凭证探测/);
+
+  assert.equal((await app.request(
+    "https://dailynews.test/dailynews/.well-known/dailynews-agent-setup.json",
+  )).status, 404);
+});
+
 function runtimeConfig(port) {
   return {
     origin: "http://127.0.0.1",
@@ -717,6 +768,39 @@ test("pairing codes are stable per generation, refreshable, normalized, and dige
   assert.ok(normalized);
   assert.match(digestPairingCode(secret, normalized), /^[0-9a-f]{64}$/);
   assert.equal(normalizePairingCode("00000-00000"), null);
+});
+
+test("invalid client names fail before the repository can look up or consume a pairing code", async () => {
+  let pairingLookupCalls = 0;
+  const service = new AgentCredentialService({
+    reservePairingRequest: async () => {},
+    claimPairing: async () => {
+      pairingLookupCalls += 1;
+      throw new Error("pairing lookup must not run");
+    },
+  }, {
+    tokenDigestSecret: "agent-token-unit-secret-with-at-least-32-characters",
+    pairingCodeDigestSecret: "pairing-unit-secret-with-at-least-32-characters",
+    activeCredentialLimit: 10,
+    pairingCodeTtlSeconds: 600,
+    provisioningTtlSeconds: 600,
+    claimIpHourlyLimit: 20,
+    verifyIpHourlyLimit: 40,
+    apiBaseUrl: "https://example.com/api/v1",
+    mcpUrl: "https://example.com/mcp",
+    pairingVerifyUrl: "https://example.com/agent-pairing/v1/verify",
+  });
+
+  await assert.rejects(
+    () => service.claimPairing({
+      code: "23456-789AB",
+      clientName: "\n",
+      ipDigest: "ip-digest",
+      requestId: "req_invalid_client_name",
+    }),
+    (error) => error?.code === "invalid_request",
+  );
+  assert.equal(pairingLookupCalls, 0);
 });
 
 test("settings CSRF tokens bind to one session and user", () => {

@@ -95,7 +95,7 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `GET /` 是不含用户数据的公开产品入口；已登录用户只会看到进入私人编辑部的动作。
 - `GET /login` 显示统一品牌外壳中的邮箱与 OTP 登录页；成功后由 `GET /post-login` 把首次用户送到接入页，已有用户送回安全的站内目标或 Home。
 - `ALL /api/auth/*` 由 Better Auth 处理 Email OTP、Session 与退出。
-- `GET /onboarding` 对昵称未完成的新用户先显示 1–24 个可见字符的昵称步骤；保存后才显示完整接入话术与独立的短时配对码。接入话术本身不包含配对码、PAT、MCP 配置或完整调度提示词。`GET /.well-known/dailynews-agent-setup.json` 是无用户数据的公开接入说明。
+- `GET /onboarding` 对昵称未完成的新用户先显示 1–24 个可见字符的昵称步骤；保存后才显示完整接入话术与独立的短时配对码。接入话术本身不包含配对码、PAT、MCP 配置或完整调度提示词。`GET /agent-setup.md` 以 `text/markdown; charset=utf-8` 返回无用户数据的公开接入合同，并按当前实例渲染绝对 Claim、Verify、API Base 与 MCP 地址。
 - `GET /home` 显示系统示例或首要 Publication 的最新正式日报；正式内容出现后不再并列显示示例。其他活动 Publication 只有在已有正式内容时才以精简入口出现，不在 Home 展开完整正文，也不伪造调度、在线或更新时间承诺。
 - `GET /publications/` 是活动 Publication 的阅读目录，展示首要标记与最新正式一期；尚无正式内容的活动项仍保留明确空状态，创建、排序、停用等管理操作不进入阅读目录。
 - `GET /p/:publicationId/?date=YYYY-MM-DD` 按 Compiled Edition 的正式层级和顺序阅读指定日期日报；省略日期时读取该 Publication 的最新正式日报。指定日期不存在时明确返回 `404` 并只提供真实存在的最近一期入口，不静默回退。停用项不再出现在目录和 Home，但所属用户仍可通过原地址只读已有正式内容。

@@ -118,7 +118,7 @@ async function run(
 export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettingsDependencies): void {
   const route = (pathname: string) => `${dependencies.basePath}${pathname}`;
   const wantsHtml = (context: Context) => context.req.header("accept")?.includes("text/html") === true;
-  const setupUrl = `${dependencies.origin}${route("/.well-known/dailynews-agent-setup.json")}`;
+  const setupUrl = `${dependencies.origin}${route("/agent-setup.md")}`;
 
   async function browserAccess(context: Context, currentRequestId: string): Promise<BrowserAccessContext> {
     const session = await dependencies.identity.getSession(context.req.raw, dependencies.clientIpResolver(context));
