@@ -57,7 +57,9 @@ export DAILYNEWS_PAT='dnpat_example_only_never_use_this_value'
 
 ### 版本化 Agent 接入说明
 
-具备调度能力的 Agent 应按以下 `v1.0.0` 顺序完成接入：
+普通 Agent 的唯一接入入口是当前实例的 `GET /agent-setup.md`。该 Markdown 合同由运行时写入当前 Claim、Verify、API Base 与 MCP 绝对地址，并闭合一次性 Claim、凭证持久化、Verify、重复运行与不确定结果恢复；不要从本指南猜测配对字段，也不要寻找其他接入入口。
+
+完成接入后，具备调度能力的 Agent 应按以下 `v1.0.0` 顺序继续：
 
 1. 检查客户端是否支持远程 Streamable HTTP、Bearer Secret 和本地定时任务；不支持的能力必须明确告诉用户，不能声称已经建立自动更新。
 2. 通过配对领取凭证，只在安全存储中保存；先完成只读验证，再调用 Context 工具。

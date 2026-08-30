@@ -363,25 +363,29 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   const onboardingHtml = await onboarding.text();
   assert.match(onboardingHtml, /把这段话发给你的 Agent/);
   assert.match(onboardingHtml, /当前显示的配对码/);
+  assert.match(onboardingHtml, /https:\/\/dailynews\.test\/agent-setup\.md/);
+  assert.doesNotMatch(onboardingHtml, /dailynews-agent-setup/);
   assert.match(onboardingHtml, /data-copy-source="pairing"/);
   const instructionText = /data-copy-source="instruction">([\s\S]*?)<\/pre>/.exec(onboardingHtml)?.[1] ?? "";
   assert.doesNotMatch(instructionText, /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/);
 
   const setupResponse = await appRequest(
     harness.app,
-    "https://dailynews.test/.well-known/dailynews-agent-setup.json",
+    "https://dailynews.test/agent-setup.md",
   );
   assert.equal(setupResponse.status, 200);
-  const setup = await setupResponse.json();
-  assert.equal(setup.instructionsVersion, "1.0.0");
-  assert.deepEqual(setup.mcp, {
-    url: "https://dailynews.test/mcp",
-    transport: "streamable-http",
-    protocolVersions: ["2026-07-28", "2025-11-25"],
-    authorization: "bearer",
-  });
-  assert.match(setup.instructions.join(" "), /定时任务/);
-  assert.doesNotMatch(JSON.stringify(setup), /dnpat_|配对码：/);
+  assert.equal(setupResponse.headers.get("content-type"), "text/markdown; charset=utf-8");
+  const setup = await setupResponse.text();
+  assert.match(setup, /接入合同版本：`2\.0\.0`/);
+  assert.match(setup, /POST https:\/\/dailynews\.test\/agent-pairing\/v1\/claim/);
+  assert.match(setup, /POST https:\/\/dailynews\.test\/agent-pairing\/v1\/verify/);
+  assert.match(setup, /GET https:\/\/dailynews\.test\/api\/v1\/publications/);
+  assert.match(setup, /https:\/\/dailynews\.test\/mcp/);
+  assert.doesNotMatch(setup, /\{\{[^{}]+\}\}|dnpat_[A-Za-z0-9_-]+/);
+  assert.equal((await appRequest(
+    harness.app,
+    "https://dailynews.test/.well-known/dailynews-agent-setup.json",
+  )).status, 404);
 
   const sampleHome = await appRequest(harness.app, "https://dailynews.test/home", {
     headers: { cookie, accept: "text/html" },
@@ -869,6 +873,21 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
   const initial = settings.body.pairings[0];
   assert.match(initial.code, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/);
 
+  const pairingPage = await appRequest(
+    harness.app,
+    `https://dailynews.test/settings/agent/connections/${initial.id}/pair`,
+    { headers: { cookie, accept: "text/html" } },
+  );
+  assert.equal(pairingPage.status, 200);
+  const pairingPageHtml = await pairingPage.text();
+  assert.match(pairingPageHtml, /https:\/\/dailynews\.test\/agent-setup\.md/);
+  assert.doesNotMatch(pairingPageHtml, /dailynews-agent-setup/);
+  const pairingInstruction = /data-copy-source="instruction">([\s\S]*?)<\/pre>/.exec(pairingPageHtml)?.[1] ?? "";
+  assert.doesNotMatch(
+    pairingInstruction,
+    /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/,
+  );
+
   const storedBefore = await controlPool.query(
     "SELECT code_digest, intended_name FROM app.agent_pairing_sessions WHERE id = $1",
     [initial.id],
@@ -890,6 +909,21 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
     clientName: "Codex",
   }, { "x-test-client-ip": "203.0.113.10" });
   assert.equal(oldClaim.status, 404);
+
+  const invalidClientName = await post(harness.app, "/agent-pairing/v1/claim", {
+    pairingCode: refreshed.body.pairing.code,
+    clientName: "\n",
+  }, { "x-test-client-ip": "203.0.113.10" });
+  assert.equal(invalidClientName.status, 400);
+  assert.equal((await invalidClientName.json()).error.code, "invalid_request");
+  const afterInvalidName = await controlPool.query(
+    "SELECT status FROM app.agent_pairing_sessions WHERE id = $1",
+    [initial.id],
+  );
+  assert.equal(afterInvalidName.rows[0].status, "pending");
+  assert.equal((await controlPool.query(
+    "SELECT count(*)::integer AS count FROM app.agent_credentials",
+  )).rows[0].count, 0);
 
   const claim = await post(harness.app, "/agent-pairing/v1/claim", {
     pairingCode: refreshed.body.pairing.code,
@@ -919,6 +953,10 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
   `, [claimed.credentialId]);
   assert.equal(stored.rows[0].status, "provisioning");
   assert.doesNotMatch(JSON.stringify(stored.rows[0]), new RegExp(claimed.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal((await controlPool.query(
+    "SELECT status FROM app.agent_pairing_sessions WHERE id = $1",
+    [initial.id],
+  )).rows[0].status, "claimed");
 
   const wrongToken = `${claimed.token.slice(0, -1)}${claimed.token.endsWith("A") ? "B" : "A"}`;
   const wrongVerify = await verifyPairing(harness.app, wrongToken, {
@@ -943,9 +981,20 @@ test("bootstrap pairing refreshes, claims once, verifies once, and persists no p
     (await harness.agentAccess.authenticateActiveToken(`Bearer ${claimed.token}`)).id,
     claimed.credentialId,
   );
-  assert.equal((await verifyPairing(harness.app, claimed.token, {
+  const repeatedVerify = await verifyPairing(harness.app, claimed.token, {
     "x-test-client-ip": "203.0.113.10",
-  })).status, 401);
+  });
+  assert.equal(repeatedVerify.status, 401);
+  const successfulState = await controlPool.query(`
+    SELECT p.status AS pairing_status, c.status AS credential_status
+    FROM app.agent_pairing_sessions p
+    JOIN app.agent_credentials c ON c.id = p.provisioning_credential_id
+    WHERE p.id = $1
+  `, [initial.id]);
+  assert.deepEqual(successfulState.rows[0], {
+    pairing_status: "verified",
+    credential_status: "active",
+  });
 
   const after = await getJson(harness.app, "/settings/agent", { cookie });
   assert.equal(after.body.authorizations.length, 1);
