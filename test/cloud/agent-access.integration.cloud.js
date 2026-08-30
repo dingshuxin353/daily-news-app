@@ -329,14 +329,18 @@ test("private product journey keeps onboarding, sample replacement, formal Daily
   assert.equal(blockedAgent.status, 303);
   assert.equal(blockedAgent.headers.get("location"), "/onboarding");
   assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_pairing_sessions")).rows[0].count, 0);
-  const invalidNickname = await browserForm(harness.app, "/onboarding/nickname", cookie, { _csrf: nicknameCsrf, nickname: "这是一个明显超过二十四个可见字符的昵称输入需要被完整保留" });
+  const invalidNickname = await appRequest(harness.app, "https://dailynews.test/onboarding/nickname", {
+    method: "POST",
+    headers: { cookie, accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ _csrf: nicknameCsrf, nickname: "这是一个明显超过二十四个可见字符的昵称输入需要被完整保留" }).toString(),
+  });
   assert.equal(invalidNickname.status, 400);
   const invalidNicknameHtml = await invalidNickname.text();
   assert.match(invalidNicknameHtml, /value="这是一个明显超过二十四个可见字符的昵称输入需要被完整保留"/);
   assert.doesNotMatch(invalidNicknameHtml, /data-copy-source="pairing"/);
   const nicknameSaved = await appRequest(harness.app, "https://dailynews.test/onboarding/nickname", {
     method: "POST",
-    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
+    headers: { cookie, origin: "null", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ _csrf: nicknameCsrf, nickname: "丁丁" }).toString(),
   });
   assert.equal(nicknameSaved.status, 303);

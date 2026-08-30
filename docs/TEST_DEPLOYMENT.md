@@ -185,7 +185,7 @@ location / {
 
 - `proxy_pass` 只能指向回环地址，不能指向 `0.0.0.0` 或公网端口。
 - 必须保留真实公开 `Host`，并由 Nginx 覆盖而不是追加单值 `X-Forwarded-Proto` 和 `X-DailyNews-Client-IP`。
-- 不允许客户端传入的转发 Header 穿透。应用会独立核对 Socket 来源、实际 Host、请求目标 Host、代理协议和 Origin；不要通过放宽 Origin 或伪造 Host 解决 `403`。
+- 不允许客户端传入的转发 Header 穿透。应用会独立核对 Socket 来源、实际 Host、请求目标 Host、代理协议和可信外部请求 Origin；不要通过改写或伪造这些代理事实解决 `403`。浏览器自身缺少 `Origin` 或发送字面值 `null` 由应用结合 Session 绑定 CSRF 处理，不需要在 Nginx 补写该 Header。
 - 若使用非空 `CLOUD_BASE_PATH`，只调整 location 匹配范围，不在 `proxy_pass` 后添加会重写路径的 URI。
 
 ## 9. 健康、公开入口与监听检查
