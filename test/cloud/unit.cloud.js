@@ -728,7 +728,7 @@ test("settings CSRF tokens bind to one session and user", () => {
   assert.equal(verifySettingsCsrfToken(secret, "session-a", "user-a", `${token}x`), false);
 });
 
-test("settings mutations reject cross-origin, invalid CSRF, unsupported media, and streamed overflow", async () => {
+test("settings mutations accept optional opaque browser Origin while preserving transport, CSRF, media, and size boundaries", async () => {
   const secret = "settings-request-secret-with-at-least-32-characters";
   const csrf = createSettingsCsrfToken(secret, "session-a", "user-a");
   const validRequest = new Request("https://dailynews.test/settings/agent/connections", {
@@ -737,6 +737,10 @@ test("settings mutations reject cross-origin, invalid CSRF, unsupported media, a
     body: new URLSearchParams({ _csrf: csrf, name: "Agent" }),
   });
   const body = await readSettingsBody(validRequest.clone(), 1024);
+  const mutationRequest = (origin) => new Request("https://dailynews.test/settings/agent/connections", {
+    method: "POST",
+    headers: origin === undefined ? {} : { origin },
+  });
   assert.deepEqual(body, { _csrf: csrf, name: "Agent" });
   assert.doesNotThrow(() => assertBrowserMutation({
     request: validRequest,
@@ -747,14 +751,54 @@ test("settings mutations reject cross-origin, invalid CSRF, unsupported media, a
     userId: "user-a",
     body,
   }));
+  for (const origin of [undefined, "null"]) {
+    assert.doesNotThrow(() => assertBrowserMutation({
+      request: mutationRequest(origin),
+      requestOrigin: "https://dailynews.test",
+      configuredOrigin: "https://dailynews.test",
+      csrfSecret: secret,
+      sessionId: "session-a",
+      userId: "user-a",
+      body,
+    }));
+  }
   assert.throws(() => assertBrowserMutation({
-    request: new Request(validRequest, { headers: { ...Object.fromEntries(validRequest.headers), origin: "https://attacker.test" } }),
+    request: mutationRequest("https://attacker.test"),
     requestOrigin: "https://dailynews.test",
     configuredOrigin: "https://dailynews.test",
     csrfSecret: secret,
     sessionId: "session-a",
     userId: "user-a",
     body,
+  }), (error) => error.status === 403);
+  for (const origin of ["", "NULL"]) {
+    assert.throws(() => assertBrowserMutation({
+      request: mutationRequest(origin),
+      requestOrigin: "https://dailynews.test",
+      configuredOrigin: "https://dailynews.test",
+      csrfSecret: secret,
+      sessionId: "session-a",
+      userId: "user-a",
+      body,
+    }), (error) => error.status === 403);
+  }
+  assert.throws(() => assertBrowserMutation({
+    request: mutationRequest("null"),
+    requestOrigin: null,
+    configuredOrigin: "https://dailynews.test",
+    csrfSecret: secret,
+    sessionId: "session-a",
+    userId: "user-a",
+    body,
+  }), (error) => error.status === 403);
+  assert.throws(() => assertBrowserMutation({
+    request: mutationRequest("null"),
+    requestOrigin: "https://dailynews.test",
+    configuredOrigin: "https://dailynews.test",
+    csrfSecret: secret,
+    sessionId: "session-a",
+    userId: "user-a",
+    body: { ...body, _csrf: "invalid" },
   }), (error) => error.status === 403);
   await assert.rejects(
     () => readSettingsBody(new Request("https://dailynews.test/", {

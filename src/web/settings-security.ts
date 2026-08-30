@@ -78,9 +78,13 @@ export function assertBrowserMutation(input: {
   userId: string;
   body: Record<string, unknown>;
 }): void {
+  const browserOrigin = input.request.headers.get("origin");
+  const browserOriginIsAllowed = browserOrigin === null
+    || browserOrigin === "null"
+    || browserOrigin === input.configuredOrigin;
   if (
     input.requestOrigin !== input.configuredOrigin
-    || input.request.headers.get("origin") !== input.configuredOrigin
+    || !browserOriginIsAllowed
     || !verifySettingsCsrfToken(
       input.csrfSecret,
       input.sessionId,

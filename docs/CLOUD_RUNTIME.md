@@ -101,7 +101,7 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `GET /p/:publicationId/?date=YYYY-MM-DD` 按 Compiled Edition 的正式层级和顺序阅读指定日期日报；省略日期时读取该 Publication 的最新正式日报。指定日期不存在时明确返回 `404` 并只提供真实存在的最近一期入口，不静默回退。停用项不再出现在目录和 Home，但所属用户仍可通过原地址只读已有正式内容。
 - `GET /todo/` 只在 Todo 已启用且存在正式 State 时出现在全局导航，并只展示正式 State；Home 的 Todo 摘要与日报是否已有正式内容相互独立。`GET /settings` 规范跳转到 `/settings/sites`。
 - 设置外壳固定为五项：`/settings/sites` 日报站点、`/settings/themes` 只读主题库、`/settings/agent` Agent 授权、`/settings/account` 账户与安全、`/settings/advanced` 高级接入。日报站点下另有 Home、新建与精确 Publication 配置页，不提供设置 Dashboard 或独立 Todo 设置页。
-- 日报站点的创建、名称 / 主题合并保存、锁内移动、停用 / 恢复与 Todo 启停，以及昵称保存，都使用 Session、严格同源检查和绑定当前 Session 的 CSRF Token；PAT 不能进入这些浏览器写入路径。失败会保留表单输入，事务失败不留下部分事实。
+- 日报站点的创建、名称 / 主题合并保存、锁内移动、停用 / 恢复与 Todo 启停，以及昵称保存，都使用 Session、可信外部请求 Origin 和绑定当前 Session 的 CSRF Token；PAT 不能进入这些浏览器写入路径。浏览器提供具体 `Origin` 时必须与 `CLOUD_ORIGIN` 一致；浏览器未提供该 Header 或因隐私上下文发送字面值 `null` 时，由可信外部请求 Origin 与 CSRF 共同完成校验。失败会保留表单输入，事务失败不留下部分事实。
 - `GET /settings/agent` 与连接子路由沿用相同浏览器安全边界；昵称未完成时不能跳过首次步骤建立 Agent 授权。`GET /settings/advanced` 管理手动凭证，完整 PAT 仅在创建或轮换成功响应中显示一次；`GET /settings/advanced/openapi.yaml` 需要有效 Session。
 - 登录后的私有外壳读取显式昵称并显示首字符头像；昵称、Home 名称和 Publication 名称保持三个独立事实。账户页只读显示完整登录邮箱与“邮箱验证码”，退出只结束当前浏览器 Session。
 - 私有阅读外壳固定为“总览 / 我的日报 / Todo（满足可见条件时）/ 编辑部设置”，不随首要 Publication 名称变化。日报页的多来源以一个共享 Dialog 渐进增强；无 JavaScript 时仍保留可访问的来源列表。正式图片保留尺寸、替代文本与来源信息，远端图片不发送 Referrer，加载失败时回退为文字说明。
@@ -111,7 +111,7 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `GET /api/v1/todo` 与 `POST /api/v1/todo/candidates` 提供 Todo 状态、正式 State 与受控写入；Todo 关闭时不读取保留正文。
 - `POST /mcp` 提供十一项 Daily / Todo / Theme MCP 工具；只接受 Bearer PAT 与 `application/json`。`GET /mcp`、`DELETE /mcp` 和其他方法固定返回 `405 Allow: POST`。
 
-所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用独立核对实际 `Host`、HTTP 请求目标中的 Host、Socket 实际传输协议与 `CLOUD_ORIGIN`，只在两个 Host 都严格一致、直接上游地址为回环且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。连接或 Socket 元数据不可得时直接视为不可信；来自非回环地址、缺失或多值的代理协议、absolute-form 请求目标与 `Host` 不一致、Host 不匹配及浏览器 `Origin` 不匹配都会继续拒绝，不能用任意 Origin 或伪造请求目标绕过 CSRF。
+所有私有页面禁止公共缓存与索引。普通响应和日志不返回 Cookie、Session Token、OTP、完整邮箱、SQL、堆栈或供应商响应正文。HTTPS 在 Nginx 终止时，Nginx 必须通过回环地址访问 Node.js，保留公开 `Host`，并覆盖 `X-Forwarded-Proto $scheme` 与 `X-DailyNews-Client-IP`；应用独立核对实际 `Host`、HTTP 请求目标中的 Host、Socket 实际传输协议与 `CLOUD_ORIGIN`，只在两个 Host 都严格一致、直接上游地址为回环且 `X-Forwarded-Proto` 是单一匹配协议时使用代理协议参与同源判断。连接或 Socket 元数据不可得时直接视为不可信；来自非回环地址、缺失或多值的代理协议、absolute-form 请求目标与 `Host` 不一致、Host 不匹配及浏览器提供的具体 `Origin` 不匹配都会继续拒绝。浏览器缺少 `Origin` 或发送字面值 `null` 不单独构成拒绝条件，但可信外部请求 Origin 与 Session 绑定 CSRF 仍必须同时通过，不能用任意 Origin 或伪造请求目标绕过 CSRF。
 
 ## 测试
 
