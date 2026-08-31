@@ -78,6 +78,7 @@ export interface CloudAppDependencies {
 
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const agentSetupSource = new URL("docs/AGENT_SETUP.md", `file://${projectRoot}/`);
+const codexAgentSetupSource = new URL("docs/agent-setup/codex.md", `file://${projectRoot}/`);
 const cloudAssets = {
   "cloud.css": { url: new URL("src/web/cloud.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
   "tokens.css": { url: new URL("tokens.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
@@ -220,17 +221,20 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
   }
 
   if (dependencies.agentSettings) {
-    app.get(route("/agent-setup.md"), async (context) => {
+    const serveAgentSetup = async (context: Context, source: URL) => {
       try {
         const markdown = renderAgentSetupMarkdown(
-          await readFile(agentSetupSource, "utf8"),
+          await readFile(source, "utf8"),
           dependencies.agentSettings!.mcpUrl,
         );
         return context.body(markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
       }
-    });
+    };
+
+    app.get(route("/agent-setup.md"), (context) => serveAgentSetup(context, agentSetupSource));
+    app.get(route("/agent-setup/codex.md"), (context) => serveAgentSetup(context, codexAgentSetupSource));
   }
 
   if (dependencies.identity && dependencies.tenancy && dependencies.defaults) {
