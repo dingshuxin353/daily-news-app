@@ -538,62 +538,106 @@ test("health routes honor the explicit base path", async () => {
   assert.equal((await app.request("http://localhost/cloud/health/live")).status, 200);
 });
 
-test("Agent setup Markdown routes render the shared index and Codex guide under the configured base path", async () => {
-  const app = createCloudApp({
-    basePath: "/dailynews",
+test("Agent setup exposes only the API-first Markdown contracts at the configured base path", async () => {
+  const createApp = (basePath, apiBaseUrl) => createCloudApp({
+    basePath,
     readinessCheck: async () => {},
     agentSettings: {
       origin: "https://dailynews.test",
       csrfSecret: "agent-setup-test-secret",
       service: {},
       digestActor: () => "unused",
-      apiBaseUrl: "https://dailynews.test/dailynews/api/v1",
-      mcpUrl: "https://dailynews.test/dailynews/mcp",
+      apiBaseUrl,
+      mcpUrl: `https://dailynews.test${basePath}/mcp`,
       activeCredentialLimit: 10,
       requestBodyLimitBytes: 16384,
     },
   });
+  const documentPaths = [
+    "/agent-setup.md",
+    "/agent-setup/content.md",
+    "/agent-setup/todo.md",
+    "/agent-setup/theme.md",
+  ];
 
-  assert.equal((await app.request("https://dailynews.test/agent-setup.md")).status, 404);
-  assert.equal((await app.request("https://dailynews.test/agent-setup/codex.md")).status, 404);
+  const basePath = "/dailynews";
+  const apiBaseUrl = "https://dailynews.test/dailynews/api/v1";
+  const app = createApp(basePath, apiBaseUrl);
+  for (const path of documentPaths) {
+    assert.equal((await app.request(`https://dailynews.test${path}`)).status, 404);
+  }
 
-  const indexResponse = await app.request("https://dailynews.test/dailynews/agent-setup.md");
-  assert.equal(indexResponse.status, 200);
-  assert.equal(indexResponse.headers.get("content-type"), "text/markdown; charset=utf-8");
-  const indexMarkdown = await indexResponse.text();
+  const rendered = new Map();
+  for (const path of documentPaths) {
+    const response = await app.request(`https://dailynews.test${basePath}${path}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    rendered.set(path, await response.text());
+  }
 
-  const codexResponse = await app.request("https://dailynews.test/dailynews/agent-setup/codex.md");
-  assert.equal(codexResponse.status, 200);
-  assert.equal(codexResponse.headers.get("content-type"), "text/markdown; charset=utf-8");
-  const codexMarkdown = await codexResponse.text();
-
-  const mcpUrl = "https://dailynews.test/dailynews/mcp";
-  assert.ok(indexMarkdown.includes(mcpUrl));
-  assert.match(indexMarkdown, /^# DailyNews Agent 接入索引/m);
-  assert.match(indexMarkdown, /接入合同版本：`3\.1\.0`/);
-  assert.match(indexMarkdown, /\]\(\.\/agent-setup\/codex\.md\)/);
+  const indexMarkdown = rendered.get("/agent-setup.md");
+  assert.match(indexMarkdown, /^---\nname: dailynews\nversion: 4\.0\.0\n/);
+  assert.match(indexMarkdown, new RegExp(`api_base: "${apiBaseUrl.replaceAll("/", "\\/")}"`));
+  assert.match(indexMarkdown, /\]\(\.\/agent-setup\/content\.md\)/);
+  assert.match(indexMarkdown, /\]\(\.\/agent-setup\/todo\.md\)/);
+  assert.match(indexMarkdown, /\]\(\.\/agent-setup\/theme\.md\)/);
   assert.doesNotMatch(indexMarkdown, /状态：|实现阶段：|更新日期：/);
 
-  assert.ok(codexMarkdown.includes(mcpUrl));
-  assert.match(codexMarkdown, /^# DailyNews 接入操作手册：Codex/m);
-  assert.match(codexMarkdown, /指南版本：`1\.0\.0`/);
-  assert.match(codexMarkdown, /\[mcp_servers\.dailynews\]/);
-  assert.match(codexMarkdown, /http_headers/);
-  assert.match(codexMarkdown, /get_daily_context/);
-  assert.doesNotMatch(codexMarkdown, /状态：|实现阶段：|运行时路由：|更新日期：/);
+  const contentMarkdown = rendered.get("/agent-setup/content.md");
+  assert.match(contentMarkdown, /\/publications`/);
+  assert.match(contentMarkdown, /\/publications\/\{publicationId\}\/daily-context/);
+  assert.match(contentMarkdown, /\/publications\/\{publicationId\}\/daily-candidates/);
+  assert.match(contentMarkdown, /\/publications\/\{publicationId\}\/issues\/\{date\}/);
+  assert.match(contentMarkdown, /Authorization: Bearer/);
+  assert.match(contentMarkdown, /Content-Type: application\/json/);
+  assert.match(contentMarkdown, /Idempotency-Key/);
+  assert.match(contentMarkdown, /"mode": "update"/);
+  assert.match(contentMarkdown, /"confirmation"/);
+  assert.match(contentMarkdown, /"candidate"/);
 
-  for (const markdown of [indexMarkdown, codexMarkdown]) {
+  const todoMarkdown = rendered.get("/agent-setup/todo.md");
+  assert.match(todoMarkdown, /GET .*\/todo`/);
+  assert.match(todoMarkdown, /POST .*\/todo\/candidates`/);
+  assert.match(todoMarkdown, /baseRevision/);
+  assert.match(todoMarkdown, /revision_conflict/);
+  assert.doesNotMatch(todoMarkdown, /\/publications|\/themes/);
+
+  const themeMarkdown = rendered.get("/agent-setup/theme.md");
+  assert.match(themeMarkdown, /GET .*\/themes\/context`/);
+  assert.match(themeMarkdown, /GET .*\/themes\/\{themeId\}`/);
+  assert.match(themeMarkdown, /POST .*\/themes`/);
+  assert.match(themeMarkdown, /PUT .*\/themes\/\{themeId\}`/);
+  assert.match(themeMarkdown, /DELETE .*\/themes\/\{themeId\}`/);
+  assert.match(themeMarkdown, /baseRevision/);
+  assert.match(themeMarkdown, /If-Match/);
+  assert.doesNotMatch(themeMarkdown, /\/publications|\/todo/);
+
+  for (const markdown of rendered.values()) {
+    assert.ok(markdown.includes(apiBaseUrl));
     assert.doesNotMatch(markdown, /\{\{[^{}]+\}\}/);
-    assert.doesNotMatch(markdown, /Claim|Verify|配对|provisioning|instructionsVersion|dailynews-agent-setup\.json/);
+    assert.doesNotMatch(markdown, /\bmcp\b|mcp_servers|config\.toml|Claim|Verify|配对|provisioning|instructionsVersion|dailynews-agent-setup\.json/i);
     assert.doesNotMatch(markdown, /dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/);
   }
 
+  assert.equal((await app.request(
+    "https://dailynews.test/dailynews/agent-setup/codex.md",
+  )).status, 404);
   assert.equal((await app.request(
     "https://dailynews.test/dailynews/agent-setup/unknown.md",
   )).status, 404);
   assert.equal((await app.request(
     "https://dailynews.test/dailynews/.well-known/dailynews-agent-setup.json",
   )).status, 404);
+
+  const rootApiBaseUrl = "https://dailynews.test/api/v1";
+  const rootApp = createApp("", rootApiBaseUrl);
+  for (const path of documentPaths) {
+    const response = await rootApp.request(`https://dailynews.test${path}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.ok((await response.text()).includes(rootApiBaseUrl));
+    assert.equal((await rootApp.request(`https://dailynews.test/dailynews${path}`)).status, 404);
+  }
 });
 
 function runtimeConfig(port) {

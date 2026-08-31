@@ -78,7 +78,9 @@ export interface CloudAppDependencies {
 
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const agentSetupSource = new URL("docs/AGENT_SETUP.md", `file://${projectRoot}/`);
-const codexAgentSetupSource = new URL("docs/agent-setup/codex.md", `file://${projectRoot}/`);
+const agentSetupContentSource = new URL("docs/agent-setup/content.md", `file://${projectRoot}/`);
+const agentSetupTodoSource = new URL("docs/agent-setup/todo.md", `file://${projectRoot}/`);
+const agentSetupThemeSource = new URL("docs/agent-setup/theme.md", `file://${projectRoot}/`);
 const cloudAssets = {
   "cloud.css": { url: new URL("src/web/cloud.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
   "tokens.css": { url: new URL("tokens.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
@@ -225,7 +227,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
       try {
         const markdown = renderAgentSetupMarkdown(
           await readFile(source, "utf8"),
-          dependencies.agentSettings!.mcpUrl,
+          dependencies.agentSettings!.apiBaseUrl,
         );
         return context.body(markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
       } catch {
@@ -234,7 +236,9 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
     };
 
     app.get(route("/agent-setup.md"), (context) => serveAgentSetup(context, agentSetupSource));
-    app.get(route("/agent-setup/codex.md"), (context) => serveAgentSetup(context, codexAgentSetupSource));
+    app.get(route("/agent-setup/content.md"), (context) => serveAgentSetup(context, agentSetupContentSource));
+    app.get(route("/agent-setup/todo.md"), (context) => serveAgentSetup(context, agentSetupTodoSource));
+    app.get(route("/agent-setup/theme.md"), (context) => serveAgentSetup(context, agentSetupThemeSource));
   }
 
   if (dependencies.identity && dependencies.tenancy && dependencies.defaults) {

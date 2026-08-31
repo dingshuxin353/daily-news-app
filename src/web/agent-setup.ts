@@ -1,11 +1,11 @@
-const mcpUrlPlaceholder = "{{MCP_URL}}";
+const apiBaseUrlPlaceholder = "{{API_BASE_URL}}";
 
-function assertAbsoluteMcpUrl(value: string): void {
+function assertAbsoluteApiBaseUrl(value: string): void {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Agent setup MCP URL must be absolute");
+    throw new Error("Agent setup API Base URL must be absolute");
   }
   if (
     (url.protocol !== "https:" && url.protocol !== "http:")
@@ -14,15 +14,15 @@ function assertAbsoluteMcpUrl(value: string): void {
     || url.search
     || url.hash
   ) {
-    throw new Error("Agent setup MCP URL must be HTTP(S) without credentials, query, or fragment");
+    throw new Error("Agent setup API Base URL must be HTTP(S) without credentials, query, or fragment");
   }
 }
 
-export function renderAgentSetupMarkdown(source: string, mcpUrl: string): string {
-  const occurrences = source.split(mcpUrlPlaceholder).length - 1;
-  if (occurrences === 0) throw new Error(`Agent setup source is missing ${mcpUrlPlaceholder}`);
-  assertAbsoluteMcpUrl(mcpUrl);
-  const rendered = source.replaceAll(mcpUrlPlaceholder, mcpUrl);
+export function renderAgentSetupMarkdown(source: string, apiBaseUrl: string): string {
+  const occurrences = source.split(apiBaseUrlPlaceholder).length - 1;
+  if (occurrences === 0) throw new Error(`Agent setup source is missing ${apiBaseUrlPlaceholder}`);
+  assertAbsoluteApiBaseUrl(apiBaseUrl);
+  const rendered = source.replaceAll(apiBaseUrlPlaceholder, apiBaseUrl);
   if (/\{\{[^{}]+\}\}/.test(rendered)) {
     throw new Error("Agent setup source contains an unresolved placeholder");
   }
