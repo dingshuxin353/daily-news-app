@@ -77,20 +77,11 @@ export async function startCloudServer(options: {
     const tenancy = new PostgresTenancyStore(pool);
     const agentAccess = new AgentCredentialService(
       new PostgresAgentAccessRepository(pool, {
-        rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
         auditDays: config.product.agentAccess.auditRetentionDays,
       }),
       {
         tokenDigestSecret: config.agentAccess.tokenDigestSecret,
-        pairingCodeDigestSecret: config.agentAccess.pairingCodeDigestSecret,
         activeCredentialLimit: config.product.limits.activeTokensPerUser,
-        pairingCodeTtlSeconds: config.product.agentAccess.pairingCodeTtlSeconds,
-        provisioningTtlSeconds: config.product.agentAccess.provisioningTtlSeconds,
-        claimIpHourlyLimit: config.product.agentAccess.claimIpHourlyLimit,
-        verifyIpHourlyLimit: config.product.agentAccess.verifyIpHourlyLimit,
-        apiBaseUrl: config.agentAccess.apiBaseUrl,
-        mcpUrl: config.agentAccess.mcpUrl,
-        pairingVerifyUrl: `${config.origin}${config.basePath}/agent-pairing/v1/verify`,
       },
     );
     const agentRequestPolicy = new PostgresAgentRequestPolicy(pool);
@@ -99,7 +90,7 @@ export async function startCloudServer(options: {
       tenancy,
       agentRequestPolicy,
       {
-        digestSecret: config.agentAccess.pairingCodeDigestSecret,
+        digestSecret: config.agentAccess.tokenDigestSecret,
         rateLimitRetentionHours: config.product.agentAccess.rateLimitRetentionHours,
         readTokenHourlyLimit: config.product.agentAccess.readTokenHourlyLimit,
         writeTokenHourlyLimit: config.product.agentAccess.writeTokenHourlyLimit,
@@ -137,7 +128,7 @@ export async function startCloudServer(options: {
         csrfSecret: config.identity.authSecret,
         service: agentAccess,
         digestActor: (purpose, value) => keyedDigest(
-          config.agentAccess.pairingCodeDigestSecret,
+          config.agentAccess.tokenDigestSecret,
           `${purpose}\0${value}`,
         ),
         apiBaseUrl: config.agentAccess.apiBaseUrl,

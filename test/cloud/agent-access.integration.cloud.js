@@ -16,15 +16,12 @@ import { UserProfileService } from "../../.cloud-dist/src/modules/identity/profi
 import { SiteManagementService } from "../../.cloud-dist/src/modules/site-management/service.js";
 import { SiteThemeCatalogService } from "../../.cloud-dist/src/modules/site-management/theme-catalog.js";
 import { PostgresSiteManagementRepository } from "../../.cloud-dist/src/adapters/postgres/site-management.js";
-import { compileIssue } from "../../scripts/lib/compiler.js";
 import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("TEST_DATABASE_URL is required for PostgreSQL integration tests");
 const databaseName = decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, ""));
-if (!/(?:test|ci)/i.test(databaseName)) {
-  throw new Error("PostgreSQL integration tests require a dedicated test or CI database");
-}
+if (!/(?:test|ci)/i.test(databaseName)) throw new Error("PostgreSQL integration tests require a dedicated test or CI database");
 
 const { Pool } = pg;
 const controlPool = new Pool({ connectionString, max: 30, connectionTimeoutMillis: 5000 });
@@ -32,164 +29,121 @@ const openHarnesses = new Set();
 const migrationsDirectory = new URL("../../db/migrations", import.meta.url).pathname;
 const projectRoot = new URL("../../", import.meta.url).pathname;
 const systemThemes = createFileThemeStorage({ rootDir: projectRoot });
-const testRequestEnvironment = {
-  incoming: {
-    socket: {
-      remoteAddress: "127.0.0.1",
-      remotePort: 443,
-      remoteFamily: "IPv4",
-      encrypted: true,
-    },
-  },
+const requestEnvironment = { incoming: { socket: { remoteAddress: "127.0.0.1", remotePort: 443, remoteFamily: "IPv4", encrypted: true } } };
+
+const defaults = {
+  spaceName: "我的日报",
+  timeZone: "Asia/Shanghai",
+  publicationId: "daily-news",
+  publicationName: "DailyNews",
+  theme: { id: "newspaper-default", revision: 1 },
+  todoEnabled: false,
+  priorityLimits: { lead: 1, important: 2, normal: null },
 };
 
-const product = {
-  schemaVersion: 1,
-  defaults: {
-    spaceName: "我的日报",
-    timeZone: "Asia/Shanghai",
-    publicationId: "daily-news",
-    publicationName: "DailyNews",
-    theme: { id: "newspaper-default", revision: 1 },
-    todoEnabled: false,
-    priorityLimits: { lead: 1, important: 2, normal: null },
-  },
-  limits: {
-    publicationsPerSpace: 8,
-    customThemesPerSpace: 24,
-    activeTokensPerUser: 10,
-    testDailyEmailHardLimit: 100,
-    emailCooldownSeconds: 1,
-    emailHourlyLimit: 100,
-    ipHourlyLimit: 100,
-  },
-  identity: {
-    otpLength: 6,
-    otpExpiresInSeconds: 300,
-    otpAllowedAttempts: 3,
-    sessionExpiresInDays: 30,
-  },
-  agentAccess: {
-    pairingCodeTtlSeconds: 600,
-    provisioningTtlSeconds: 600,
-    claimIpHourlyLimit: 20,
-    verifyIpHourlyLimit: 40,
-    requestBodyLimitBytes: 16384,
-    rateLimitRetentionHours: 24,
-    auditRetentionDays: 90,
-  },
-};
+function appRequest(app, pathname, init = {}) {
+  return app.request(`https://dailynews.test${pathname}`, {
+    ...init,
+    headers: { host: "dailynews.test", ...Object.fromEntries(new Headers(init.headers)) },
+  }, requestEnvironment);
+}
 
-function runtimeConfig(productOverrides = {}) {
-  const mergedProduct = {
-    ...product,
-    ...productOverrides,
-    limits: { ...product.limits, ...productOverrides.limits },
-    identity: { ...product.identity, ...productOverrides.identity },
-    agentAccess: { ...product.agentAccess, ...productOverrides.agentAccess },
-  };
-  return {
+async function post(app, pathname, body, headers = {}) {
+  return appRequest(app, pathname, {
+    method: "POST",
+    headers: { origin: "https://dailynews.test", "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+async function resetAndMigrate() {
+  await controlPool.query("DROP SCHEMA IF EXISTS auth CASCADE");
+  await controlPool.query("DROP SCHEMA IF EXISTS app CASCADE");
+  await runMigrations(controlPool, { migrationsDirectory });
+}
+
+function createHarness(activeLimit = 10) {
+  const database = { connectionString, sslMode: "disable", max: 20, idleTimeoutMillis: 1000, connectionTimeoutMillis: 5000 };
+  const runtime = {
     origin: "https://dailynews.test",
     basePath: "",
     host: "127.0.0.1",
     port: 0,
-    database: {
-      connectionString,
-      sslMode: "disable",
-      max: 20,
-      idleTimeoutMillis: 1000,
-      connectionTimeoutMillis: 5000,
-    },
+    database,
     identity: {
       authSecret: "agent-access-auth-secret-at-least-32-characters",
-      digestSecret: "agent-access-identity-digest-at-least-32-characters",
+      digestSecret: "agent-access-identity-secret-at-least-32-characters",
       mailMode: "fake",
     },
     agentAccess: {
-      tokenDigestSecret: "agent-access-token-digest-at-least-32-characters",
-      pairingCodeDigestSecret: "agent-access-pairing-digest-at-least-32-characters",
+      tokenDigestSecret: "agent-access-token-secret-at-least-32-characters",
       apiBaseUrl: "https://dailynews.test/api/v1",
       mcpUrl: "https://dailynews.test/mcp",
     },
-    product: mergedProduct,
+    product: {
+      schemaVersion: 1,
+      defaults,
+      limits: {
+        publicationsPerSpace: 8,
+        customThemesPerSpace: 24,
+        activeTokensPerUser: activeLimit,
+        testDailyEmailHardLimit: 100,
+        emailCooldownSeconds: 1,
+        emailHourlyLimit: 100,
+        ipHourlyLimit: 100,
+      },
+      identity: { otpLength: 6, otpExpiresInSeconds: 300, otpAllowedAttempts: 3, sessionExpiresInDays: 30 },
+      agentAccess: { requestBodyLimitBytes: 16384, rateLimitRetentionHours: 24, auditRetentionDays: 90 },
+    },
   };
-}
-
-function createHarness(options = {}) {
-  const config = runtimeConfig(options.productOverrides);
-  const appPool = createPostgresPool(config.database);
-  const authPool = createAuthPostgresPool(config.database);
+  const appPool = createPostgresPool(database);
+  const authPool = createAuthPostgresPool(database);
   const mail = new FakeMailAdapter();
-  const identity = createIdentityService({ config, appPool, authPool, mailAdapter: mail });
+  const identity = createIdentityService({ config: runtime, appPool, authPool, mailAdapter: mail });
   const tenancy = new PostgresTenancyStore(appPool);
   const profiles = new UserProfileService(appPool);
   const privateReading = new PrivateReadingService(appPool, tenancy, systemThemes, () => new Date("2026-08-27T08:00:00+08:00"), profiles);
+  const credentials = new AgentCredentialService(
+    new PostgresAgentAccessRepository(appPool, { auditDays: 90 }),
+    { tokenDigestSecret: runtime.agentAccess.tokenDigestSecret, activeCredentialLimit: activeLimit },
+  );
   const siteManagement = new SiteManagementService(
     new PostgresSiteManagementRepository(appPool, systemThemes),
-    config.product.defaults,
-    config.product.limits.publicationsPerSpace,
+    defaults,
+    8,
   );
-  const agentAccess = new AgentCredentialService(
-    new PostgresAgentAccessRepository(appPool, {
-      rateLimitHours: config.product.agentAccess.rateLimitRetentionHours,
-      auditDays: config.product.agentAccess.auditRetentionDays,
-    }),
-    {
-      tokenDigestSecret: config.agentAccess.tokenDigestSecret,
-      pairingCodeDigestSecret: config.agentAccess.pairingCodeDigestSecret,
-      activeCredentialLimit: config.product.limits.activeTokensPerUser,
-      pairingCodeTtlSeconds: config.product.agentAccess.pairingCodeTtlSeconds,
-      provisioningTtlSeconds: config.product.agentAccess.provisioningTtlSeconds,
-      claimIpHourlyLimit: config.product.agentAccess.claimIpHourlyLimit,
-      verifyIpHourlyLimit: config.product.agentAccess.verifyIpHourlyLimit,
-      apiBaseUrl: config.agentAccess.apiBaseUrl,
-      mcpUrl: config.agentAccess.mcpUrl,
-      pairingVerifyUrl: "https://dailynews.test/agent-pairing/v1/verify",
-    },
-  );
-  const digestActor = (purpose, value) => keyedDigest(
-    config.agentAccess.pairingCodeDigestSecret,
-    `${purpose}\0${value}`,
-  );
+  const digestActor = (purpose, value) => keyedDigest(runtime.agentAccess.tokenDigestSecret, `${purpose}\0${value}`);
   const app = createCloudApp({
     basePath: "",
     readinessCheck: async () => {},
     identity,
     tenancy,
     privateReading,
-    defaults: config.product.defaults,
+    defaults,
     clientIpResolver: (context) => context.req.header("x-test-client-ip") || "127.0.0.1",
     testMailReader: mail,
     agentSettings: {
-      origin: config.origin,
-      csrfSecret: config.identity.authSecret,
-      service: agentAccess,
+      origin: runtime.origin,
+      csrfSecret: runtime.identity.authSecret,
+      service: credentials,
       digestActor,
-      apiBaseUrl: config.agentAccess.apiBaseUrl,
-      mcpUrl: config.agentAccess.mcpUrl,
-      activeCredentialLimit: config.product.limits.activeTokensPerUser,
-      requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
+      apiBaseUrl: runtime.agentAccess.apiBaseUrl,
+      mcpUrl: runtime.agentAccess.mcpUrl,
+      activeCredentialLimit: activeLimit,
+      requestBodyLimitBytes: 16384,
     },
     siteSettings: {
-      origin: config.origin,
-      csrfSecret: config.identity.authSecret,
+      origin: runtime.origin,
+      csrfSecret: runtime.identity.authSecret,
       service: siteManagement,
       themes: new SiteThemeCatalogService(appPool, systemThemes),
       profiles,
-      publicationLimit: config.product.limits.publicationsPerSpace,
-      requestBodyLimitBytes: config.product.agentAccess.requestBodyLimitBytes,
+      publicationLimit: 8,
+      requestBodyLimitBytes: 16384,
     },
   });
   const harness = {
-    app,
-    appPool,
-    authPool,
-    mail,
-    agentAccess,
-    profiles,
-    tenancy,
-    privateReading,
-    siteManagement,
+    app, appPool, authPool, mail, credentials, profiles, tenancy,
     async close() {
       openHarnesses.delete(harness);
       await Promise.all([appPool.end(), authPool.end()]);
@@ -199,1111 +153,184 @@ function createHarness(options = {}) {
   return harness;
 }
 
-async function resetAndMigrate() {
-  await controlPool.query("DROP SCHEMA IF EXISTS auth CASCADE");
-  await controlPool.query("DROP SCHEMA IF EXISTS app CASCADE");
-  await runMigrations(controlPool, { migrationsDirectory });
-}
-
-function appRequest(app, input, init = {}) {
-  return app.request(input, {
-    ...init,
-    headers: {
-      host: "dailynews.test",
-      ...Object.fromEntries(new Headers(init.headers)),
-    },
-  }, testRequestEnvironment);
-}
-
-async function post(app, pathname, body, headers = {}) {
-  return appRequest(app, `https://dailynews.test${pathname}`, {
-    method: "POST",
-    headers: { origin: "https://dailynews.test", "content-type": "application/json", ...headers },
-    body: JSON.stringify(body),
-  });
-}
-
-async function verifyPairing(app, token, headers = {}) {
-  return appRequest(app, "https://dailynews.test/agent-pairing/v1/verify", {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, ...headers },
-  });
-}
-
 async function signIn(harness, email, completeProfile = true) {
-  assert.equal((await post(harness.app, "/api/auth/email-otp/send-verification-otp", {
-    email,
-    type: "sign-in",
-  })).status, 200);
+  assert.equal((await post(harness.app, "/api/auth/email-otp/send-verification-otp", { email, type: "sign-in" })).status, 200);
   const otp = harness.mail.latestFor(email)?.otp;
   assert.ok(otp);
   const response = await post(harness.app, "/api/auth/sign-in/email-otp", { email, otp });
   assert.equal(response.status, 200);
-  const setCookie = response.headers.get("set-cookie");
-  assert.ok(setCookie);
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+  assert.ok(cookie);
   if (completeProfile) {
     const user = await controlPool.query('SELECT "id" FROM auth."user" WHERE "email" = $1', [email]);
     await harness.profiles.setNickname(user.rows[0].id, "测试用户");
   }
-  return setCookie.split(";", 1)[0];
+  return cookie;
 }
 
-async function getJson(app, pathname, headers = {}) {
-  const response = await appRequest(app, `https://dailynews.test${pathname}`, { headers });
+async function getSettings(harness, pathname, cookie, accept = "application/json") {
+  const response = await appRequest(harness.app, pathname, { headers: { cookie, accept } });
+  return { response, body: accept.includes("json") && response.status !== 404 ? await response.json() : null };
+}
+
+async function mutate(harness, pathname, cookie, csrfToken, body = {}, headers = {}) {
+  const response = await post(harness.app, pathname, { ...body, _csrf: csrfToken }, { cookie, ...headers });
   return { response, body: await response.json() };
-}
-
-async function mutate(app, pathname, cookie, csrfToken, body = {}, headers = {}) {
-  const response = await post(app, pathname, { ...body, _csrf: csrfToken }, { cookie, ...headers });
-  return { response, body: await response.json() };
-}
-
-async function browserForm(app, pathname, cookie, fields, headers = {}) {
-  return appRequest(app, `https://dailynews.test${pathname}`, {
-    method: "POST",
-    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded", ...headers },
-    body: new URLSearchParams(fields).toString(),
-  });
-}
-
-async function waitForBlockedTransactions(blockerPid, minimum) {
-  for (let attempt = 0; attempt < 1000; attempt += 1) {
-    const result = await controlPool.query(`
-      WITH RECURSIVE blocked(pid) AS (
-        SELECT pid
-        FROM pg_stat_activity
-        WHERE datname = current_database()
-          AND $1::integer = ANY(pg_blocking_pids(pid))
-        UNION
-        SELECT activity.pid
-        FROM pg_stat_activity activity
-        JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
-        WHERE activity.datname = current_database()
-      )
-      SELECT count(*)::integer AS count FROM blocked
-    `, [blockerPid]);
-    if (result.rows[0].count >= minimum) return;
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  throw new Error(`expected at least ${minimum} transactions blocked by the Space lock holder`);
 }
 
 beforeEach(resetAndMigrate);
-
 afterEach(async () => {
   await Promise.all([...openHarnesses].map((harness) => harness.close()));
 });
-
 after(async () => {
   await controlPool.query("DROP SCHEMA IF EXISTS auth CASCADE");
   await controlPool.query("DROP SCHEMA IF EXISTS app CASCADE");
   await controlPool.end();
 });
 
-test("private product journey keeps onboarding, sample replacement, formal Daily, and Todo projection on one tenant", async () => {
-  const harness = createHarness();
-  const cookie = await signIn(harness, "reader@example.com", false);
-
-  const publicPage = await appRequest(harness.app, "https://dailynews.test/", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(publicPage.status, 200);
-  assert.match(await publicPage.text(), /每天一份，只为你而编的私人日报/);
-
-  const destination = await appRequest(harness.app, "https://dailynews.test/post-login", {
-    headers: { cookie },
-  });
-  assert.equal(destination.status, 303);
-  assert.equal(destination.headers.get("location"), "/onboarding");
-
-  const nicknameStep = await appRequest(harness.app, "https://dailynews.test/onboarding", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(nicknameStep.status, 200);
-  const nicknameHtml = await nicknameStep.text();
-  assert.match(nicknameHtml, /先写下你的称呼/);
-  assert.doesNotMatch(nicknameHtml, /把这段话发给你的 Agent|data-copy-source="pairing"/);
-  const nicknameCsrf = /name="_csrf" value="([^"]+)"/.exec(nicknameHtml)?.[1];
-  assert.ok(nicknameCsrf);
-  const blockedAgent = await appRequest(harness.app, "https://dailynews.test/settings/agent", { headers: { cookie, accept: "text/html" } });
-  assert.equal(blockedAgent.status, 303);
-  assert.equal(blockedAgent.headers.get("location"), "/onboarding");
-  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_pairing_sessions")).rows[0].count, 0);
-  const invalidNickname = await appRequest(harness.app, "https://dailynews.test/onboarding/nickname", {
-    method: "POST",
-    headers: { cookie, accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ _csrf: nicknameCsrf, nickname: "这是一个明显超过二十四个可见字符的昵称输入需要被完整保留" }).toString(),
-  });
-  assert.equal(invalidNickname.status, 400);
-  const invalidNicknameHtml = await invalidNickname.text();
-  assert.match(invalidNicknameHtml, /value="这是一个明显超过二十四个可见字符的昵称输入需要被完整保留"/);
-  assert.doesNotMatch(invalidNicknameHtml, /data-copy-source="pairing"/);
-  const nicknameSaved = await appRequest(harness.app, "https://dailynews.test/onboarding/nickname", {
-    method: "POST",
-    headers: { cookie, origin: "null", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ _csrf: nicknameCsrf, nickname: "丁丁" }).toString(),
-  });
-  assert.equal(nicknameSaved.status, 303);
-  assert.equal(nicknameSaved.headers.get("location"), "/onboarding");
-
-  const anchoredLogin = await appRequest(harness.app, "https://dailynews.test/login?returnTo=%2Ftodo%2F%23todo-1234abcd", {
-    headers: { accept: "text/html" },
-  });
-  assert.equal(anchoredLogin.status, 200);
-  assert.match(await anchoredLogin.text(), /data-return-to="\/todo\/#todo-1234abcd"/);
-  const anchoredDestination = await appRequest(harness.app, "https://dailynews.test/post-login?returnTo=%2Ftodo%2F%23todo-1234abcd", {
-    headers: { cookie },
-  });
-  assert.equal(anchoredDestination.headers.get("location"), "/todo/#todo-1234abcd");
-
-  const onboarding = await appRequest(harness.app, "https://dailynews.test/onboarding", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(onboarding.status, 200);
-  const onboardingHtml = await onboarding.text();
-  assert.match(onboardingHtml, /把这段话发给你的 Agent/);
-  assert.match(onboardingHtml, /当前显示的配对码/);
-  assert.match(onboardingHtml, /https:\/\/dailynews\.test\/agent-setup\.md/);
-  assert.doesNotMatch(onboardingHtml, /dailynews-agent-setup/);
-  assert.match(onboardingHtml, /data-copy-source="pairing"/);
-  const instructionText = /data-copy-source="instruction">([\s\S]*?)<\/pre>/.exec(onboardingHtml)?.[1] ?? "";
-  assert.doesNotMatch(instructionText, /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/);
-
-  const setupResponse = await appRequest(
-    harness.app,
-    "https://dailynews.test/agent-setup.md",
-  );
-  assert.equal(setupResponse.status, 200);
-  assert.equal(setupResponse.headers.get("content-type"), "text/markdown; charset=utf-8");
-  const setup = await setupResponse.text();
-  assert.match(setup, /接入合同版本：`2\.0\.0`/);
-  assert.match(setup, /POST https:\/\/dailynews\.test\/agent-pairing\/v1\/claim/);
-  assert.match(setup, /POST https:\/\/dailynews\.test\/agent-pairing\/v1\/verify/);
-  assert.match(setup, /GET https:\/\/dailynews\.test\/api\/v1\/publications/);
-  assert.match(setup, /https:\/\/dailynews\.test\/mcp/);
-  assert.doesNotMatch(setup, /\{\{[^{}]+\}\}|dnpat_[A-Za-z0-9_-]+/);
-  assert.equal((await appRequest(
-    harness.app,
-    "https://dailynews.test/.well-known/dailynews-agent-setup.json",
-  )).status, 404);
-
-  const sampleHome = await appRequest(harness.app, "https://dailynews.test/home", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(sampleHome.status, 200);
-  const sampleHtml = await sampleHome.text();
-  assert.match(sampleHtml, /示例日报/);
-  assert.match(sampleHtml, /\/assets\/themes\/newspaper-default\/1\.css/);
-  assert.doesNotMatch(sampleHtml, /下次更新时间|负责 Agent|调度健康|迟到/);
-  assert.match(sampleHtml, /账户：丁丁/);
-  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.issues")).rows[0].count, 0);
-  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.daily_candidates")).rows[0].count, 0);
-  const themeAsset = await appRequest(harness.app, "https://dailynews.test/assets/themes/newspaper-default/1.css");
-  assert.equal(themeAsset.status, 200);
-  assert.match(await themeAsset.text(), /--color-paper: var\(--color-background\)/);
-
-  const space = (await controlPool.query("SELECT id FROM app.spaces")).rows[0];
-  const issue = {
-    schemaVersion: 1,
-    date: "2026-08-27",
-    generatedAt: "2026-08-27T08:00:00+08:00",
-    coverage: { start: "2026-08-26T08:00:00+08:00", end: "2026-08-27T08:00:00+08:00" },
-    revision: 1,
-    items: [
-      { id: "formal-lead", title: "正式主标题", brief: "正式短摘要", summary: "正式完整摘要，用于验证第一份个性化日报会在 Home 的同一位置替换系统示例，而不会与示例并排展示。这里保留足够正文，让大模块使用正式 summary。", category: "正式内容", editorial: { priority: "lead", selectionReason: "正式首要内容" }, sources: [{ name: "正式来源一", url: "https://example.com/lead" }] },
-      { id: "formal-normal", title: "正式次标题", brief: "正式次要摘要", summary: "正式次要完整摘要，用于验证编译顺序和层级。", category: "正式内容", editorial: { priority: "normal", selectionReason: "正式次要内容" }, sources: [{ name: "正式来源二", url: "https://example.com/normal" }] },
-    ],
-  };
-  const compiled = compileIssue(issue).compiled;
-  await controlPool.query(
-    `INSERT INTO app.issues (space_id, publication_id, issue_date, revision, issue_payload)
-     VALUES ($1, 'daily-news', $2::date, 1, $3::jsonb)`,
-    [space.id, issue.date, JSON.stringify(issue)],
-  );
-  await controlPool.query(
-    `INSERT INTO app.compiled_editions (space_id, publication_id, issue_date, revision, compiled_payload)
-     VALUES ($1, 'daily-news', $2::date, 1, $3::jsonb)`,
-    [space.id, issue.date, JSON.stringify(compiled)],
-  );
-
-  const tenant = await harness.tenancy.resolveTenantContextForSpace(space.id);
-  const formalReading = await harness.privateReading.readLatestDaily(tenant);
-  assert.equal(formalReading.date, issue.date);
-  assert.equal(formalReading.projection.rows[0].modules[0].item.id, "formal-lead");
-
-  const formalHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  assert.equal(formalHome.status, 200);
-  const formalHomeHtml = await formalHome.text();
-  assert.match(formalHomeHtml, /个性化正式日报/);
-  assert.match(formalHomeHtml, /正式主标题/);
-  assert.doesNotMatch(formalHomeHtml, /把一天的信息/);
-
-  const dailyPage = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", { headers: { cookie, accept: "text/html" } });
-  assert.equal(dailyPage.status, 200);
-  const dailyHtml = await dailyPage.text();
-  assert.ok(dailyHtml.indexOf("正式主标题") < dailyHtml.indexOf("正式次标题"));
-  assert.match(dailyHtml, /daily-module--large/);
-  assert.match(dailyHtml, /daily-module--small/);
-  const missing = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-26", { headers: { cookie, accept: "text/html" } });
-  assert.equal(missing.status, 404);
-  assert.match(await missing.text(), /这一天没有正式日报/);
-
-  const otherTenant = await harness.tenancy.ensureSpaceForUser("private-reading-other-user", product.defaults);
-  await controlPool.query(
-    `INSERT INTO app.publications (space_id, publication_id, display_name, status, sort_order)
-     VALUES ($1, 'private-other', '其他用户的私密日报', 'active', 1)`,
-    [otherTenant.spaceId],
-  );
-  const crossTenant = await appRequest(harness.app, "https://dailynews.test/p/private-other/?date=2026-08-27", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(crossTenant.status, 404);
-  assert.doesNotMatch(await crossTenant.text(), /其他用户的私密日报|正式主标题/);
-  const nonexistent = await appRequest(harness.app, "https://dailynews.test/p/not-a-publication/?date=2026-08-27", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(nonexistent.status, 404);
-  assert.doesNotMatch(await nonexistent.text(), /正式主标题/);
-
-  const agentSettings = await getJson(harness.app, "/settings/agent", { cookie });
-  const disabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites?reason=todo-disabled", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(disabledSettings.status, 200);
-  const disabledSettingsHtml = await disabledSettings.text();
-  assert.match(disabledSettingsHtml, /Personal Todo 尚未启用/);
-  assert.doesNotMatch(disabledSettingsHtml, /今天的正式任务/);
-  const enabled = await appRequest(harness.app, "https://dailynews.test/settings/sites/todo/enable", {
-    method: "POST",
-    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ _csrf: agentSettings.body.csrfToken }).toString(),
-  });
-  assert.equal(enabled.status, 303);
-  assert.equal(enabled.headers.get("location"), "/todo/");
-
-  const todoState = {
-    schemaVersion: 1,
-    revision: 1,
-    updatedAt: "2026-08-27T08:00:00+08:00",
-    items: [
-      { id: "todo-1234abcd", title: "今天的正式任务", note: "只来自正式 Todo State", dueDate: "2026-08-27", dueTime: "15:00", status: "open", createdAt: "2026-08-27T07:00:00+08:00", updatedAt: "2026-08-27T07:00:00+08:00", completedAt: null, archivedAt: null },
-    ],
-  };
-  await controlPool.query(
-    "INSERT INTO app.todo_states (space_id, revision, state_payload) VALUES ($1, 1, $2::jsonb)",
-    [space.id, JSON.stringify(todoState)],
-  );
-  const todoPage = await appRequest(harness.app, "https://dailynews.test/todo/", { headers: { cookie, accept: "text/html" } });
-  assert.equal(todoPage.status, 200);
-  const todoHtml = await todoPage.text();
-  for (const heading of ["已逾期", "今天", "接下来", "暂无日期", "今天已完成"]) assert.match(todoHtml, new RegExp(heading));
-  assert.match(todoHtml, /今天的正式任务/);
-
-  const enabledSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites", {
-    headers: { cookie, accept: "text/html" },
-  });
-  const enabledSettingsHtml = await enabledSettings.text();
-  assert.match(enabledSettingsHtml, /已保留正式 Todo 数据/);
-  assert.doesNotMatch(enabledSettingsHtml, /今天的正式任务/);
-  const disableConfirmation = await appRequest(harness.app, "https://dailynews.test/settings/sites/todo/disable", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(disableConfirmation.status, 200);
-  assert.match(await disableConfirmation.text(), /已有正式内容会完整保留/);
-  assert.equal((await controlPool.query("SELECT enabled FROM app.todo_profiles WHERE space_id = $1", [space.id])).rows[0].enabled, true);
-
-  const disabled = await appRequest(harness.app, "https://dailynews.test/settings/sites/todo/disable", {
-    method: "POST",
-    headers: { cookie, origin: "https://dailynews.test", accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ _csrf: agentSettings.body.csrfToken }).toString(),
-  });
-  assert.equal(disabled.status, 303);
-  assert.equal(disabled.headers.get("location"), "/settings/sites?updated=todo-disabled#personal-todo");
-  const hiddenTodo = await appRequest(harness.app, "https://dailynews.test/todo/", { headers: { cookie, accept: "text/html" } });
-  assert.equal(hiddenTodo.status, 303);
-  assert.equal(hiddenTodo.headers.get("location"), "/settings/sites?reason=todo-disabled#personal-todo");
-  assert.equal((await controlPool.query("SELECT state_payload FROM app.todo_states WHERE space_id = $1", [space.id])).rowCount, 1);
-
-  await controlPool.query(
-    "UPDATE app.publications SET status = 'inactive', sort_order = NULL WHERE space_id = $1 AND publication_id = 'daily-news'",
-    [space.id],
-  );
-  const retainedDaily = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(retainedDaily.status, 200);
-  const retainedDailyHtml = await retainedDaily.text();
-  assert.match(retainedDailyHtml, /正式主标题/);
-  assert.match(retainedDailyHtml, /正式次标题/);
-  await controlPool.query(
-    "UPDATE app.publications SET status = 'active', sort_order = 0 WHERE space_id = $1 AND publication_id = 'daily-news'",
-    [space.id],
-  );
-
-  await controlPool.query(
-    "UPDATE app.theme_selections SET theme_id = 'missing-theme' WHERE space_id = $1 AND target_type = 'home'",
-    [space.id],
-  );
-  const incompleteTheme = await appRequest(harness.app, "https://dailynews.test/home", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(incompleteTheme.status, 503);
-  assert.doesNotMatch(await incompleteTheme.text(), /正式主标题|今天的正式任务/);
+test("final Agent access schema contains only digest-backed Token lifecycle facts", async () => {
+  const tables = (await controlPool.query("SELECT tablename FROM pg_tables WHERE schemaname = 'app' ORDER BY tablename")).rows.map(({ tablename }) => tablename);
+  assert.ok(tables.includes("agent_credentials"));
+  assert.equal(tables.some((name) => name.includes("pairing")), false);
+  const columns = (await controlPool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'app' AND table_name = 'agent_credentials' ORDER BY ordinal_position")).rows.map(({ column_name }) => column_name);
+  assert.equal(columns.includes("expires_at"), false);
+  const constraints = (await controlPool.query("SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'app.agent_credentials'::regclass")).rows.map(({ definition }) => definition).join("\n");
+  assert.doesNotMatch(constraints, /provisioning|pairing/i);
 });
 
-test("M4 final reading journey keeps multi-publication indexes, dates, themes, images, sources, inactive archives, and Todo navigation tenant-safe", async () => {
+test("new users reach onboarding without implicit Token creation and see only the direct Token journey", async () => {
   const harness = createHarness();
-  const cookie = await signIn(harness, "m4-reader@example.com");
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie } })).status, 200);
-  const user = await controlPool.query('SELECT "id" FROM auth."user" WHERE "email" = $1', ["m4-reader@example.com"]);
-  const tenant = await harness.tenancy.resolveTenantContextForUser(user.rows[0].id);
-  assert.ok(tenant);
-  await harness.siteManagement.createPublication(tenant, {
-    publicationId: "product-watch",
-    name: "产品观察",
-    theme: { mode: "override", themeId: "midnight-tech" },
-  });
-
-  const insertDaily = async (publicationId, date, title, options = {}) => {
-    const issue = {
-      schemaVersion: 2,
-      date,
-      generatedAt: `${date}T08:00:00+08:00`,
-      coverage: { start: `${date}T00:00:00+08:00`, end: `${date}T08:00:00+08:00` },
-      revision: 1,
-      items: [{
-        id: `${publicationId}-${date}`,
-        title,
-        brief: `${title}的正式短摘要`,
-        summary: `${title}的正式完整摘要，只用于 M4 隔离验收。`,
-        category: "虚构验收",
-        editorial: { priority: "lead", selectionReason: "验证最终阅读体验" },
-        ...(options.image ? { image: options.image } : {}),
-        sources: options.sources ?? [{ name: "虚构主要来源", url: `https://example.test/${publicationId}/${date}` }],
-      }],
-    };
-    const compiled = compileIssue(issue).compiled;
-    await controlPool.query(
-      `INSERT INTO app.issues (space_id, publication_id, issue_date, revision, issue_payload)
-       VALUES ($1, $2, $3::date, 1, $4::jsonb)`,
-      [tenant.spaceId, publicationId, date, JSON.stringify(issue)],
-    );
-    await controlPool.query(
-      `INSERT INTO app.compiled_editions (space_id, publication_id, issue_date, revision, compiled_payload)
-       VALUES ($1, $2, $3::date, 1, $4::jsonb)`,
-      [tenant.spaceId, publicationId, date, JSON.stringify(compiled)],
-    );
-  };
-
-  await insertDaily("daily-news", "2026-08-28", "AI 日报较早一期");
-  await insertDaily("daily-news", "2026-08-29", "AI 日报最新一期", {
-    image: { src: "https://images.example.test/m4.jpg", alt: "虚构验收配图", width: 1200, height: 800, credit: "虚构图片来源", sourceUrl: "https://images.example.test/m4-source" },
-    sources: [
-      { name: "虚构主要来源", url: "https://example.test/main" },
-      { name: "虚构补充来源", url: "https://example.test/extra", originalTitle: "Fictional original" },
-    ],
-  });
-  await insertDaily("product-watch", "2026-08-29", "产品观察最新一期");
-
-  const firstHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  assert.equal(firstHome.status, 200);
-  const firstHomeHtml = await firstHome.text();
-  assert.match(firstHomeHtml, /AI 日报最新一期/);
-  assert.match(firstHomeHtml, /产品观察最新一期/);
-  assert.ok(firstHomeHtml.indexOf("AI 日报最新一期") < firstHomeHtml.indexOf("产品观察最新一期"));
-  assert.match(firstHomeHtml, /href="\/publications\/"[^>]*>我的日报/);
-  assert.doesNotMatch(firstHomeHtml, />Todo</);
-  assert.match(firstHomeHtml, /assets\/themes\/newspaper-default\/1\.css/);
-
-  const directory = await appRequest(harness.app, "https://dailynews.test/publications/", { headers: { cookie, accept: "text/html" } });
-  assert.equal(directory.status, 200);
-  const directoryHtml = await directory.text();
-  assert.match(directoryHtml, /首要日报/);
-  assert.match(directoryHtml, /AI 日报最新一期/);
-  assert.match(directoryHtml, /产品观察最新一期/);
-  assert.doesNotMatch(directoryHtml, /<form|配置日报|上移|下移/);
-
-  const daily = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-29", { headers: { cookie, accept: "text/html" } });
-  assert.equal(daily.status, 200);
-  const dailyHtml = await daily.text();
-  assert.match(dailyHtml, /AI 日报较早一期|2026-08-28/);
-  assert.match(dailyHtml, /data-reading-image/);
-  assert.match(dailyHtml, /data-source-dialog/);
-  assert.match(dailyHtml, /虚构补充来源/);
-  assert.match(daily.headers.get("content-security-policy"), /img-src 'self' data: https:/);
-
-  const missing = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-27", { headers: { cookie, accept: "text/html" } });
-  assert.equal(missing.status, 404);
-  const missingHtml = await missing.text();
-  assert.match(missingHtml, /这一天没有正式日报/);
-  assert.match(missingHtml, /阅读最近一期 · 2026-08-29/);
-  assert.doesNotMatch(missingHtml, /AI 日报最新一期/);
-  const invalidCalendarDate = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-02-31", { headers: { cookie, accept: "text/html" } });
-  assert.equal(invalidCalendarDate.status, 404);
-  assert.match(await invalidCalendarDate.text(), /页面不存在/);
-
-  await harness.siteManagement.reorderPublications(tenant, ["product-watch", "daily-news"]);
-  const reordered = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  const reorderedHtml = await reordered.text();
-  assert.match(reorderedHtml, /产品观察最新一期/);
-  assert.ok(reorderedHtml.indexOf("产品观察最新一期") < reorderedHtml.indexOf("AI 日报最新一期"));
-  assert.match(reorderedHtml, /assets\/themes\/newspaper-default\/1\.css/);
-
-  await harness.siteManagement.setPublicationStatus(tenant, "product-watch", "inactive");
-  const inactive = await appRequest(harness.app, "https://dailynews.test/p/product-watch/?date=2026-08-29", { headers: { cookie, accept: "text/html" } });
-  assert.equal(inactive.status, 200);
-  assert.match(await inactive.text(), /已停用 · 只读归档/);
-  const activeDirectory = await appRequest(harness.app, "https://dailynews.test/publications/", { headers: { cookie, accept: "text/html" } });
-  assert.doesNotMatch(await activeDirectory.text(), /产品观察最新一期/);
-
-  await harness.siteManagement.setTodoEnabled(tenant, true);
-  const enabledWithoutData = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  assert.doesNotMatch(await enabledWithoutData.text(), />Todo</);
-  await controlPool.query(
-    `INSERT INTO app.todo_states (space_id, revision, state_payload)
-     VALUES ($1, 1, $2::jsonb)`,
-    [tenant.spaceId, JSON.stringify({ schemaVersion: 1, revision: 1, updatedAt: "2026-08-29T08:00:00+08:00", items: [{ id: "todo-a1b2c3d4", title: "M4 正式待办", dueDate: "2026-08-29", status: "open", createdAt: "2026-08-29T07:00:00+08:00", updatedAt: "2026-08-29T07:00:00+08:00", completedAt: null, archivedAt: null }] })],
-  );
-  const enabledWithData = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  const enabledWithDataHtml = await enabledWithData.text();
-  assert.match(enabledWithDataHtml, />Todo</);
-  assert.match(enabledWithDataHtml, /M4 正式待办/);
-  await harness.siteManagement.setTodoEnabled(tenant, false);
-  const disabledWithData = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  assert.doesNotMatch(await disabledWithData.text(), />Todo</);
-
-  await harness.siteManagement.setPublicationTheme(tenant, "daily-news", { mode: "override", themeId: "swiss-editorial" });
-  const publicationThemed = await appRequest(harness.app, "https://dailynews.test/p/daily-news/?date=2026-08-29", { headers: { cookie, accept: "text/html" } });
-  const publicationThemedHtml = await publicationThemed.text();
-  assert.match(publicationThemedHtml, /assets\/themes\/swiss-editorial\/1\.css/);
-  assert.match(publicationThemedHtml, /<meta name="color-scheme" content="light">/);
-  await harness.siteManagement.updateHome(tenant, { themeId: "midnight-tech" });
-  const darkHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  const darkHomeHtml = await darkHome.text();
-  assert.match(darkHomeHtml, /assets\/themes\/midnight-tech\/1\.css/);
-  assert.match(darkHomeHtml, /<meta name="color-scheme" content="dark">/);
-
-  const customDefinition = {
-    schemaVersion: 1,
-    id: "reader-custom",
-    name: "阅读自定义",
-    revision: 1,
-    compilerVersion: "1",
-    usesSiteAccent: false,
-    tokens: {
-      colors: { background: "#F5F1E8", text: "#171A19", muted: "#696A64", accent: "#9A7531", rule: "#B8B3A8" },
-      typography: { headlinePreset: "serif-cn", uiPreset: "sans-cn", headlineScale: "balanced" },
-      density: "balanced",
-      motion: "subtle",
-      ruleStyle: "hairline",
-      surfaceStyle: "paper",
-    },
-    recipes: { masthead: "classic", lead: "stacked", important: "minimal", normal: "compact" },
-  };
-  const customCss = ":root { --color-background: #F5F1E8; --color-text: #171A19; --color-muted: #696A64; --color-accent: #9A7531; --color-rule: #B8B3A8; --font-headline: ui-serif, serif; --font-ui: ui-sans-serif, sans-serif; --surface-background: var(--color-background); }";
-  await controlPool.query(
-    `INSERT INTO app.theme_definitions (space_id, theme_id, revision, definition_payload, compiled_css)
-     VALUES ($1, 'reader-custom', 1, $2::jsonb, $3)`,
-    [tenant.spaceId, JSON.stringify(customDefinition), customCss],
-  );
-  await controlPool.query(
-    `INSERT INTO app.custom_themes (space_id, theme_id, display_name, current_revision)
-     VALUES ($1, 'reader-custom', '阅读自定义', 1)`,
-    [tenant.spaceId],
-  );
-  await harness.siteManagement.updateHome(tenant, { themeId: "reader-custom" });
-  const themedHome = await appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie, accept: "text/html" } });
-  assert.match(await themedHome.text(), /assets\/themes\/reader-custom\/1\.css/);
-  const anonymousTheme = await appRequest(harness.app, "https://dailynews.test/assets/themes/reader-custom/1.css");
-  assert.equal(anonymousTheme.status, 404);
-  const customTheme = await appRequest(harness.app, "https://dailynews.test/assets/themes/reader-custom/1.css", { headers: { cookie } });
-  assert.equal(customTheme.status, 200);
-  assert.match(await customTheme.text(), /--color-background: #F5F1E8/);
-  for (const themeId of ["newspaper-default", "midnight-tech", "swiss-editorial"]) {
-    assert.equal((await appRequest(harness.app, `https://dailynews.test/assets/themes/${themeId}/1.css`)).status, 200);
-  }
-
-  const otherCookie = await signIn(harness, "m4-other@example.com");
-  const hiddenCustomTheme = await appRequest(harness.app, "https://dailynews.test/assets/themes/reader-custom/1.css", { headers: { cookie: otherCookie } });
-  assert.equal(hiddenCustomTheme.status, 404);
+  const cookie = await signIn(harness, "onboarding@example.test");
+  assert.equal((await appRequest(harness.app, "/post-login", { headers: { cookie } })).headers.get("location"), "/onboarding");
+  const page = await getSettings(harness, "/onboarding", cookie, "text/html");
+  assert.equal(page.response.status, 200);
+  const html = await page.response.text();
+  assert.match(html, /请先完整阅读 https:\/\/dailynews\.test\/agent-setup\.md/);
+  assert.match(html, /等 Agent 向你索取 Token/);
+  assert.match(html, /value="我的 Agent"/);
+  assert.doesNotMatch(html, /配对|倒计时|刷新|取消|认领|等待 Agent/);
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials")).rows[0].count, 0);
 });
 
-test("M4 browser settings complete the five-section site, theme, and account journey", async () => {
+test("explicit browser submission creates one active Token, returns plaintext once, and stores only its digest", async () => {
   const harness = createHarness();
-  const cookie = await signIn(harness, "settings@example.com");
-
-  const settingsRoot = await appRequest(harness.app, "https://dailynews.test/settings", { headers: { cookie, accept: "text/html" } });
-  assert.equal(settingsRoot.status, 303);
-  assert.equal(settingsRoot.headers.get("location"), "/settings/sites");
-
-  const sitesResponse = await appRequest(harness.app, "https://dailynews.test/settings/sites", { headers: { cookie, accept: "text/html" } });
-  assert.equal(sitesResponse.status, 200);
-  const sitesHtml = await sitesResponse.text();
-  for (const label of ["日报站点", "主题库", "Agent 授权", "账户与安全", "高级接入"]) assert.match(sitesHtml, new RegExp(`>${label}<`));
-  assert.match(sitesHtml, /Home 固定在最前/);
-  assert.match(sitesHtml, /id="personal-todo"/);
-  assert.match(sitesHtml, /theme-preview--site/);
-  assert.match(sitesHtml, /现代报纸/);
-  assert.doesNotMatch(sitesHtml, /任务标题|settings\/todo/);
-  const csrf = /name="_csrf" value="([^"]+)"/.exec(sitesHtml)?.[1];
-  assert.ok(csrf);
-
-  const catalogResponse = await appRequest(harness.app, "https://dailynews.test/settings/themes", { headers: { cookie, accept: "text/html" } });
-  assert.equal(catalogResponse.status, 200);
-  const catalogHtml = await catalogResponse.text();
-  for (const name of ["现代报纸", "瑞士编辑", "午夜技术"]) assert.match(catalogHtml, new RegExp(name));
-  assert.match(catalogHtml, /theme-preview/);
-  assert.doesNotMatch(catalogHtml, /· revision|<code>newspaper-default|<code>swiss-editorial|<code>midnight-tech/);
-  assert.doesNotMatch(catalogHtml, /<form|创建主题|编辑主题|删除主题/);
-
-  const homeSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites/home", { headers: { cookie, accept: "text/html" } });
-  assert.equal(homeSettings.status, 200);
-  assert.match(await homeSettings.text(), /配置 Home|固定路径|\/home/);
-  const homeUpdated = await browserForm(harness.app, "/settings/sites/home", cookie, { _csrf: csrf, name: "每日总览", themeMode: "override:swiss-editorial" });
-  assert.equal(homeUpdated.status, 303);
-
-  const crossOrigin = await browserForm(harness.app, "/settings/sites/new", cookie, { _csrf: csrf, name: "Cross Origin", publicationId: "cross-origin", themeMode: "inherit" }, { origin: "https://attacker.example" });
-  assert.equal(crossOrigin.status, 403);
-  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.publications WHERE publication_id = 'cross-origin'")).rows[0].count, 0);
-
-  const invalid = await browserForm(harness.app, "/settings/sites/new", cookie, { _csrf: csrf, name: "  保留输入  ", publicationId: "Invalid_Path", themeMode: "inherit" });
-  assert.equal(invalid.status, 400);
-  const invalidHtml = await invalid.text();
-  assert.match(invalidHtml, /value="  保留输入  "/);
-  assert.match(invalidHtml, /value="Invalid_Path"/);
-  assert.match(invalidHtml, /请检查名称、地址和主题选择/);
-
-  const created = await browserForm(harness.app, "/settings/sites/new", cookie, { _csrf: csrf, name: "产品观察", publicationId: "product-watch", themeMode: "inherit" });
-  assert.equal(created.status, 303);
-  assert.equal(created.headers.get("location"), "/settings/sites?created=product-watch");
-  const createdPage = await appRequest(harness.app, "https://dailynews.test/settings/sites?created=product-watch", { headers: { cookie, accept: "text/html" } });
-  const createdHtml = await createdPage.text();
-  assert.match(createdHtml, /把下一步交给已有 Agent/);
-  assert.match(createdHtml, /data-copy-source="site-instruction"/);
-  assert.match(createdHtml, /产品观察.*\/p\/product-watch\//s);
-  assert.doesNotMatch(createdHtml, /配对码/);
-
-  const configured = await browserForm(harness.app, "/settings/sites/product-watch", cookie, { _csrf: csrf, name: "产品与安全", publicationId: "product-watch", themeMode: "override:midnight-tech" });
-  assert.equal(configured.status, 303);
-  const tenant = await harness.tenancy.resolveTenantContextForUser((await controlPool.query('SELECT "id" FROM auth."user" WHERE "email" = $1', ["settings@example.com"])).rows[0].id);
-  assert.deepEqual((await harness.siteManagement.read(tenant)).home, { name: "每日总览", themeId: "swiss-editorial" });
-  const afterConfigure = await harness.siteManagement.read(tenant);
-  assert.equal(afterConfigure.publications.find(({ publicationId }) => publicationId === "product-watch").name, "产品与安全");
-  assert.deepEqual(afterConfigure.publications.find(({ publicationId }) => publicationId === "product-watch").theme, { mode: "override", themeId: "midnight-tech" });
-
-  const moved = await browserForm(harness.app, "/settings/sites/product-watch/move", cookie, { _csrf: csrf, direction: "up" });
-  assert.equal(moved.status, 303);
-  assert.equal(moved.headers.get("location"), "/settings/sites?updated=moved#site-product-watch");
-  assert.equal((await harness.siteManagement.read(tenant)).publications.find(({ isPrimary }) => isPrimary).publicationId, "product-watch");
-  const movedPage = await appRequest(harness.app, "https://dailynews.test/settings/sites?updated=moved", { headers: { cookie, accept: "text/html" } });
-  assert.match(await movedPage.text(), /日报顺序已更新/);
-
-  const disablePage = await appRequest(harness.app, "https://dailynews.test/settings/sites/product-watch/status/disable", { headers: { cookie, accept: "text/html" } });
-  assert.equal(disablePage.status, 200);
-  assert.match(await disablePage.text(), /已有正式日报仍可从原地址阅读/);
-  const disabled = await browserForm(harness.app, "/settings/sites/product-watch/status/disable", cookie, { _csrf: csrf });
-  assert.equal(disabled.status, 303);
-  assert.equal(disabled.headers.get("location"), "/settings/sites?updated=disabled#site-product-watch");
-  assert.equal((await harness.siteManagement.read(tenant)).publications.find(({ publicationId }) => publicationId === "product-watch").status, "inactive");
-  const restored = await browserForm(harness.app, "/settings/sites/product-watch/status/restore", cookie, { _csrf: csrf });
-  assert.equal(restored.status, 303);
-  assert.equal(restored.headers.get("location"), "/settings/sites?updated=restored#site-product-watch");
-  assert.equal((await harness.siteManagement.read(tenant)).publications.find(({ publicationId }) => publicationId === "product-watch").status, "active");
-
-  const accountResponse = await appRequest(harness.app, "https://dailynews.test/settings/account", { headers: { cookie, accept: "text/html" } });
-  const accountHtml = await accountResponse.text();
-  assert.equal(accountResponse.status, 200);
-  assert.match(accountHtml, /settings@example\.com/);
-  assert.match(accountHtml, /邮箱验证码/);
-  const invalidNickname = await browserForm(harness.app, "/settings/account/nickname", cookie, { _csrf: csrf, nickname: "line\nbreak" });
-  assert.equal(invalidNickname.status, 400);
-  assert.match(await invalidNickname.text(), /昵称需要是 1–24 个可见字符/);
-  assert.equal((await browserForm(harness.app, "/settings/account/nickname", cookie, { _csrf: csrf, nickname: "新昵称" })).status, 303);
-  assert.equal((await harness.profiles.read(tenant.userId)).nickname, "新昵称");
-  assert.equal((await harness.siteManagement.read(tenant)).home.name, "每日总览");
-
-  const other = await harness.tenancy.ensureSpaceForUser("settings-other-user", product.defaults);
-  await harness.siteManagement.createPublication(other, { publicationId: "hidden-settings", name: "Hidden Settings", theme: { mode: "inherit" } });
-  const hiddenSettings = await appRequest(harness.app, "https://dailynews.test/settings/sites/hidden-settings", { headers: { cookie, accept: "text/html" } });
-  assert.equal(hiddenSettings.status, 404);
-  assert.doesNotMatch(await hiddenSettings.text(), /Hidden Settings/);
-
-  for (let index = 2; index <= 7; index += 1) {
-    await harness.siteManagement.createPublication(tenant, {
-      publicationId: `limit-${index}`,
-      name: `Limit ${index}`,
-      theme: { mode: "inherit" },
-    });
-  }
-  const limitPage = await appRequest(harness.app, "https://dailynews.test/settings/sites/new", { headers: { cookie, accept: "text/html" } });
-  assert.equal(limitPage.status, 409);
-  const limitHtml = await limitPage.text();
-  assert.match(limitHtml, /无法新建日报站点/);
-  assert.match(limitHtml, /停用项也计入上限/);
-  assert.doesNotMatch(limitHtml, /disabled/);
-
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/settings/todo", { headers: { cookie, accept: "text/html" } })).status, 404);
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/settings/agent/manual-tokens", { headers: { cookie, accept: "text/html" } })).status, 404);
-  const pat = await harness.agentAccess.issueManualCredential(
-    tenant,
-    { name: "PAT only", operationId: randomUUID() },
-    `req_${randomUUID().replaceAll("-", "")}`,
-    keyedDigest("agent-access-pairing-digest-at-least-32-characters", "browser-test"),
-  );
-  const patOnly = await appRequest(harness.app, "https://dailynews.test/settings/sites", { headers: { authorization: `Bearer ${pat.token}`, accept: "text/html" } });
-  assert.equal(patOnly.status, 303);
-  assert.match(patOnly.headers.get("location"), /^\/login\?returnTo=/);
-});
-
-test("bootstrap pairing refreshes, claims once, verifies once, and persists no plaintext secret", async () => {
-  const harness = createHarness();
-  const signedOutSettings = await appRequest(harness.app, "https://dailynews.test/settings/agent", {
-    headers: { accept: "text/html" },
-  });
-  assert.equal(signedOutSettings.status, 303);
-  assert.equal(signedOutSettings.headers.get("location"), "/login?returnTo=%2Fsettings%2Fagent");
-  const cookie = await signIn(harness, "pairing@example.com");
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
-
-  const settings = await getJson(harness.app, "/settings/agent", { cookie });
-  assert.equal(settings.response.status, 200);
-  assert.equal(settings.body.activeLimit, 10);
-  assert.equal(settings.body.authorizations.length, 0);
-  assert.equal(settings.body.pairings.length, 1);
-  const initial = settings.body.pairings[0];
-  assert.match(initial.code, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/);
-
-  const pairingPage = await appRequest(
-    harness.app,
-    `https://dailynews.test/settings/agent/connections/${initial.id}/pair`,
-    { headers: { cookie, accept: "text/html" } },
-  );
-  assert.equal(pairingPage.status, 200);
-  const pairingPageHtml = await pairingPage.text();
-  assert.match(pairingPageHtml, /https:\/\/dailynews\.test\/agent-setup\.md/);
-  assert.doesNotMatch(pairingPageHtml, /dailynews-agent-setup/);
-  const pairingInstruction = /data-copy-source="instruction">([\s\S]*?)<\/pre>/.exec(pairingPageHtml)?.[1] ?? "";
-  assert.doesNotMatch(
-    pairingInstruction,
-    /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/,
-  );
-
-  const storedBefore = await controlPool.query(
-    "SELECT code_digest, intended_name FROM app.agent_pairing_sessions WHERE id = $1",
-    [initial.id],
-  );
-  assert.match(storedBefore.rows[0].code_digest, /^[0-9a-f]{64}$/);
-  assert.doesNotMatch(JSON.stringify(storedBefore.rows[0]), new RegExp(initial.code.replace("-", ""), "i"));
-
-  const refreshed = await mutate(
-    harness.app,
-    `/settings/agent/connections/${initial.id}/pair/refresh`,
-    cookie,
-    settings.body.csrfToken,
-  );
-  assert.equal(refreshed.response.status, 200);
-  assert.notEqual(refreshed.body.pairing.code, initial.code);
-
-  const oldClaim = await post(harness.app, "/agent-pairing/v1/claim", {
-    pairingCode: initial.code,
-    clientName: "Codex",
-  }, { "x-test-client-ip": "203.0.113.10" });
-  assert.equal(oldClaim.status, 404);
-
-  const invalidClientName = await post(harness.app, "/agent-pairing/v1/claim", {
-    pairingCode: refreshed.body.pairing.code,
-    clientName: "\n",
-  }, { "x-test-client-ip": "203.0.113.10" });
-  assert.equal(invalidClientName.status, 400);
-  assert.equal((await invalidClientName.json()).error.code, "invalid_request");
-  const afterInvalidName = await controlPool.query(
-    "SELECT status FROM app.agent_pairing_sessions WHERE id = $1",
-    [initial.id],
-  );
-  assert.equal(afterInvalidName.rows[0].status, "pending");
-  assert.equal((await controlPool.query(
-    "SELECT count(*)::integer AS count FROM app.agent_credentials",
-  )).rows[0].count, 0);
-
-  const claim = await post(harness.app, "/agent-pairing/v1/claim", {
-    pairingCode: refreshed.body.pairing.code,
-    clientName: "Codex <script>alert(1)</script>",
-  }, { "x-test-client-ip": "203.0.113.10" });
-  assert.equal(claim.status, 201);
-  const claimed = await claim.json();
-  assert.match(claimed.token, /^dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}$/);
-  assert.equal(claimed.apiBaseUrl, "https://dailynews.test/api/v1");
-  assert.equal(claimed.mcpUrl, "https://dailynews.test/mcp");
-  assert.equal(claimed.verifyUrl, "https://dailynews.test/agent-pairing/v1/verify");
-  await assert.rejects(
-    () => harness.agentAccess.authenticateActiveToken(`Bearer ${claimed.token}`),
-    (error) => error.status === 401,
-  );
-
-  const duplicateClaim = await post(harness.app, "/agent-pairing/v1/claim", {
-    pairingCode: refreshed.body.pairing.code,
-    clientName: "Codex",
-  }, { "x-test-client-ip": "203.0.113.10" });
-  assert.equal(duplicateClaim.status, 404);
-
-  const stored = await controlPool.query(`
-    SELECT selector, secret_digest, token_hint, name, status
-    FROM app.agent_credentials
-    WHERE id = $1
-  `, [claimed.credentialId]);
-  assert.equal(stored.rows[0].status, "provisioning");
-  assert.doesNotMatch(JSON.stringify(stored.rows[0]), new RegExp(claimed.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.equal((await controlPool.query(
-    "SELECT status FROM app.agent_pairing_sessions WHERE id = $1",
-    [initial.id],
-  )).rows[0].status, "claimed");
-
-  const wrongToken = `${claimed.token.slice(0, -1)}${claimed.token.endsWith("A") ? "B" : "A"}`;
-  const wrongVerify = await verifyPairing(harness.app, wrongToken, {
-    "x-test-client-ip": "203.0.113.10",
-  });
-  assert.equal(wrongVerify.status, 401);
-  assert.equal(wrongVerify.headers.get("www-authenticate"), "Bearer");
-
-  const verify = await verifyPairing(harness.app, claimed.token, {
-    "x-test-client-ip": "203.0.113.10",
-  });
-  assert.equal(verify.status, 200);
-  const verified = await verify.json();
-  assert.equal(verified.status, "active");
-  assert.deepEqual(verified.context, {
-    publicationId: "daily-news",
-    publicationName: "DailyNews",
-    timeZone: "Asia/Shanghai",
-    todoEnabled: false,
-  });
-  assert.equal(
-    (await harness.agentAccess.authenticateActiveToken(`Bearer ${claimed.token}`)).id,
-    claimed.credentialId,
-  );
-  const repeatedVerify = await verifyPairing(harness.app, claimed.token, {
-    "x-test-client-ip": "203.0.113.10",
-  });
-  assert.equal(repeatedVerify.status, 401);
-  const successfulState = await controlPool.query(`
-    SELECT p.status AS pairing_status, c.status AS credential_status
-    FROM app.agent_pairing_sessions p
-    JOIN app.agent_credentials c ON c.id = p.provisioning_credential_id
-    WHERE p.id = $1
-  `, [initial.id]);
-  assert.deepEqual(successfulState.rows[0], {
-    pairing_status: "verified",
-    credential_status: "active",
-  });
-
-  const after = await getJson(harness.app, "/settings/agent", { cookie });
-  assert.equal(after.body.authorizations.length, 1);
-  assert.equal(after.body.authorizations[0].name, "Codex <script>alert(1)</script>");
-  assert.doesNotMatch(JSON.stringify(after.body), /tokenHint|secretDigest|selector|dnpat_/);
-  const agentSettingsPage = await appRequest(harness.app, "https://dailynews.test/settings/agent", {
-    headers: { cookie, accept: "text/html" },
-  });
-  assert.equal(agentSettingsPage.status, 200);
-  const agentSettingsHtml = await agentSettingsPage.text();
-  assert.match(agentSettingsHtml, /Codex &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.doesNotMatch(agentSettingsHtml, /Codex <script>/);
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/", {
-    headers: { authorization: `Bearer ${claimed.token}` },
-  })).status, 200);
-
-  const audits = await controlPool.query("SELECT event_type FROM app.audit_events ORDER BY created_at");
-  assert.ok(audits.rows.some(({ event_type }) => event_type === "pairing_claimed"));
-  assert.ok(audits.rows.some(({ event_type }) => event_type === "pairing_verify_failed"));
-  assert.ok(audits.rows.some(({ event_type }) => event_type === "pairing_verified"));
-});
-
-test("manual token operations are CSRF-safe, one-time, tenant-bound, and independently revocable", async () => {
-  const harness = createHarness();
-  const cookieA = await signIn(harness, "manual-a@example.com");
-  const settingsA = await getJson(harness.app, "/settings/advanced", { cookie: cookieA });
-  assert.equal(settingsA.response.status, 200);
-
-  const crossOrigin = await mutate(
-    harness.app,
-    "/settings/advanced/tokens",
-    cookieA,
-    settingsA.body.csrfToken,
-    { name: "跨站请求", operationId: randomUUID() },
-    { origin: "https://attacker.example" },
-  );
-  assert.equal(crossOrigin.response.status, 403);
-
-  const operationId = randomUUID();
-  const created = await mutate(
-    harness.app,
-    "/settings/advanced/tokens",
-    cookieA,
-    settingsA.body.csrfToken,
-    { name: "自动化脚本", operationId },
-  );
+  const cookie = await signIn(harness, "create-token@example.test");
+  const settings = await getSettings(harness, "/settings/agent", cookie);
+  const operationId = settings.body.operationId;
+  const created = await mutate(harness, "/settings/agent/tokens", cookie, settings.body.csrfToken, { name: "  我的 Agent  ", operationId });
   assert.equal(created.response.status, 201);
-  assert.match(created.body.token, /^dnpat_/);
-  const repeated = await mutate(
-    harness.app,
-    "/settings/advanced/tokens",
-    cookieA,
-    settingsA.body.csrfToken,
-    { name: "自动化脚本", operationId },
-  );
+  assert.match(created.body.token, /^dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}$/);
+  assert.equal(created.body.credential.status, "active");
+  assert.equal(created.body.credential.name, "我的 Agent");
+  const stored = (await controlPool.query("SELECT name, status, selector, secret_digest, token_hint FROM app.agent_credentials")).rows[0];
+  assert.equal(stored.name, "我的 Agent");
+  assert.equal(stored.status, "active");
+  assert.match(stored.secret_digest, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(stored).includes(created.body.token), false);
+
+  const repeated = await mutate(harness, "/settings/agent/tokens", cookie, settings.body.csrfToken, { name: "我的 Agent", operationId });
   assert.equal(repeated.response.status, 200);
-  assert.equal(repeated.body.repeated, true);
   assert.equal(repeated.body.token, null);
-  const conflict = await mutate(
-    harness.app,
-    "/settings/advanced/tokens",
-    cookieA,
-    settingsA.body.csrfToken,
-    { name: "另一项请求", operationId },
-  );
-  assert.equal(conflict.response.status, 409);
-
-  const cookieB = await signIn(harness, "manual-b@example.com");
-  const settingsB = await getJson(harness.app, "/settings/agent", { cookie: cookieB });
-  const crossTenant = await mutate(
-    harness.app,
-    `/settings/agent/connections/${created.body.credential.id}/remove`,
-    cookieB,
-    settingsB.body.csrfToken,
-  );
-  assert.equal(crossTenant.response.status, 404);
-
-  const rotatePage = await getJson(
-    harness.app,
-    `/settings/advanced/tokens/${created.body.credential.id}/rotate`,
-    { cookie: cookieA },
-  );
-  assert.equal(rotatePage.response.status, 200);
-  const rotated = await mutate(
-    harness.app,
-    `/settings/advanced/tokens/${created.body.credential.id}/rotate`,
-    cookieA,
-    rotatePage.body.csrfToken,
-    { name: "自动化脚本（新）", operationId: rotatePage.body.operationId },
-  );
-  assert.equal(rotated.response.status, 201);
-  assert.match(rotated.body.token, /^dnpat_/);
-  const repeatedRotation = await mutate(
-    harness.app,
-    `/settings/advanced/tokens/${created.body.credential.id}/rotate`,
-    cookieA,
-    rotatePage.body.csrfToken,
-    { name: "自动化脚本（新）", operationId: rotatePage.body.operationId },
-  );
-  assert.equal(repeatedRotation.response.status, 200);
-  assert.equal(repeatedRotation.body.token, null);
-  await assert.rejects(
-    () => harness.agentAccess.authenticateActiveToken(`Bearer ${created.body.token}`),
-    (error) => error.status === 401,
-  );
-  assert.equal(
-    (await harness.agentAccess.authenticateActiveToken(`Bearer ${rotated.body.token}`)).id,
-    rotated.body.credential.id,
-  );
-
-  const statuses = await controlPool.query(
-    "SELECT id, status FROM app.agent_credentials WHERE id = ANY($1::uuid[]) ORDER BY created_at",
-    [[created.body.credential.id, rotated.body.credential.id]],
-  );
-  assert.deepEqual(statuses.rows.map(({ status }) => status), ["rotated", "active"]);
-  const revoked = await mutate(
-    harness.app,
-    `/settings/advanced/tokens/${rotated.body.credential.id}/revoke`,
-    cookieA,
-    rotatePage.body.csrfToken,
-  );
-  assert.equal(revoked.response.status, 200);
-  assert.equal(revoked.body.credential.status, "revoked");
-  await assert.rejects(
-    () => harness.agentAccess.authenticateActiveToken(`Bearer ${rotated.body.token}`),
-    (error) => error.status === 401,
-  );
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials")).rows[0].count, 1);
 });
 
-test("credential quota serializes concurrent creation and pairing refresh consumes no new slot", async () => {
+test("Token names enforce 1–80 visible characters without disturbing existing credentials", async () => {
   const harness = createHarness();
-  const cookie = await signIn(harness, "quota@example.com");
-  const settings = await getJson(harness.app, "/settings/agent", { cookie });
-  const pairing = settings.body.pairings[0];
-  const attempts = await Promise.all(Array.from({ length: 12 }, (_, index) => mutate(
-    harness.app,
-    "/settings/advanced/tokens",
+  const cookie = await signIn(harness, "token-name@example.test");
+  const settings = await getSettings(harness, "/settings/agent", cookie);
+  const valid = await mutate(harness, "/settings/agent/tokens", cookie, settings.body.csrfToken, { name: "A".repeat(80), operationId: settings.body.operationId });
+  assert.equal(valid.response.status, 201);
+  for (const name of [" ", "A".repeat(81), "broken\nname"]) {
+    const rejected = await mutate(harness, "/settings/agent/tokens", cookie, settings.body.csrfToken, { name, operationId: randomUUID() });
+    assert.equal(rejected.response.status, 400);
+    assert.equal(rejected.body.error.code, "invalid_request");
+  }
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials WHERE status = 'active'")).rows[0].count, 1);
+});
+
+test("the eleventh active Token is rejected under concurrent creation and successful Tokens remain usable", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "token-limit@example.test");
+  const settings = await getSettings(harness, "/settings/agent", cookie);
+  const attempts = await Promise.all(Array.from({ length: 11 }, (_, index) => mutate(
+    harness,
+    "/settings/agent/tokens",
     cookie,
     settings.body.csrfToken,
     { name: `Agent ${index + 1}`, operationId: randomUUID() },
   )));
-  assert.equal(attempts.filter(({ response }) => response.status === 201).length, 9);
-  assert.equal(attempts.filter(({ response }) => response.status === 409).length, 3);
-  const occupied = await controlPool.query(`
-    SELECT
-      (SELECT count(*)::integer FROM app.agent_credentials WHERE status IN ('active', 'provisioning')) AS credentials,
-      (SELECT count(*)::integer FROM app.agent_pairing_sessions WHERE status = 'pending') AS pairings
-  `);
-  assert.deepEqual(occupied.rows[0], { credentials: 9, pairings: 1 });
-
-  const refreshed = await mutate(
-    harness.app,
-    `/settings/agent/connections/${pairing.id}/pair/refresh`,
-    cookie,
-    settings.body.csrfToken,
-  );
-  assert.equal(refreshed.response.status, 200);
-  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_pairing_sessions")).rows[0].count, 1);
-  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials")).rows[0].count, 9);
+  assert.equal(attempts.filter(({ response }) => response.status === 201).length, 10);
+  assert.equal(attempts.filter(({ body }) => body.error?.code === "credential_limit_reached").length, 1);
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials WHERE status = 'active'")).rows[0].count, 10);
 });
 
-test("claim and browser bootstrap acquire the Space lock before the pairing row", async () => {
+test("rotation and revocation cut over one Token atomically while preserving other active Tokens", async () => {
   const harness = createHarness();
-  const cookie = await signIn(harness, "claim-lock-order@example.com");
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
-  const settings = await getJson(harness.app, "/settings/agent", { cookie });
-  const pairing = settings.body.pairings[0];
-  const stored = await controlPool.query(
-    "SELECT space_id FROM app.agent_pairing_sessions WHERE id = $1",
-    [pairing.id],
-  );
-  const blocker = await controlPool.connect();
-  let claimPromise;
-  let homePromise;
-  try {
-    await blocker.query("BEGIN");
-    await blocker.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [stored.rows[0].space_id]);
-    const blockerPid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
-    claimPromise = post(harness.app, "/agent-pairing/v1/claim", {
-      pairingCode: pairing.code,
-      clientName: "Concurrent claimant",
-    });
-    homePromise = appRequest(harness.app, "https://dailynews.test/home", { headers: { cookie } });
-    await waitForBlockedTransactions(blockerPid, 2);
+  const cookie = await signIn(harness, "token-lifecycle@example.test");
+  const settings = await getSettings(harness, "/settings/agent", cookie);
+  const first = await mutate(harness, "/settings/agent/tokens", cookie, settings.body.csrfToken, { name: "First Agent", operationId: randomUUID() });
+  const second = await mutate(harness, "/settings/agent/tokens", cookie, settings.body.csrfToken, { name: "Second Agent", operationId: randomUUID() });
+  assert.equal(first.response.status, 201);
+  assert.equal(second.response.status, 201);
 
-    const observer = await controlPool.connect();
-    try {
-      await observer.query("BEGIN");
-      await observer.query(
-        "SELECT id FROM app.agent_pairing_sessions WHERE id = $1 FOR UPDATE NOWAIT",
-        [pairing.id],
-      );
-      await observer.query("ROLLBACK");
-    } finally {
-      observer.release();
-    }
-    await blocker.query("COMMIT");
-    assert.equal((await claimPromise).status, 201);
-    assert.equal((await homePromise).status, 200);
-  } finally {
-    await blocker.query("ROLLBACK").catch(() => {});
-    blocker.release();
-    await Promise.allSettled([claimPromise, homePromise].filter(Boolean));
-  }
-});
-
-test("verify and cancellation serialize at Space before locking pairing or credential rows", async () => {
-  const harness = createHarness();
-  const cookie = await signIn(harness, "verify-lock-order@example.com");
-  assert.equal((await appRequest(harness.app, "https://dailynews.test/", { headers: { cookie } })).status, 200);
-  const settings = await getJson(harness.app, "/settings/agent", { cookie });
-  const pairing = settings.body.pairings[0];
-  const claim = await post(harness.app, "/agent-pairing/v1/claim", {
-    pairingCode: pairing.code,
-    clientName: "Concurrent verifier",
+  const rotatePage = await getSettings(harness, `/settings/agent/tokens/${first.body.credential.id}/rotate`, cookie);
+  const rotated = await mutate(harness, `/settings/agent/tokens/${first.body.credential.id}/rotate`, cookie, rotatePage.body.csrfToken, {
+    name: first.body.credential.name,
+    operationId: rotatePage.body.operationId,
   });
-  assert.equal(claim.status, 201);
-  const claimed = await claim.json();
-  const stored = await controlPool.query(
-    "SELECT space_id FROM app.agent_pairing_sessions WHERE id = $1",
-    [pairing.id],
-  );
-  const blocker = await controlPool.connect();
-  let verifyPromise;
-  let cancelPromise;
-  try {
-    await blocker.query("BEGIN");
-    await blocker.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [stored.rows[0].space_id]);
-    const blockerPid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
-    verifyPromise = verifyPairing(harness.app, claimed.token);
-    cancelPromise = mutate(
-      harness.app,
-      `/settings/agent/connections/${pairing.id}/pair/cancel`,
-      cookie,
-      settings.body.csrfToken,
-    );
-    await waitForBlockedTransactions(blockerPid, 2);
+  assert.equal(rotated.response.status, 201);
+  await assert.rejects(() => harness.credentials.authenticateActiveToken(`Bearer ${first.body.token}`), (error) => error.status === 401);
+  assert.equal((await harness.credentials.authenticateActiveToken(`Bearer ${rotated.body.token}`)).id, rotated.body.credential.id);
+  assert.equal((await harness.credentials.authenticateActiveToken(`Bearer ${second.body.token}`)).id, second.body.credential.id);
 
-    const observer = await controlPool.connect();
-    try {
-      await observer.query("BEGIN");
-      await observer.query(
-        "SELECT id FROM app.agent_pairing_sessions WHERE id = $1 FOR UPDATE NOWAIT",
-        [pairing.id],
-      );
-      await observer.query(
-        "SELECT id FROM app.agent_credentials WHERE id = $1 FOR UPDATE NOWAIT",
-        [claimed.credentialId],
-      );
-      await observer.query("ROLLBACK");
-    } finally {
-      observer.release();
-    }
-    await blocker.query("COMMIT");
-    const verifyStatus = (await verifyPromise).status;
-    const cancelStatus = (await cancelPromise).response.status;
-    assert.ok(
-      (verifyStatus === 200 && cancelStatus === 409)
-      || (verifyStatus === 401 && cancelStatus === 200),
-    );
-  } finally {
-    await blocker.query("ROLLBACK").catch(() => {});
-    blocker.release();
-    await Promise.allSettled([verifyPromise, cancelPromise].filter(Boolean));
+  const revokePage = await getSettings(harness, `/settings/agent/tokens/${rotated.body.credential.id}/revoke`, cookie);
+  const revoked = await mutate(harness, `/settings/agent/tokens/${rotated.body.credential.id}/revoke`, cookie, revokePage.body.csrfToken);
+  assert.equal(revoked.response.status, 200);
+  await assert.rejects(() => harness.credentials.authenticateActiveToken(`Bearer ${rotated.body.token}`), (error) => error.status === 401);
+  assert.equal((await harness.credentials.authenticateActiveToken(`Bearer ${second.body.token}`)).id, second.body.credential.id);
+});
+
+test("Agent authorization is the only Token management page and all retired routes return 404", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "retired-routes@example.test");
+  const agent = await getSettings(harness, "/settings/agent", cookie, "text/html");
+  const agentHtml = await agent.response.text();
+  assert.match(agentHtml, /创建 Agent Token/);
+  assert.match(agentHtml, /轮换|撤销|Token 记录/);
+
+  const advanced = await getSettings(harness, "/settings/advanced", cookie, "text/html");
+  const advancedHtml = await advanced.response.text();
+  assert.match(advancedHtml, /JSON API/);
+  assert.match(advancedHtml, /MCP/);
+  assert.match(advancedHtml, /OpenAPI/);
+  assert.match(advancedHtml, /前往 Agent 授权/);
+  assert.doesNotMatch(advancedHtml, /<form[\s\S]*创建.*Token/);
+
+  for (const pathname of [
+    "/.well-known/dailynews-agent-setup.json",
+    "/agent-pairing/v1/claim",
+    "/agent-pairing/v1/verify",
+    "/settings/agent/connections",
+    "/settings/agent/connections/00000000-0000-4000-8000-000000000001/pair",
+    "/settings/advanced/tokens",
+  ]) {
+    assert.equal((await appRequest(harness.app, pathname, { headers: { cookie } })).status, 404, pathname);
+    assert.equal((await post(harness.app, pathname, {}, { cookie })).status, 404, `POST ${pathname}`);
   }
 });
 
-test("pairing rate limits persist and expired provisioning credentials are revoked before retry", async () => {
-  const limited = createHarness({ productOverrides: { agentAccess: { claimIpHourlyLimit: 2 } } });
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await post(limited.app, "/agent-pairing/v1/claim", {
-      pairingCode: "23456-789AB",
-      clientName: "Rate probe",
-    }, { "x-test-client-ip": "198.51.100.50" });
-    assert.equal(response.status, attempt < 2 ? 404 : 429);
-  }
-  assert.equal((await controlPool.query(
-    "SELECT count(*)::integer AS count FROM app.agent_rate_limit_events WHERE action = 'pairing_claim'",
-  )).rows[0].count, 2);
-  await limited.close();
-
-  await resetAndMigrate();
+test("Token management keeps Session, Origin, CSRF, tenant, and Agent Token boundaries separate", async () => {
   const harness = createHarness();
-  const cookie = await signIn(harness, "expired@example.com");
-  const settings = await getJson(harness.app, "/settings/agent", { cookie });
-  const pairing = settings.body.pairings[0];
-  const claim = await post(harness.app, "/agent-pairing/v1/claim", {
-    pairingCode: pairing.code,
-    clientName: "Expired client",
-  });
-  assert.equal(claim.status, 201);
-  const claimed = await claim.json();
-  await controlPool.query(
-    "UPDATE app.agent_credentials SET expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
-    [claimed.credentialId],
-  );
-  const expired = await verifyPairing(harness.app, claimed.token);
-  assert.equal(expired.status, 401);
-  const lifecycle = await controlPool.query(`
-    SELECT c.status AS credential_status, p.status AS pairing_status
-    FROM app.agent_credentials c
-    JOIN app.agent_pairing_sessions p ON p.provisioning_credential_id = c.id
-    WHERE c.id = $1
-  `, [claimed.credentialId]);
-  assert.deepEqual(lifecycle.rows[0], { credential_status: "revoked", pairing_status: "expired" });
+  const cookieA = await signIn(harness, "space-a@example.test");
+  const cookieB = await signIn(harness, "space-b@example.test");
+  const settingsA = await getSettings(harness, "/settings/agent", cookieA);
+  const settingsB = await getSettings(harness, "/settings/agent", cookieB);
+  const created = await mutate(harness, "/settings/agent/tokens", cookieA, settingsA.body.csrfToken, { name: "Space A Agent", operationId: randomUUID() });
+  assert.equal(created.response.status, 201);
 
-  const retry = await getJson(harness.app, `/settings/agent/connections/${pairing.id}/pair`, { cookie });
-  assert.equal(retry.response.status, 200);
-  assert.equal(retry.body.pairing.status, "pending");
-  assert.notEqual(retry.body.pairing.code, pairing.code);
-  assert.equal((await verifyPairing(harness.app, claimed.token)).status, 401);
+  assert.equal((await mutate(harness, "/settings/agent/tokens", cookieA, "invalid", { name: "Blocked", operationId: randomUUID() })).response.status, 403);
+  assert.equal((await mutate(harness, "/settings/agent/tokens", cookieA, settingsA.body.csrfToken, { name: "Blocked", operationId: randomUUID() }, { origin: "https://attacker.test" })).response.status, 403);
+  assert.equal((await post(harness.app, "/settings/agent/tokens", { name: "Blocked", operationId: randomUUID(), _csrf: settingsA.body.csrfToken }, { authorization: `Bearer ${created.body.token}` })).status, 401);
+  assert.equal((await mutate(harness, `/settings/agent/tokens/${created.body.credential.id}/revoke`, cookieB, settingsB.body.csrfToken)).response.status, 404);
+  assert.equal((await harness.credentials.authenticateActiveToken(`Bearer ${created.body.token}`)).id, created.body.credential.id);
 });

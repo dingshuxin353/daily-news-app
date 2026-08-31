@@ -88,7 +88,7 @@ test("empty database migrates fully and a repeated run has no side effects", asy
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
 });
 
-test("the exact M2 migration history upgrades atomically through M3-B", async () => {
+test("the exact M2 migration history upgrades atomically to the final v1 schema", async () => {
   await resetAppSchema();
   const m2Names = [
     "0001_initialize_app_schema.sql",
@@ -115,6 +115,20 @@ test("the exact M2 migration history upgrades atomically through M3-B", async ()
     (await pool.query("SELECT to_regclass('app.agent_credentials')::text AS relation")).rows[0].relation,
     "app.agent_credentials",
   );
+  assert.equal(
+    (await pool.query("SELECT to_regclass('app.agent_pairings')::text AS relation")).rows[0].relation,
+    null,
+  );
+  const credentialStatuses = await pool.query(`
+    SELECT pg_get_constraintdef(oid) AS definition
+    FROM pg_constraint
+    WHERE conrelid = 'app.agent_credentials'::regclass
+  `);
+  const definitions = credentialStatuses.rows.map(({ definition }) => definition).join("\n");
+  assert.match(definitions, /active/);
+  assert.match(definitions, /rotated/);
+  assert.match(definitions, /revoked/);
+  assert.doesNotMatch(definitions, /pending|provisioning|pairing/i);
   await checkMigrationCompatibility(pool, { migrationsDirectory: projectMigrations });
 });
 

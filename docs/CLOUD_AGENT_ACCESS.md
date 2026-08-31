@@ -1,6 +1,6 @@
 # DailyNews Agent JSON API 与远程 MCP
 
-状态：`v1.0.0` M4-B 研发契约，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M5 直接 Agent Token 研发契约，不代表云端产品已经发布或部署。
 
 DailyNews 的 Agent JSON API 与远程 MCP 使用设置页一次性签发的同一枚 Personal Access Token（PAT）。浏览器 Cookie 不能代替 PAT，PAT 也不能打开浏览器私有页面。请从 DailyNews 设置中读取真实 API Base URL 与 MCP URL；下面的域名、Token 和内容都是假数据。
 
@@ -17,7 +17,7 @@ DailyNews 的 Agent JSON API 与远程 MCP 使用设置页一次性签发的同�
 
 ## 远程 MCP
 
-MCP 端点是设置页或配对结果返回的绝对 `mcpUrl`，路径通常为 `/mcp`。它使用官方 `@modelcontextprotocol/server@2.0.0` 的单一 Server Factory，同时服务现代 `2026-07-28` 与无状态兼容 `2025-11-25`；不会生成 `Mcp-Session-Id`，也不提供 GET 事件流。PAT 是 DailyNews 自定义 Bearer 凭证，不是 MCP OAuth Token。
+MCP 端点是 Agent 授权页和接入说明中的绝对 `mcpUrl`，路径通常为 `/mcp`。它使用官方 `@modelcontextprotocol/server@2.0.0` 的单一 Server Factory，同时服务现代 `2026-07-28` 与无状态兼容 `2025-11-25`；不会生成 `Mcp-Session-Id`，也不提供 GET 事件流。Agent Token 是 DailyNews 自定义 Bearer PAT，不是 MCP OAuth Token。
 
 十一个工具由两代协议共用同一业务和幂等状态：
 
@@ -57,12 +57,12 @@ export DAILYNEWS_PAT='dnpat_example_only_never_use_this_value'
 
 ### 版本化 Agent 接入说明
 
-普通 Agent 的唯一接入入口是当前实例的 `GET /agent-setup.md`。该 Markdown 合同由运行时写入当前 Claim、Verify、API Base 与 MCP 绝对地址，并闭合一次性 Claim、凭证持久化、Verify、重复运行与不确定结果恢复；不要从本指南猜测配对字段，也不要寻找其他接入入口。
+普通 Agent 的唯一接入入口是当前实例的 `GET /agent-setup.md`。该 Markdown 合同只由运行时写入当前 MCP 绝对地址：Agent 先确认客户端支持远程 Streamable HTTP 与 Bearer Secret，再请用户在 DailyNews“Agent 授权”页面显式生成一次性可见的 Token，并由用户安全交给受信 Agent。接入说明本身不包含 Token、用户数据或第二套接入入口。
 
 完成接入后，具备调度能力的 Agent 应按以下 `v1.0.0` 顺序继续：
 
 1. 检查客户端是否支持远程 Streamable HTTP、Bearer Secret 和本地定时任务；不支持的能力必须明确告诉用户，不能声称已经建立自动更新。
-2. 通过配对领取凭证，只在安全存储中保存；先完成只读验证，再调用 Context 工具。
+2. 请用户在“Agent 授权”页生成 Token，只在客户端的安全存储中保存；配置原生 MCP 后先执行 `tools/list`，再调用 `get_daily_context` 完成只读验证。
 3. 用普通语言询问长期关注范围和更新时间，把相对时间复述为明确时间与时区，请用户确认。
 4. 只有客户端确实支持调度时，才在 Agent 自己的运行环境建立或更新任务。DailyNews 服务端不保存提示词、不托管调度器，也不能判断本地任务是否在线。
 5. 立即运行一次，先读 Context，再提交 Candidate，最后读取正式结果并把无凭证的私有页面链接交给用户。

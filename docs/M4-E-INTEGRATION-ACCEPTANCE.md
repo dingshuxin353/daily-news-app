@@ -61,10 +61,10 @@ Git 忽略目录中的脱敏证据包括：
 
 ### 4.1 用户、示例与多日报
 
-- 既有 M4-A–D 的 PostgreSQL 集成覆盖了新用户 OTP、显式昵称、昵称完成后建立 Bootstrap Pairing、首次登录私有 Shell 和昵称不得从邮箱猜测；本轮使用 fake mail 创建隔离用户，并通过真实 HTTP Session 访问正式页面。
+- 既有 M4-A–D 的 PostgreSQL 集成覆盖了新用户 OTP、显式昵称、昵称完成后的 Agent 授权入口、首次登录私有 Shell 和昵称不得从邮箱猜测；本轮使用 fake mail 创建隔离用户，并通过真实 HTTP Session 访问正式页面。
 - 首次无正式数据时，真实 `/home` 显示版本化系统示例；示例没有 Candidate、Issue、Compiled、Agent 在线或调度状态。
 - 通过真实 MCP 写入第一份 Daily 后，正式 Issue/Compiled revision 为 `1`，Home 同一主卡替换为正式内容；页面不显示 Candidate 或 Token 文案。
-- 通过浏览器 Session 创建第二份 Publication，既有 Agent 的设置话术为普通语言且不含配对码；第二份日报独立写入并出现在 Home 的紧凑入口。
+- 通过浏览器 Session 创建第二份 Publication，既有 Agent 的设置话术为普通语言且不包含凭证明文；第二份日报独立写入并出现在 Home 的紧凑入口。
 - 通过真实设置表单改变排序后，第二份 Publication 成为派生首要项；Home 主内容和 Agent 默认 `get_daily_context` 目标同步变化。恢复排序后再次确认唯一首要项和活动排序事实。
 
 ### 4.2 Publication 生命周期、阅读与隔离

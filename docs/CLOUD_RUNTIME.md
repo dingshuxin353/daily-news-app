@@ -1,8 +1,8 @@
 # Cloud Runtime 开发说明
 
-状态：`v1.0.0` M2–M4 已实现能力与 M5 测试部署运行时合同，不代表云端产品已经发布或部署。
+状态：`v1.0.0` M2–M5 已实现运行时合同，不代表云端产品已经发布或部署。
 
-本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、Agent 配对和凭证生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4 的 Publication、昵称、设置、阅读和 Agent 自定义主题合同。M5 旧域名测试环境的唯一手工部署入口见 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md)；生产部署不在本文范围。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
+本文说明 Node.js / Hono 进程、PostgreSQL 连接、数据库 Migration、Space 身份与对象地基、日报 / Personal Todo / 主题 PostgreSQL 持久化、邮箱 OTP 与 Session、直接 Agent Token 生命周期、统一 Agent Request Layer、私有页面、双时代远程 MCP，以及 M4 的 Publication、昵称、设置、阅读和 Agent 自定义主题合同。M5 旧域名测试环境的唯一手工部署入口见 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md)；生产部署不在本文范围。Agent API、MCP 与假数据示例见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 ## 环境要求
 
@@ -21,7 +21,7 @@
 - `PG_SSL_MODE`：`disable` 或 `require`。
 - `PG_POOL_MAX`、`PG_IDLE_TIMEOUT_MS`、`PG_CONNECTION_TIMEOUT_MS`：连接池边界。
 - `BETTER_AUTH_SECRET`、`IDENTITY_DIGEST_SECRET`：至少 32 字符的独立随机 Secret。
-- `AGENT_TOKEN_DIGEST_SECRET`、`PAIRING_CODE_DIGEST_SECRET`：至少 32 字符、彼此独立且不得与身份 Secret 复用；分别用于长期凭证摘要和短时配对码派生 / 摘要。
+- `AGENT_TOKEN_DIGEST_SECRET`：至少 32 字符，不得与身份 Secret 复用；用于 Agent Token 的 HMAC-SHA-256 摘要。
 - `AGENT_API_BASE_URL`、`AGENT_MCP_URL`：与 `CLOUD_ORIGIN` 和 `CLOUD_BASE_PATH` 严格一致的公开绝对地址；分别指向已实现的 JSON API 与 MCP 路由。
 - `MAIL_MODE`：必须显式配置；本地与 CI 使用 `fake`，腾讯云投递使用 `ses`。缺失或空值时云端配置失败，不会降级到 Fake。
 - `TENCENTCLOUD_SECRET_ID`、`TENCENTCLOUD_SECRET_KEY`、`TENCENT_SES_REGION`、`TENCENT_SES_FROM_EMAIL`、`TENCENT_SES_TEMPLATE_ID`、`TENCENT_SES_SUBJECT`：只在 `ses` 模式需要。
@@ -49,7 +49,7 @@ Migration Runner 先持有固定的 PostgreSQL 会话级 advisory lock，再在�
 - `0002_create_tenant_foundation.sql`：建立 `spaces`、`home_profiles`、`publications`、`publication_configs`、`theme_selections` 与 `todo_profiles`。
 - `0003_create_domain_storage.sql`：建立日报 Candidate、提交结果、Issue、Compiled Edition、日期锁，Personal Todo 状态与提交结果，以及 Space 自定义主题定义和预览；同时为主题选择补充当前激活清单。它不建立 Better Auth 表。
 - `0100_create_email_identity.sql`：建立 `auth` Schema 中 Better Auth 1.7.1 所需的 User、Account、Session、Verification 与数据库限流表，并建立 `app.login_*` 邮件发送预留、摘要限流和供应商双 ID 记录。`0100` 为并行 M2-D 保留的 Migration 段，避免与 M2-C 文件名冲突。
-- `0101_create_agent_access.sql`：建立 Agent Pairing、摘要凭证、持久配对限流与最小脱敏审计表。数据库不保存配对码或 PAT 明文。
+- `0101_create_agent_access.sql`：建立直接 Agent Token、持久 API 限流与最小脱敏审计表。数据库不保存 Token 明文。
 - `0102_create_agent_request_layer.sql`：扩展持久 PAT / IP 读写限流，建立跨进程 Space 写入租约，并为 Todo Submission 增加 JSON API / MCP 共用的 `client_run_id`；已有记录一次性生成稳定的 `legacy-<digest>` 键，之后协议幂等键与领域 `candidate_id` 保持独立。
 - `0103_create_m4_domain_contract.sql`：建立显式 `user_profiles` 昵称事实和 `custom_themes` current revision 目录；Publication 改为活动排序派生首要项、停用项无排序，主题选择改为 ID / `inherit` 且读取时解析 current revision；移除云端 `theme_candidates`、固定 `theme_revision` 和激活清单旧字段。
 - `0104_create_theme_agent_operations.sql`：建立 JSON API / MCP 共用的主题写入幂等回执；定义本身继续写入既有不可变 `theme_definitions` 历史表。
@@ -80,11 +80,11 @@ M4-A 的昵称由 `UserProfileService` 作为唯一应用写入口，在同一�
 
 `MAIL_MODE=fake` 不调用外部供应商。Fake OTP 读取能力只由自动化测试在构造测试 App 时显式注入；正式 `npm run start:cloud` 即使运行在 Fake 模式也不会注册测试读取路由。`MAIL_MODE=ses` 使用腾讯云 SES `SendEmail` 触发类模板；成功必须同时保存 RequestId 和 MessageId，拒绝、超时或缺失任一 ID 时返回脱敏 `503`，同一次请求不自动重试。
 
-M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret>`：selector 为 128 bit 随机公开定位段，secret 为 256 bit 随机值。服务端只保存带部署 Secret 的 HMAC-SHA-256 摘要与掩码 hint。配对码为 10 位无歧义字符、默认 10 分钟有效，由 Pairing ID 与单调代次派生；数据库只保存摘要，刷新增加代次并立即使旧码失效。Claim 只签发一次默认 10 分钟的 provisioning PAT；完成最小只读 Verify 后同一凭证原子变为 active，超时、取消、轮换或撤销后不能恢复。
+Agent Token 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret>`：selector 为 128 bit 随机公开定位段，secret 为 256 bit 随机值。服务端只保存带部署 Secret 的 HMAC-SHA-256 摘要与掩码 hint，完整 Token 只在创建或轮换成功页显示一次。Token 创建后立即为 active；轮换和撤销即时切断旧 Token，状态不会恢复。
 
-`config/cloud.json` 的 `agentAccess` 同时固定 Pairing / provisioning TTL、Claim / Verify 每 IP 小时上限、16 KiB 浏览器设置与 Claim 请求体上限、24 小时限流事件保留期与 90 天最小审计保留期。浏览器设置与 Claim 请求体在 JSON 或表单解析前按流读取并停止超限请求，具体数值不散落在 Controller 中。Verify 是 PAT-only 的空 POST，不要求也不解析 `Content-Type` 或请求体。
+`config/cloud.json` 的 `agentAccess` 固定每 Space 最多 10 枚 active Token、16 KiB 浏览器设置请求体上限、24 小时限流事件保留期与 90 天最小审计保留期。浏览器设置请求体在 JSON 或表单解析前按流读取并停止超限请求，具体数值不散落在 Controller 中。
 
-待配对、provisioning 与 active 共同占用每 Space 10 个授权槽位。所有 Agent 授权生命周期事务统一按 `Space → Pairing → Credential` 获取有关行锁；只涉及其中一类子资源时仍先锁 Space，不能建立反向锁序。轮换在同一事务中撤销旧凭证并建立替代凭证，不增加槽位。浏览器创建和轮换使用 operation ID，重复提交不会重放明文；相同 operation ID 携带不同请求会冲突。
+所有 Agent Token 生命周期事务统一先锁 Space，再处理 Credential，不能建立反向锁序。并发创建时第 11 枚 Token 在事务内失败；轮换在同一事务中撤销旧凭证并建立替代凭证，不增加 active 槽位。浏览器创建和轮换使用 operation ID，重复提交不会重放明文；相同 operation ID 携带不同请求会冲突。
 
 云端编译产物位于 `.cloud-dist/`，已被 Git 忽略，不进入现有静态 `dist/` 或 `local-dist/`。现有本地文件版仍使用 `npm start`，行为不变。
 
@@ -95,18 +95,18 @@ M3-A 将 PAT 字符格式锁定为 `dnpat_<22 字符 selector>_<43 字符 secret
 - `GET /` 是不含用户数据的公开产品入口；已登录用户只会看到进入私人编辑部的动作。
 - `GET /login` 显示统一品牌外壳中的邮箱与 OTP 登录页；成功后由 `GET /post-login` 把首次用户送到接入页，已有用户送回安全的站内目标或 Home。
 - `ALL /api/auth/*` 由 Better Auth 处理 Email OTP、Session 与退出。
-- `GET /onboarding` 对昵称未完成的新用户先显示 1–24 个可见字符的昵称步骤；保存后才显示完整接入话术与独立的短时配对码。接入话术本身不包含配对码、PAT、MCP 配置或完整调度提示词。`GET /agent-setup.md` 以 `text/markdown; charset=utf-8` 返回无用户数据的公开接入合同，并按当前实例渲染绝对 Claim、Verify、API Base 与 MCP 地址。
+- `GET /onboarding` 对昵称未完成的新用户先显示 1–24 个可见字符的昵称步骤；保存后显示接入话术和显式“生成 Token”表单，不会因打开或刷新页面自动生成凭证。`GET /agent-setup.md` 以 `text/markdown; charset=utf-8` 返回无用户数据的公开接入合同，运行时只写入当前实例的绝对 MCP 地址；页面和 Markdown 均不包含 Token。
 - `GET /home` 显示系统示例或首要 Publication 的最新正式日报；正式内容出现后不再并列显示示例。其他活动 Publication 只有在已有正式内容时才以精简入口出现，不在 Home 展开完整正文，也不伪造调度、在线或更新时间承诺。
 - `GET /publications/` 是活动 Publication 的阅读目录，展示首要标记与最新正式一期；尚无正式内容的活动项仍保留明确空状态，创建、排序、停用等管理操作不进入阅读目录。
 - `GET /p/:publicationId/?date=YYYY-MM-DD` 按 Compiled Edition 的正式层级和顺序阅读指定日期日报；省略日期时读取该 Publication 的最新正式日报。指定日期不存在时明确返回 `404` 并只提供真实存在的最近一期入口，不静默回退。停用项不再出现在目录和 Home，但所属用户仍可通过原地址只读已有正式内容。
 - `GET /todo/` 只在 Todo 已启用且存在正式 State 时出现在全局导航，并只展示正式 State；Home 的 Todo 摘要与日报是否已有正式内容相互独立。`GET /settings` 规范跳转到 `/settings/sites`。
 - 设置外壳固定为五项：`/settings/sites` 日报站点、`/settings/themes` 只读主题库、`/settings/agent` Agent 授权、`/settings/account` 账户与安全、`/settings/advanced` 高级接入。日报站点下另有 Home、新建与精确 Publication 配置页，不提供设置 Dashboard 或独立 Todo 设置页。
 - 日报站点的创建、名称 / 主题合并保存、锁内移动、停用 / 恢复与 Todo 启停，以及昵称保存，都使用 Session、可信外部请求 Origin 和绑定当前 Session 的 CSRF Token；PAT 不能进入这些浏览器写入路径。浏览器提供具体 `Origin` 时必须与 `CLOUD_ORIGIN` 一致；浏览器未提供该 Header 或因隐私上下文发送字面值 `null` 时，由可信外部请求 Origin 与 CSRF 共同完成校验。失败会保留表单输入，事务失败不留下部分事实。
-- `GET /settings/agent` 与连接子路由沿用相同浏览器安全边界；昵称未完成时不能跳过首次步骤建立 Agent 授权。`GET /settings/advanced` 管理手动凭证，完整 PAT 仅在创建或轮换成功响应中显示一次；`GET /settings/advanced/openapi.yaml` 需要有效 Session。
+- `GET /settings/agent` 是 Token 创建、命名、轮换和撤销的唯一浏览器入口，并沿用相同浏览器安全边界；昵称未完成时不能跳过首次步骤建立 Agent 授权。`GET /settings/advanced` 只展示 API / MCP 地址和 OpenAPI 入口，不管理 Token；`GET /settings/advanced/openapi.yaml` 需要有效 Session。
 - 登录后的私有外壳读取显式昵称并显示首字符头像；昵称、Home 名称和 Publication 名称保持三个独立事实。账户页只读显示完整登录邮箱与“邮箱验证码”，退出只结束当前浏览器 Session。
 - 私有阅读外壳固定为“总览 / 我的日报 / Todo（满足可见条件时）/ 编辑部设置”，不随首要 Publication 名称变化。日报页的多来源以一个共享 Dialog 渐进增强；无 JavaScript 时仍保留可访问的来源列表。正式图片保留尺寸、替代文本与来源信息，远端图片不发送 Referrer，加载失败时回退为文字说明。
 - 官方主题 CSS 继续从只读构建产物公开读取；自定义主题精确 revision 的 CSS 必须经过当前 Session 与 Space 归属校验，匿名用户和其他 Space 不能探测。Home、日报目录、日报正文与 Todo 都使用解析后的有效主题；Home 的 inherit 与 Publication 直接选择继续随 current revision 指针变化。
-- `POST /agent-pairing/v1/claim` 只接受短时配对码，一次返回 provisioning PAT；`POST /agent-pairing/v1/verify` 是无请求体的 PAT-only POST，只接受 `Authorization: Bearer <provisioning PAT>`，并返回不含正文的默认 Publication、时区与 Todo enabled 最小上下文。
+- `POST /onboarding/token` 与 `POST /settings/agent/tokens` 在 Session、同源和 CSRF 校验后显式创建立即可用的 Agent Token；完整值只在一次性成功页显示。轮换与撤销同样只通过 `/settings/agent/tokens/:credentialId/*` 的浏览器写入路由完成。
 - `GET /api/v1/publications`、`GET /api/v1/publications/:id/daily-context`、`POST /api/v1/publications/:id/daily-candidates` 与 `GET /api/v1/publications/:id/issues/:date` 提供 Content 正式读写闭环。
 - `GET /api/v1/todo` 与 `POST /api/v1/todo/candidates` 提供 Todo 状态、正式 State 与受控写入；Todo 关闭时不读取保留正文。
 - `POST /mcp` 提供十一项 Daily / Todo / Theme MCP 工具；只接受 Bearer PAT 与 `application/json`。`GET /mcp`、`DELETE /mcp` 和其他方法固定返回 `405 Allow: POST`。
@@ -129,16 +129,16 @@ M2-B 集成测试额外覆盖并发首次初始化、事务故障回滚、部分
 
 M2-D 自动化只使用 Fake Adapter 或注入的 SES Stub，覆盖完整 OTP 登录、错误次数、重发轮换、一次性与并发消费、Session 跨新运行时保持、退出、初始化补偿、持久限流、全站并发硬上限、跨站首登拒绝、供应商失败脱敏、Cookie 属性和 Fake 测试路由隔离。真实 SES 不进入本地自检或 CI；只有用户另行授权后才能执行一次正式代码真实邮箱冒烟。
 
-M3-A 集成测试覆盖 Bootstrap Pairing、刷新旧码失效、Claim / 无请求体 Verify 一次性、provisioning 超时、摘要存储、CSRF / 跨 Origin、浏览器重复提交、轮换与单独撤销、跨 Space 目标、第 11 个并发授权失败、持久 IP 限流，以及 Claim / 页面 Bootstrap、Verify / 取消之间的真实 PostgreSQL 锁顺序。云端单元测试通过真实 HTTP Adapter 覆盖回环 TLS 终止代理的同源判断及其负向边界。测试只使用虚构用户和临时凭证，不把明文写入数据库、日志或测试快照。
+Agent Token 集成测试覆盖最终数据库结构、打开和刷新页面不隐式生成、显式创建立即 active、完整值只显示一次、摘要存储、1–80 字符名称、CSRF / 跨 Origin、浏览器重复提交、轮换与单独撤销、跨 Space 目标，以及并发创建时第 11 枚 active Token 失败。云端单元测试通过真实 HTTP Adapter 覆盖回环 TLS 终止代理的同源判断及其负向边界。测试只使用虚构用户和临时凭证，不把明文写入数据库、日志、页面快照或截图。
 
 M3-B 集成测试覆盖活动 / 撤销 PAT、`last_used_at` 节流触达、PAT 与 IP 持久限流、跨进程写入租约、Content 正式写入与读取、跨 Space 隐藏、未来 / 历史 / `replace` 锁内确认、停用 Publication、Todo disabled 最小披露、Todo `clientRunId` 幂等与 Candidate ID 独立性，以及 `0102` 对短 legacy Candidate ID 的安全升级。OpenAPI 测试从真实路由清单核对全部 Method / Path、Bearer、POST 幂等头、错误码与假数据示例。
 
-M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与配对码分离、系统示例不落库、第一份正式日报替换示例、Compiled Edition 顺序和层级、指定日期 404、Todo 浏览器启停、正式 State 五组投影、关闭后不披露保留正文、主题选择链不完整时失败关闭，以及动态 Agent 名称的 HTML 转义。云端单元测试同时验证可见页面使用统一品牌外壳、资源入口和无用户数据的公开边界。
+M3-C 集成测试覆盖公开入口、首次登录去向、接入话术与 Token 创建边界、系统示例不落库、第一份正式日报替换示例、Compiled Edition 顺序和层级、指定日期 404、Todo 浏览器启停、正式 State 五组投影、关闭后不披露保留正文、主题选择链不完整时失败关闭，以及动态 Agent 名称的 HTML 转义。云端单元测试同时验证可见页面使用统一品牌外壳、资源入口和无用户数据的公开边界。
 
 协议自动化使用官方 `@modelcontextprotocol/client@2.0.0` 分别执行现代 Discover 和兼容 Initialize，核对同一组十一项工具的 `tools/list`、全部 `tools/call`、Instructions、Schema、Annotations、结构化错误、无 Session 与私有响应头。负向测试继续覆盖 Method、Content-Type、流式超限、Cookie / PAT 混淆、跨 Origin、现代协议 Header，以及真实 Node HTTP Adapter 的传输边界。PostgreSQL 集成测试还使用同一 PAT 跨 MCP / JSON API 复用主题 `clientRunId`，覆盖 revision 并发、官方 / 使用中删除拒绝、历史保留、配额和跨 Space 隔离。Inspector 基线与客户端配置见 [`CLOUD_AGENT_ACCESS.md`](./CLOUD_AGENT_ACCESS.md)。
 
 M4-A PostgreSQL 集成测试覆盖空库与精确 M3 Schema 升级、Migration 幂等、8 份 Publication 上限、同 Space 名称 / 地址冲突、并发创建、活动排序派生首要项、停用 / 恢复与最后活动项保护、跨 Space 隔离、依赖行写入失败整体回滚、主题 current revision 传播、官方 ID 防遮蔽、Todo 正式数据与开关独立投影，以及昵称写入与身份名称同步的原子性。本地 `npm test` 继续作为文件模式回归。
 
-M4-C 集成测试覆盖昵称先于配对、五项设置 IA、Home / Publication 表单、创建后普通语言 Agent 话术、名称与主题原子保存、锁内排序和首要项派生、停用 / 恢复确认、Todo 固定行与保留正文隔离、只读主题预览、账户资料 / 退出、输入失败回显、CSRF / Origin / PAT 混淆、旧可见设置路径消失及跨 Space 404。浏览器页面继续在 320、375、414、768 与桌面宽度核对键盘焦点、目标尺寸和无横向溢出。
+M4-C 集成测试覆盖昵称先于 Agent 授权、五项设置 IA、Home / Publication 表单、创建后普通语言 Agent 话术、名称与主题原子保存、锁内排序和首要项派生、停用 / 恢复确认、Todo 固定行与保留正文隔离、只读主题预览、账户资料 / 退出、输入失败回显、CSRF / Origin / PAT 混淆、旧可见设置路径消失及跨 Space 404。浏览器页面继续在 320、375、414、768 与桌面宽度核对键盘焦点、目标尺寸和无横向溢出。
 
 M4-D 集成测试覆盖多 Publication Home 摘要与活动阅读目录、真实日期前后导航和明确缺期 `404`、停用项归档直读、首要顺序变化、正式图片与单/多来源投影、Todo 导航与正式 State 存在性、三套官方主题、自定义主题 current revision，以及自定义 CSS 的 Session / Space 隔离。页面脚本测试同时锁定无 JavaScript 来源回退、共享 Dialog 焦点归还和图片加载失败文字回退。

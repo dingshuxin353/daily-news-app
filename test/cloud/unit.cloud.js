@@ -37,11 +37,8 @@ import {
 } from "../../.cloud-dist/src/modules/shared/canonical-json.js";
 import {
   constantTimeDigestEquals,
-  derivePairingCode,
   digestAgentTokenSecret,
-  digestPairingCode,
   issueAgentToken,
-  normalizePairingCode,
   parseAgentToken,
 } from "../../.cloud-dist/src/modules/agent-access/token-secret.js";
 import {
@@ -89,10 +86,6 @@ const validProductConfig = {
     sessionExpiresInDays: 30,
   },
   agentAccess: {
-    pairingCodeTtlSeconds: 600,
-    provisioningTtlSeconds: 600,
-    claimIpHourlyLimit: 20,
-    verifyIpHourlyLimit: 40,
     requestBodyLimitBytes: 16384,
     rateLimitRetentionHours: 24,
     auditRetentionDays: 90,
@@ -115,7 +108,6 @@ const requiredIdentityEnvironment = {
   BETTER_AUTH_SECRET: "unit-test-auth-secret-at-least-32-characters",
   IDENTITY_DIGEST_SECRET: "unit-test-digest-secret-at-least-32-characters",
   AGENT_TOKEN_DIGEST_SECRET: "unit-test-agent-token-secret-at-least-32-characters",
-  PAIRING_CODE_DIGEST_SECRET: "unit-test-pairing-code-secret-at-least-32-characters",
   MAIL_MODE: "fake",
 };
 
@@ -546,7 +538,7 @@ test("health routes honor the explicit base path", async () => {
   assert.equal((await app.request("http://localhost/cloud/health/live")).status, 200);
 });
 
-test("Agent setup Markdown renders the current base path and replaces the retired JSON contract", async () => {
+test("Agent setup Markdown renders only the current absolute MCP URL under the configured base path", async () => {
   const app = createCloudApp({
     basePath: "/dailynews",
     readinessCheck: async () => {},
@@ -568,29 +560,14 @@ test("Agent setup Markdown renders the current base path and replaces the retire
   assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
   const markdown = await response.text();
 
-  for (const endpoint of [
-    "https://dailynews.test/dailynews/agent-pairing/v1/claim",
-    "https://dailynews.test/dailynews/agent-pairing/v1/verify",
-    "https://dailynews.test/dailynews/api/v1",
-    "https://dailynews.test/dailynews/mcp",
-  ]) {
-    assert.match(markdown, new RegExp(endpoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  }
+  const mcpUrl = "https://dailynews.test/dailynews/mcp";
+  assert.ok(markdown.includes(mcpUrl));
+  assert.deepEqual([...new Set(markdown.match(/https?:\/\/[^\s`]+/g))], [mcpUrl]);
   assert.match(markdown, /^# DailyNews Agent 接入说明/m);
-  assert.match(markdown, /接入合同版本：`2\.0\.0`/);
-  assert.doesNotMatch(markdown, /^\s*- (?:状态|实现阶段)：/m);
+  assert.match(markdown, /接入合同版本：`3\.0\.0`/);
   assert.doesNotMatch(markdown, /\{\{[^{}]+\}\}/);
-  assert.doesNotMatch(markdown, /dnpat_[A-Za-z0-9_-]+/);
-  assert.doesNotMatch(markdown, /[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}/);
-
-  const claimRequest = /POST https:\/\/dailynews\.test\/dailynews\/agent-pairing\/v1\/claim\nContent-Type: application\/json\n\n(\{[\s\S]*?\})\n```/.exec(markdown);
-  assert.ok(claimRequest);
-  assert.deepEqual(Object.keys(JSON.parse(claimRequest[1])), ["pairingCode", "clientName"]);
-  const verifyRequest = /```http\n(POST https:\/\/dailynews\.test\/dailynews\/agent-pairing\/v1\/verify\nAuthorization: Bearer <已安全保存的 DailyNews PAT>)\n```/.exec(markdown);
-  assert.ok(verifyRequest);
-  assert.doesNotMatch(verifyRequest[1], /Content-Type|\{\s*\}/);
-  assert.match(markdown, /pending.*claimed.*provisioning.*verified.*active/);
-  assert.match(markdown, /Verify 超时或响应丢失[\s\S]*活动凭证探测/);
+  assert.doesNotMatch(markdown, /API Base|Claim|Verify|配对|provisioning|instructionsVersion/);
+  assert.doesNotMatch(markdown, /dnpat_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/);
 
   assert.equal((await app.request(
     "https://dailynews.test/dailynews/.well-known/dailynews-agent-setup.json",
@@ -617,7 +594,6 @@ function runtimeConfig(port) {
     },
     agentAccess: {
       tokenDigestSecret: requiredIdentityEnvironment.AGENT_TOKEN_DIGEST_SECRET,
-      pairingCodeDigestSecret: requiredIdentityEnvironment.PAIRING_CODE_DIGEST_SECRET,
       apiBaseUrl: "http://127.0.0.1/api/v1",
       mcpUrl: "http://127.0.0.1/mcp",
     },
@@ -719,7 +695,7 @@ test("PAT format locks a 128-bit selector, 256-bit secret, and digest-only verif
   assert.equal(new Set(Array.from({ length: 100 }, () => issueAgentToken(digestSecret).token)).size, 100);
 });
 
-test("active PAT authentication treats the Bearer scheme case-insensitively and rejects provisioning credentials", async () => {
+test("active PAT authentication treats the Bearer scheme case-insensitively and rejects revoked credentials", async () => {
   const tokenDigestSecret = "active-token-unit-secret-with-at-least-32-characters";
   const issued = issueAgentToken(tokenDigestSecret);
   const credential = {
@@ -731,7 +707,6 @@ test("active PAT authentication treats the Bearer scheme case-insensitively and 
     tokenHint: issued.hint,
     status: "active",
     rotatedFromId: null,
-    expiresAt: null,
     createdAt: new Date(),
     lastUsedAt: null,
     revokedAt: null,
@@ -742,65 +717,35 @@ test("active PAT authentication treats the Bearer scheme case-insensitively and 
     },
   }, {
     tokenDigestSecret,
-    pairingCodeDigestSecret: "pairing-unit-secret-with-at-least-32-characters",
     activeCredentialLimit: 10,
-    pairingCodeTtlSeconds: 600,
-    provisioningTtlSeconds: 600,
-    claimIpHourlyLimit: 20,
-    verifyIpHourlyLimit: 40,
-    apiBaseUrl: "https://example.com/api/v1",
-    mcpUrl: "https://example.com/mcp",
-    pairingVerifyUrl: "https://example.com/agent-pairing/v1/verify",
   });
   assert.equal((await service.authenticateActiveToken(`bearer ${issued.token}`)).id, credential.id);
-  credential.status = "provisioning";
+  credential.status = "revoked";
   await assert.rejects(() => service.authenticateActiveToken(`Bearer ${issued.token}`), (error) => error.status === 401);
 });
 
-test("pairing codes are stable per generation, refreshable, normalized, and digest-only", () => {
-  const secret = "pairing-code-unit-secret-with-at-least-32-characters";
-  const pairingId = "f4dc55ba-5555-4555-8555-555555555555";
-  const first = derivePairingCode(secret, pairingId, 1);
-  assert.match(first, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/);
-  assert.equal(first, derivePairingCode(secret, pairingId, 1));
-  assert.notEqual(first, derivePairingCode(secret, pairingId, 2));
-  const normalized = normalizePairingCode(first.toLowerCase().replace("-", " "));
-  assert.ok(normalized);
-  assert.match(digestPairingCode(secret, normalized), /^[0-9a-f]{64}$/);
-  assert.equal(normalizePairingCode("00000-00000"), null);
-});
-
-test("invalid client names fail before the repository can look up or consume a pairing code", async () => {
-  let pairingLookupCalls = 0;
+test("invalid Token names fail before the repository can create a credential", async () => {
+  let credentialInsertCalls = 0;
   const service = new AgentCredentialService({
-    reservePairingRequest: async () => {},
-    claimPairing: async () => {
-      pairingLookupCalls += 1;
-      throw new Error("pairing lookup must not run");
+    issueCredential: async () => {
+      credentialInsertCalls += 1;
+      throw new Error("credential insert must not run");
     },
   }, {
     tokenDigestSecret: "agent-token-unit-secret-with-at-least-32-characters",
-    pairingCodeDigestSecret: "pairing-unit-secret-with-at-least-32-characters",
     activeCredentialLimit: 10,
-    pairingCodeTtlSeconds: 600,
-    provisioningTtlSeconds: 600,
-    claimIpHourlyLimit: 20,
-    verifyIpHourlyLimit: 40,
-    apiBaseUrl: "https://example.com/api/v1",
-    mcpUrl: "https://example.com/mcp",
-    pairingVerifyUrl: "https://example.com/agent-pairing/v1/verify",
   });
 
   await assert.rejects(
-    () => service.claimPairing({
-      code: "23456-789AB",
-      clientName: "\n",
-      ipDigest: "ip-digest",
-      requestId: "req_invalid_client_name",
-    }),
+    () => service.issueCredential(
+      { spaceId: "space-a", userId: "user-a" },
+      { name: "\n", operationId: "00000000-0000-4000-8000-000000000001" },
+      "req_invalid_token_name",
+      "actor-digest",
+    ),
     (error) => error?.code === "invalid_request",
   );
-  assert.equal(pairingLookupCalls, 0);
+  assert.equal(credentialInsertCalls, 0);
 });
 
 test("settings CSRF tokens bind to one session and user", () => {
@@ -815,13 +760,13 @@ test("settings CSRF tokens bind to one session and user", () => {
 test("settings mutations accept optional opaque browser Origin while preserving transport, CSRF, media, and size boundaries", async () => {
   const secret = "settings-request-secret-with-at-least-32-characters";
   const csrf = createSettingsCsrfToken(secret, "session-a", "user-a");
-  const validRequest = new Request("https://dailynews.test/settings/agent/connections", {
+  const validRequest = new Request("https://dailynews.test/settings/agent/tokens", {
     method: "POST",
     headers: { origin: "https://dailynews.test", "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ _csrf: csrf, name: "Agent" }),
   });
   const body = await readSettingsBody(validRequest.clone(), 1024);
-  const mutationRequest = (origin) => new Request("https://dailynews.test/settings/agent/connections", {
+  const mutationRequest = (origin) => new Request("https://dailynews.test/settings/agent/tokens", {
     method: "POST",
     headers: origin === undefined ? {} : { origin },
   });
@@ -904,7 +849,7 @@ test("settings mutations accept optional opaque browser Origin while preserving 
 
 test("external origin trusts one loopback TLS proxy hop and rejects untrusted forwarding", () => {
   assert.equal(resolveTrustedExternalOrigin({
-    requestUrl: "http://dailynews.test/settings/agent/connections",
+    requestUrl: "http://dailynews.test/settings/agent/tokens",
     requestHost: "dailynews.test",
     transportProtocol: "http",
     configuredOrigin: "https://dailynews.test",
@@ -934,7 +879,7 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
     { remoteAddress: "127.0.0.1", forwardedProto: "http" },
   ]) {
     assert.equal(resolveTrustedExternalOrigin({
-      requestUrl: "http://dailynews.test/settings/agent/connections",
+      requestUrl: "http://dailynews.test/settings/agent/tokens",
       requestHost: "dailynews.test",
       transportProtocol: "http",
       configuredOrigin: "https://dailynews.test",
@@ -942,7 +887,7 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
     }), "http://dailynews.test");
   }
   assert.equal(resolveTrustedExternalOrigin({
-    requestUrl: "https://dailynews.test/settings/agent/connections",
+    requestUrl: "https://dailynews.test/settings/agent/tokens",
     requestHost: "dailynews.test",
     transportProtocol: "http",
     configuredOrigin: "https://dailynews.test",
@@ -950,7 +895,7 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
     forwardedProto: undefined,
   }), "http://dailynews.test");
   assert.equal(resolveTrustedExternalOrigin({
-    requestUrl: "https://dailynews.test/settings/agent/connections",
+    requestUrl: "https://dailynews.test/settings/agent/tokens",
     requestHost: "dailynews.test",
     transportProtocol: "https",
     configuredOrigin: "https://dailynews.test",
@@ -958,8 +903,8 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
     forwardedProto: undefined,
   }), "https://dailynews.test");
   for (const mismatch of [
-    { requestUrl: "https://dailynews.test/settings/agent/connections", requestHost: "attacker.test" },
-    { requestUrl: "https://attacker.test/settings/agent/connections", requestHost: "dailynews.test" },
+    { requestUrl: "https://dailynews.test/settings/agent/tokens", requestHost: "attacker.test" },
+    { requestUrl: "https://attacker.test/settings/agent/tokens", requestHost: "dailynews.test" },
   ]) {
     assert.equal(resolveTrustedExternalOrigin({
       ...mismatch,
@@ -971,7 +916,7 @@ test("external origin trusts one loopback TLS proxy hop and rejects untrusted fo
   }
 });
 
-test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT verification", async () => {
+test("HTTP adapter enforces the loopback TLS terminator for Agent Token browser mutations", async () => {
   const csrfSecret = "adapter-csrf-secret-with-at-least-32-characters";
   const session = { session: { id: "session-a" }, user: { id: "user-a" } };
   const renamed = [];
@@ -985,29 +930,6 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
       origin: "https://dailynews.test",
       csrfSecret,
       service: {
-        ensureBootstrapPairing: async () => {},
-        verifyPairing: async () => ({
-          credential: {
-            id: "credential-pairing",
-            spaceId: "space-a",
-            name: "Provisioned Agent",
-            selector: "selector",
-            secretDigest: "digest",
-            tokenHint: "hint",
-            status: "active",
-            rotatedFromId: null,
-            expiresAt: null,
-            createdAt: new Date("2026-08-27T00:00:00.000Z"),
-            lastUsedAt: new Date("2026-08-27T00:00:00.000Z"),
-            revokedAt: null,
-          },
-          context: {
-            publicationId: "daily-news",
-            publicationName: "DailyNews",
-            timeZone: "Asia/Shanghai",
-            todoEnabled: false,
-          },
-        }),
         renameCredential: async (_tenant, id, name) => {
           renamed.push({ id, name });
           return {
@@ -1019,7 +941,6 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
             tokenHint: "hint",
             status: "active",
             rotatedFromId: null,
-            expiresAt: null,
             createdAt: new Date("2026-08-27T00:00:00.000Z"),
             lastUsedAt: null,
             revokedAt: null,
@@ -1042,7 +963,7 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
   assert.ok(address && typeof address !== "string");
   const csrf = createSettingsCsrfToken(csrfSecret, "session-a", "user-a");
   const noSocketRequest = (host) => app.request(
-    "https://dailynews.test/settings/agent/connections/credential-a/name",
+    "https://dailynews.test/settings/agent/tokens/credential-a/name",
     {
       method: "POST",
       headers: {
@@ -1053,7 +974,7 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
       body: JSON.stringify({ name: "无连接上下文", _csrf: csrf }),
     },
   );
-  const request = (headers = {}, requestTarget = "/settings/agent/connections/credential-a/name") => new Promise((resolve, reject) => {
+  const request = (headers = {}, requestTarget = "/settings/agent/tokens/credential-a/name") => new Promise((resolve, reject) => {
     const body = JSON.stringify({ name: "代理后的 Agent", _csrf: csrf });
     const outgoing = httpRequest({
       hostname: "127.0.0.1",
@@ -1074,20 +995,6 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
     outgoing.once("error", reject);
     outgoing.end(body);
   });
-  const verifyRequest = () => new Promise((resolve, reject) => {
-    const outgoing = httpRequest({
-      hostname: "127.0.0.1",
-      port: address.port,
-      path: "/agent-pairing/v1/verify",
-      method: "POST",
-      headers: { authorization: "Bearer provisioning-token" },
-    }, (incoming) => {
-      incoming.resume();
-      incoming.once("end", () => resolve(incoming.statusCode));
-    });
-    outgoing.once("error", reject);
-    outgoing.end();
-  });
   try {
     assert.equal((await noSocketRequest("dailynews.test")).status, 403);
     assert.equal((await noSocketRequest("attacker.test")).status, 403);
@@ -1096,14 +1003,14 @@ test("HTTP adapter enforces the loopback TLS terminator and accepts bodyless PAT
     assert.equal(await request({ "x-forwarded-proto": "https", origin: "https://attacker.test" }), 403);
     assert.equal(await request(
       {},
-      "https://dailynews.test/settings/agent/connections/credential-a/name",
+      "https://dailynews.test/settings/agent/tokens/credential-a/name",
     ), 403);
     assert.equal(await request(
       { "x-forwarded-proto": "https", host: "attacker.test" },
-      "https://dailynews.test/settings/agent/connections/credential-a/name",
+      "https://dailynews.test/settings/agent/tokens/credential-a/name",
     ), 403);
     assert.equal(await request({ "x-forwarded-proto": "https" }), 200);
-    assert.equal(await verifyRequest(), 200);
+    assert.equal(await request({ "x-forwarded-proto": "https" }, "/agent-pairing/v1/verify"), 404);
     assert.deepEqual(renamed, [{ id: "credential-a", name: "代理后的 Agent" }]);
   } finally {
     await closeHttpServer(server);

@@ -54,10 +54,6 @@ const product = {
     sessionExpiresInDays: 30,
   },
   agentAccess: {
-    pairingCodeTtlSeconds: 600,
-    provisioningTtlSeconds: 600,
-    claimIpHourlyLimit: 20,
-    verifyIpHourlyLimit: 40,
     requestBodyLimitBytes: 16384,
     rateLimitRetentionHours: 24,
     auditRetentionDays: 90,
@@ -84,7 +80,6 @@ function runtimeConfig(productOverrides = {}) {
     },
     agentAccess: {
       tokenDigestSecret: "identity-integration-agent-secret-32-characters",
-      pairingCodeDigestSecret: "identity-integration-pairing-secret-32-characters",
       apiBaseUrl: "https://dailynews.test/api/v1",
       mcpUrl: "https://dailynews.test/mcp",
     },

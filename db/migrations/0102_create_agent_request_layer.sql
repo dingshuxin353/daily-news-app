@@ -1,10 +1,3 @@
-ALTER TABLE app.agent_rate_limit_events
-  DROP CONSTRAINT agent_rate_limit_events_action_allowed;
-
-ALTER TABLE app.agent_rate_limit_events
-  ADD CONSTRAINT agent_rate_limit_events_action_allowed
-  CHECK (action IN ('pairing_claim', 'pairing_verify', 'api_read_token', 'api_read_ip', 'api_write_token', 'api_write_ip'));
-
 CREATE TABLE app.agent_write_leases (
   id uuid PRIMARY KEY,
   space_id uuid NOT NULL,

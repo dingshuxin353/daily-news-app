@@ -40,7 +40,7 @@ const defaults = {
   priorityLimits: { lead: 1, important: 2, normal: null },
 };
 const digestSecret = "agent-api-integration-digest-secret-at-least-32-characters";
-const pairingSecret = "agent-api-integration-pairing-secret-at-least-32-characters";
+const requestDigestSecret = "agent-api-integration-request-secret-at-least-32-characters";
 const { Pool } = pg;
 const pool = new Pool({ connectionString, max: 30, connectionTimeoutMillis: 5000 });
 
@@ -84,29 +84,21 @@ function theme(themeId = "fictional-blue", accent = "#2457A7") {
 async function fixture(options = {}) {
   const tenancy = new PostgresTenancyStore(pool);
   const tenant = await tenancy.ensureSpaceForUser(options.userId ?? "agent-api-user", defaults);
-  const accessRepository = new PostgresAgentAccessRepository(pool, { rateLimitHours: 24, auditDays: 90 });
+  const accessRepository = new PostgresAgentAccessRepository(pool, { auditDays: 90 });
   const credentials = new AgentCredentialService(accessRepository, {
     tokenDigestSecret: digestSecret,
-    pairingCodeDigestSecret: pairingSecret,
     activeCredentialLimit: 10,
-    pairingCodeTtlSeconds: 600,
-    provisioningTtlSeconds: 600,
-    claimIpHourlyLimit: 20,
-    verifyIpHourlyLimit: 40,
-    apiBaseUrl: "https://dailynews.test/api/v1",
-    mcpUrl: "https://dailynews.test/mcp",
-    pairingVerifyUrl: "https://dailynews.test/agent-pairing/v1/verify",
   });
-  const issued = await credentials.issueManualCredential(
+  const issued = await credentials.issueCredential(
     tenant,
     { name: "集成测试 Agent", operationId: randomUUID() },
     "req_fixture",
-    keyedDigest(pairingSecret, "fixture-actor"),
+    keyedDigest(requestDigestSecret, "fixture-actor"),
   );
   assert.ok(issued.token);
   const policy = new PostgresAgentRequestPolicy(pool);
   const rateLimits = {
-    digestSecret: pairingSecret,
+    digestSecret: requestDigestSecret,
     rateLimitRetentionHours: 24,
     readTokenHourlyLimit: options.readTokenHourlyLimit ?? 100,
     writeTokenHourlyLimit: options.writeTokenHourlyLimit ?? 100,
@@ -358,7 +350,7 @@ test("one PAT shares formal Daily idempotency across MCP and JSON API, then rota
       credential.id,
       { name: "轮换后的 MCP Agent", operationId: randomUUID() },
       "req_rotate_mcp",
-      keyedDigest(pairingSecret, "rotate-mcp-actor"),
+      keyedDigest(requestDigestSecret, "rotate-mcp-actor"),
     );
     assert.ok(rotated.token);
     await assert.rejects(
@@ -715,7 +707,7 @@ test("persistent request limits, write leases, and revoked PATs fail closed", as
     limited.tenant,
     limited.credential.id,
     "req_revoke",
-    keyedDigest(pairingSecret, "revoke-actor"),
+    keyedDigest(requestDigestSecret, "revoke-actor"),
   );
   const revoked = await limited.app.request("https://dailynews.test/api/v1/todo", { headers: limited.headers });
   assert.equal(revoked.status, 401);
@@ -725,11 +717,11 @@ test("persistent request limits, write leases, and revoked PATs fail closed", as
 test("persistent IP limits aggregate different active PATs without storing the raw address", async () => {
   const limited = await fixture({ userId: "ip-rate-user", readIpHourlyLimit: 1 });
   assert.equal((await limited.app.request("https://dailynews.test/api/v1/publications", { headers: limited.headers })).status, 200);
-  const second = await limited.credentials.issueManualCredential(
+  const second = await limited.credentials.issueCredential(
     limited.tenant,
     { name: "Second Agent", operationId: randomUUID() },
     "req_second_token",
-    keyedDigest(pairingSecret, "second-token-actor"),
+    keyedDigest(requestDigestSecret, "second-token-actor"),
   );
   const response = await limited.app.request("https://dailynews.test/api/v1/publications", {
     headers: { authorization: `Bearer ${second.token}` },

@@ -75,7 +75,6 @@ test("tenant, identity, and Agent access migrations create the bounded app table
   const tables = result.rows.map(({ tablename }) => tablename);
   for (const table of [
     "agent_credentials",
-    "agent_pairing_sessions",
     "agent_rate_limit_events",
     "audit_events",
     "custom_themes",
@@ -93,6 +92,7 @@ test("tenant, identity, and Agent access migrations create the bounded app table
   ]) {
     assert.ok(tables.includes(table), `${table} must remain available`);
   }
+  assert.equal(tables.some((table) => table.includes("pairing")), false);
   assert.ok(!tables.some((table) => table.startsWith("auth_")));
 });
 
