@@ -9,7 +9,6 @@ CREATE TABLE app.agent_credentials (
   issue_payload_hash character(64) NOT NULL,
   status text NOT NULL,
   rotated_from_id uuid,
-  expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   last_used_at timestamptz,
   revoked_at timestamptz,
@@ -24,10 +23,9 @@ CREATE TABLE app.agent_credentials (
   CONSTRAINT agent_credentials_secret_digest_format CHECK (secret_digest ~ '^[0-9a-f]{64}$'),
   CONSTRAINT agent_credentials_token_hint_length CHECK (char_length(token_hint) BETWEEN 8 AND 64),
   CONSTRAINT agent_credentials_issue_payload_hash_format CHECK (issue_payload_hash ~ '^[0-9a-f]{64}$'),
-  CONSTRAINT agent_credentials_status_allowed CHECK (status IN ('provisioning', 'active', 'rotated', 'revoked')),
+  CONSTRAINT agent_credentials_status_allowed CHECK (status IN ('active', 'rotated', 'revoked')),
   CONSTRAINT agent_credentials_lifecycle_consistent CHECK (
-    (status = 'provisioning' AND expires_at IS NOT NULL AND revoked_at IS NULL)
-    OR (status = 'active' AND expires_at IS NULL AND revoked_at IS NULL)
+    (status = 'active' AND revoked_at IS NULL)
     OR (status IN ('rotated', 'revoked') AND revoked_at IS NOT NULL)
   ),
   CONSTRAINT agent_credentials_not_self_rotated CHECK (rotated_from_id IS NULL OR rotated_from_id <> id),
@@ -37,61 +35,14 @@ CREATE TABLE app.agent_credentials (
 CREATE INDEX agent_credentials_space_status_idx
   ON app.agent_credentials (space_id, status, created_at DESC);
 
-CREATE TABLE app.agent_pairing_sessions (
-  id uuid PRIMARY KEY,
-  space_id uuid NOT NULL,
-  intended_name text NOT NULL,
-  purpose text NOT NULL,
-  creation_operation_id uuid NOT NULL,
-  creation_payload_hash character(64) NOT NULL,
-  status text NOT NULL,
-  code_generation integer NOT NULL DEFAULT 1,
-  code_digest character(64) NOT NULL,
-  expires_at timestamptz NOT NULL,
-  claim_started_at timestamptz,
-  provisioning_credential_id uuid,
-  verified_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  CONSTRAINT agent_pairing_sessions_space_fk
-    FOREIGN KEY (space_id) REFERENCES app.spaces (id) ON DELETE RESTRICT,
-  CONSTRAINT agent_pairing_sessions_credential_fk
-    FOREIGN KEY (provisioning_credential_id) REFERENCES app.agent_credentials (id) ON DELETE RESTRICT,
-  CONSTRAINT agent_pairing_sessions_name_not_blank CHECK (btrim(intended_name) <> ''),
-  CONSTRAINT agent_pairing_sessions_name_length CHECK (char_length(intended_name) <= 80),
-  CONSTRAINT agent_pairing_sessions_name_no_controls CHECK (intended_name !~ '[[:cntrl:]]'),
-  CONSTRAINT agent_pairing_sessions_purpose_allowed CHECK (purpose IN ('bootstrap', 'additional')),
-  CONSTRAINT agent_pairing_sessions_creation_hash_format CHECK (creation_payload_hash ~ '^[0-9a-f]{64}$'),
-  CONSTRAINT agent_pairing_sessions_status_allowed CHECK (status IN ('pending', 'claimed', 'verified', 'cancelled', 'expired')),
-  CONSTRAINT agent_pairing_sessions_generation_positive CHECK (code_generation > 0),
-  CONSTRAINT agent_pairing_sessions_code_digest_format CHECK (code_digest ~ '^[0-9a-f]{64}$'),
-  CONSTRAINT agent_pairing_sessions_lifecycle_consistent CHECK (
-    (status = 'pending' AND claim_started_at IS NULL AND provisioning_credential_id IS NULL AND verified_at IS NULL)
-    OR (status = 'claimed' AND claim_started_at IS NOT NULL AND provisioning_credential_id IS NOT NULL AND verified_at IS NULL)
-    OR (status = 'verified' AND claim_started_at IS NOT NULL AND provisioning_credential_id IS NOT NULL AND verified_at IS NOT NULL)
-    OR (status IN ('cancelled', 'expired') AND verified_at IS NULL)
-  ),
-  CONSTRAINT agent_pairing_sessions_space_operation_unique UNIQUE (space_id, creation_operation_id)
-);
-
-CREATE UNIQUE INDEX agent_pairing_sessions_code_digest_unique
-  ON app.agent_pairing_sessions (code_digest)
-  WHERE status IN ('pending', 'claimed');
-
-CREATE UNIQUE INDEX agent_pairing_sessions_one_unfinished_bootstrap
-  ON app.agent_pairing_sessions (space_id)
-  WHERE purpose = 'bootstrap' AND status IN ('pending', 'claimed');
-
-CREATE INDEX agent_pairing_sessions_space_created_idx
-  ON app.agent_pairing_sessions (space_id, created_at DESC);
-
 CREATE TABLE app.agent_rate_limit_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   key_digest character(64) NOT NULL,
   action text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT agent_rate_limit_events_key_format CHECK (key_digest ~ '^[0-9a-f]{64}$'),
-  CONSTRAINT agent_rate_limit_events_action_allowed CHECK (action IN ('pairing_claim', 'pairing_verify'))
+  CONSTRAINT agent_rate_limit_events_action_allowed
+    CHECK (action IN ('api_read_token', 'api_read_ip', 'api_write_token', 'api_write_ip'))
 );
 
 CREATE INDEX agent_rate_limit_events_lookup_idx
@@ -132,7 +83,6 @@ CREATE INDEX audit_events_type_created_idx
 CREATE INDEX audit_events_created_idx
   ON app.audit_events (created_at);
 
-COMMENT ON TABLE app.agent_credentials IS 'Digest-only long-lived Agent credentials and their lifecycle';
-COMMENT ON TABLE app.agent_pairing_sessions IS 'Refreshable short-code Agent connection lifecycle without stored plaintext codes';
-COMMENT ON TABLE app.agent_rate_limit_events IS 'Persistent digest-keyed pairing request rate limits';
+COMMENT ON TABLE app.agent_credentials IS 'Digest-only Agent Tokens and their lifecycle';
+COMMENT ON TABLE app.agent_rate_limit_events IS 'Persistent digest-keyed Agent request rate limits';
 COMMENT ON TABLE app.audit_events IS 'Minimal redacted security and write audit facts';

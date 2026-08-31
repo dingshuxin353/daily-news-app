@@ -224,12 +224,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
       try {
         const markdown = renderAgentSetupMarkdown(
           await readFile(agentSetupSource, "utf8"),
-          {
-            claimUrl: `${dependencies.agentSettings!.origin}${route("/agent-pairing/v1/claim")}`,
-            verifyUrl: `${dependencies.agentSettings!.origin}${route("/agent-pairing/v1/verify")}`,
-            apiBaseUrl: dependencies.agentSettings!.apiBaseUrl,
-            mcpUrl: dependencies.agentSettings!.mcpUrl,
-          },
+          dependencies.agentSettings!.mcpUrl,
         );
         return context.body(markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
       } catch {
@@ -321,17 +316,10 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         const session = await identity.getSession(context.req.raw, clientIp(context));
         if (!session) return context.redirect(route("/login"), 303);
         const existing = await tenancy.resolveTenantContextForUser(session.user.id);
-        const tenant = await tenancy.ensureSpaceForUser(session.user.id, defaults);
+        await tenancy.ensureSpaceForUser(session.user.id, defaults);
         const profile = dependencies.siteSettings
           ? await dependencies.siteSettings.profiles.read(session.user.id)
           : null;
-        if (dependencies.agentSettings && (!dependencies.siteSettings || profile?.complete)) {
-          await dependencies.agentSettings.service.ensureBootstrapPairing(
-            tenant,
-            `req_${randomUUID().replaceAll("-", "")}`,
-            dependencies.agentSettings.digestActor("session", `${session.session.id}:${session.user.id}`),
-          );
-        }
         const target = safeReturnTo(context.req.query("returnTo"), dependencies.basePath);
         return context.redirect(existing && (!dependencies.siteSettings || profile?.complete)
           ? target?.path ?? route("/home")
@@ -435,16 +423,12 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
               }));
             }
           }
-          const actor = dependencies.agentSettings!.digestActor("session", `${access.session.session.id}:${access.session.user.id}`);
-          const bootstrap = await dependencies.agentSettings!.service.ensureBootstrapPairing(access.tenant, `req_${randomUUID().replaceAll("-", "")}`, actor);
-          const pairings = await dependencies.agentSettings!.service.listPairings(access.tenant, `req_${randomUUID().replaceAll("-", "")}`, actor);
-          const pairing = pairings.find(({ id }) => id === bootstrap.id) ?? bootstrap;
           const readingShell = await dependencies.privateReading!.readShell(access.tenant);
           return context.html(renderOnboardingPage({
             basePath: dependencies.basePath,
             shell: readingShell,
-            pairing,
             csrfToken: createSettingsCsrfToken(dependencies.agentSettings!.csrfSecret, access.session.session.id, access.session.user.id),
+            operationId: randomUUID(),
             setupUrl: `${dependencies.agentSettings!.origin}${route("/agent-setup.md")}`,
           }));
         } catch {

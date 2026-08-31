@@ -39,10 +39,6 @@ export interface CloudFileConfig {
     sessionExpiresInDays: number;
   };
   agentAccess: {
-    pairingCodeTtlSeconds: number;
-    provisioningTtlSeconds: number;
-    claimIpHourlyLimit: number;
-    verifyIpHourlyLimit: number;
     requestBodyLimitBytes: number;
     rateLimitRetentionHours: number;
     auditRetentionDays: number;
@@ -90,7 +86,6 @@ export interface CloudRuntimeConfig {
   };
   agentAccess: {
     tokenDigestSecret: string;
-    pairingCodeDigestSecret: string;
     apiBaseUrl: string;
     mcpUrl: string;
   };
@@ -178,20 +173,6 @@ function validateCloudFileConfig(value: unknown): CloudFileConfig {
       sessionExpiresInDays: requireInteger(identity.sessionExpiresInDays, "identity.sessionExpiresInDays", 1, 90),
     },
     agentAccess: {
-      pairingCodeTtlSeconds: requireInteger(
-        agentAccess.pairingCodeTtlSeconds,
-        "agentAccess.pairingCodeTtlSeconds",
-        60,
-        3600,
-      ),
-      provisioningTtlSeconds: requireInteger(
-        agentAccess.provisioningTtlSeconds,
-        "agentAccess.provisioningTtlSeconds",
-        60,
-        3600,
-      ),
-      claimIpHourlyLimit: requireInteger(agentAccess.claimIpHourlyLimit, "agentAccess.claimIpHourlyLimit", 1, 1000),
-      verifyIpHourlyLimit: requireInteger(agentAccess.verifyIpHourlyLimit, "agentAccess.verifyIpHourlyLimit", 1, 1000),
       requestBodyLimitBytes: requireInteger(
         agentAccess.requestBodyLimitBytes,
         "agentAccess.requestBodyLimitBytes",
@@ -430,13 +411,11 @@ export async function loadCloudConfig(options: {
   assertOriginBinding(origin, host);
   const identity = parseMailConfiguration(env);
   const tokenDigestSecret = requireSecret(env, "AGENT_TOKEN_DIGEST_SECRET");
-  const pairingCodeDigestSecret = requireSecret(env, "PAIRING_CODE_DIGEST_SECRET");
   if (new Set([
     identity.authSecret,
     identity.digestSecret,
     tokenDigestSecret,
-    pairingCodeDigestSecret,
-  ]).size !== 4) {
+  ]).size !== 3) {
     throw new CloudConfigError("identity and Agent secrets must be independent");
   }
   return {
@@ -454,7 +433,6 @@ export async function loadCloudConfig(options: {
     identity,
     agentAccess: {
       tokenDigestSecret,
-      pairingCodeDigestSecret,
       apiBaseUrl: parseAgentEndpoint(env.AGENT_API_BASE_URL, "AGENT_API_BASE_URL", origin, `${basePath}/api/v1`),
       mcpUrl: parseAgentEndpoint(env.AGENT_MCP_URL, "AGENT_MCP_URL", origin, `${basePath}/mcp`),
     },

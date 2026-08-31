@@ -100,7 +100,7 @@ npm run build:cloud
 - `CLOUD_HOST=127.0.0.1`，`CLOUD_PORT` 只在回环监听且不与其他服务冲突。
 - `AGENT_API_BASE_URL` 精确等于公开 Origin、Base Path 与 `/api/v1` 的组合；`AGENT_MCP_URL` 同理指向 `/mcp`。
 - `DATABASE_URL` 指向独立、可丢弃的本机测试库；连接串不带 `ssl*` 参数，同机回环连接使用显式 `PG_SSL_MODE=disable`。
-- 四枚应用 Secret 各自至少 32 字符且互不相同。
+- 三枚应用 Secret（Better Auth、身份摘要、Agent Token 摘要）各自至少 32 字符且互不相同。
 - 未取得真实邮件授权时只能配置 `MAIL_MODE=fake`，且不得声称登录闭环可用；取得授权后才改为 `ses` 并注入腾讯云字段。
 
 环境文件权限检查通过后，才在当前 release 的受限 Shell 中加载它：

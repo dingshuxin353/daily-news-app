@@ -54,7 +54,7 @@ for (const button of document.querySelectorAll("[data-copy]")) {
     if (!source) return;
     try {
       await navigator.clipboard.writeText(source.textContent || "");
-      if (status) status.textContent = key === "pairing" ? "配对码已复制。" : key === "secret" ? "令牌已复制。" : "设置话术已复制。";
+      if (status) status.textContent = key === "secret" ? "Token 已复制。" : "设置话术已复制。";
     } catch {
       const selection = window.getSelection();
       const range = document.createRange();
@@ -75,7 +75,7 @@ for (const form of document.querySelectorAll("[data-settings-form]")) {
   };
   const validate = (input) => {
     if (!(input instanceof HTMLInputElement) || input.readOnly || input.type === "hidden" || input.type === "radio") return true;
-    const maximum = input.name === "nickname" ? 24 : input.name === "name" ? 40 : undefined;
+    const maximum = input.maxLength > 0 ? input.maxLength : undefined;
     const value = input.value.trim();
     const valid = visibleText(value)
       && (maximum === undefined || [...value].length <= maximum)
@@ -103,47 +103,11 @@ for (const form of document.querySelectorAll("[data-settings-form]")) {
 
 const oneTimeSecret = document.querySelector('[data-copy-source="secret"]');
 if (oneTimeSecret instanceof HTMLElement) {
-  window.history.replaceState(null, "", `${basePath}/settings/advanced`);
+  const returnPath = oneTimeSecret.closest("[data-secret-return]")?.dataset.secretReturn || `${basePath}/settings/agent`;
+  window.history.replaceState(null, "", returnPath);
   window.addEventListener("pagehide", () => {
     oneTimeSecret.textContent = "";
   }, { once: true });
-}
-
-const expiry = document.querySelector("[data-pairing-expiry]");
-if (expiry instanceof HTMLTimeElement) {
-  const label = document.querySelector("[data-pairing-label]");
-  let refreshedAfterExpiry = false;
-  const update = () => {
-    const seconds = Math.max(0, Math.ceil((new Date(expiry.dateTime).getTime() - Date.now()) / 1000));
-    const minutes = Math.floor(seconds / 60);
-    const remainder = String(seconds % 60).padStart(2, "0");
-    expiry.textContent = seconds > 0 ? `剩余 ${minutes}:${remainder}` : "已到期，正在获取当前码";
-    if (seconds === 0 && label) label.textContent = "正在生成当前配对码";
-    if (seconds === 0 && !refreshedAfterExpiry) {
-      refreshedAfterExpiry = true;
-      window.location.reload();
-    }
-  };
-  update();
-  window.setInterval(update, 1000);
-}
-
-const pairingRoot = document.querySelector("[data-pairing-id]");
-if (pairingRoot instanceof HTMLElement && pairingRoot.dataset.pairingStatus !== "verified") {
-  const pairingId = pairingRoot.dataset.pairingId;
-  window.setInterval(async () => {
-    try {
-      const response = await fetch(`${basePath}/settings/agent/connections/${encodeURIComponent(pairingId)}/pair`, {
-        credentials: "same-origin",
-        headers: { accept: "application/json" },
-      });
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (payload.pairing?.status !== pairingRoot.dataset.pairingStatus) window.location.reload();
-    } catch {
-      // Polling is progressive enhancement; manual refresh remains available.
-    }
-  }, 5000);
 }
 
 if (window.location.hash) {

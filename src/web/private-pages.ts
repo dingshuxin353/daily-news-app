@@ -5,10 +5,10 @@ import type {
   PublicationReadingSummary,
   ReadingShell,
 } from "../modules/private-reading/service.js";
-import type { CredentialRecord, PairingRecord } from "../modules/agent-access/credential-service.js";
+import type { CredentialRecord } from "../modules/agent-access/credential-service.js";
 import type { UserProfile } from "../modules/identity/profile-service.js";
 
-type PageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings" | "pairing";
+type PageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings";
 
 interface PageShellOptions {
   basePath: string;
@@ -412,47 +412,32 @@ export function renderTodoPage(input: { basePath: string; shell: ReadingShell; p
 }
 
 function instruction(setupUrl: string): string {
-  return `请帮我把 DailyNews 用起来。\n请只从 ${setupUrl} 读取当前接入说明，并按说明帮我完成配置。\n读完后先向我要页面当前显示的配对码，不要让我手工配置 PAT、MCP、API、Cron 或完整提示词。\n连接成功后，继续问我想长期关注什么、希望什么时候更新；由你在自己的运行环境中建立定时任务，并立即生成第一份日报让我确认。\n不要在回复、日志或项目文件中输出长期凭证；只询问真正缺失的信息，其他使用安全默认值。`;
-}
-
-function pairingStatus(status: PairingRecord["status"]): string {
-  return ({ pending: "等待 Agent", claimed: "Agent 正在准备连接", verified: "已授权", cancelled: "没有完成", expired: "没有完成" })[status];
+  return `请帮我把 DailyNews 用起来。\n请先完整阅读 ${setupUrl}，并按说明完成配置。`;
 }
 
 function displayTime(value: Date, timeZone: string): string {
   return value.toLocaleString("zh-CN", { timeZone, hour12: false });
 }
 
-export function renderOnboardingPage(input: { basePath: string; shell: ReadingShell; pairing: PairingRecord & { code?: string | null }; csrfToken: string; setupUrl: string; firstUse?: boolean; refreshed?: boolean }): string {
+export function renderOnboardingPage(input: { basePath: string; shell: ReadingShell; csrfToken: string; operationId: string; setupUrl: string }): string {
   const text = instruction(input.setupUrl);
-  const canRefresh = input.pairing.status === "pending" || input.pairing.status === "expired";
-  const refreshForm = canRefresh
-    ? `<form method="post" action="${escapeHtml(path(input.basePath, `/settings/agent/connections/${input.pairing.id}/pair/refresh`))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><button class="button button--quiet" type="submit"${input.refreshed ? " autofocus" : ""}>换一个配对码</button></form>`
-    : "";
-  const pairingBody = input.pairing.code
-    ? `<div class="pairing-code" data-copy-source="pairing">${escapeHtml(input.pairing.code)}</div><p class="pairing-expiry"><time data-pairing-expiry datetime="${input.pairing.expiresAt.toISOString()}">有效至 ${input.pairing.expiresAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", timeZone: input.shell.timeZone })}</time></p><div class="pairing-actions"><button class="button" type="button" data-copy="pairing">复制配对码</button>${refreshForm}</div><p class="copy-status" data-copy-status="pairing" aria-live="polite">${input.refreshed ? "旧配对码已失效，请只发送当前码。" : ""}</p>`
-    : `<p>Agent 已经开始认领，旧码已隐藏。${input.pairing.status === "claimed" ? "如需重试，请先取消本次连接。" : ""}</p>`;
-  const cancelForm = input.pairing.status === "claimed"
-    ? `<form method="post" action="${escapeHtml(path(input.basePath, `/settings/agent/connections/${input.pairing.id}/pair/cancel`))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><button class="button button--quiet" type="submit">取消并换码</button></form>`
-    : "";
   return shell({
     basePath: input.basePath,
     title: "首次使用",
     page: "onboarding",
     privatePage: true,
     nav: pageNav(input.shell, ""),
-    body: `<main class="onboarding-main" id="content" data-pairing-id="${escapeHtml(input.pairing.id)}" data-pairing-status="${escapeHtml(input.pairing.status)}">
-      <header class="onboarding-heading"><p>${input.firstUse === false ? "新增独立授权" : "第一次连接"}</p><h1>${input.firstUse === false ? "连接另一个 Agent" : "把这段话发给你的 Agent"}</h1><p>先复制完整话术。等 Agent 读完官方说明并主动索要时，再单独发送当前配对码。</p></header>
+    body: `<main class="onboarding-main" id="content">
+      <header class="onboarding-heading"><p>第一次使用</p><h1>把这段话发给你的 Agent</h1><p>设置话术不包含 Token。Agent 读完说明并确认客户端能力后，会主动向你索取。</p></header>
       <section class="onboarding-step" aria-labelledby="instruction-title"><div class="step-number">1</div><div><h2 id="instruction-title">复制设置话术</h2><pre data-copy-source="instruction">${escapeHtml(text)}</pre><button class="button" type="button" data-copy="instruction">复制给 Agent</button><p class="copy-status" data-copy-status="instruction" aria-live="polite"></p></div></section>
-      <section class="onboarding-step" aria-labelledby="pairing-title"><div class="step-number">2</div><div><h2 id="pairing-title">等 Agent 向你索要配对码</h2><p class="paper-label" data-pairing-label>${escapeHtml(pairingStatus(input.pairing.status))}</p>${pairingBody}${cancelForm}<p class="security-note">配对码短时有效，只能准备这一条连接；它不包含长期 PAT，也不能读取你的数据。</p></div></section>
-      <section class="onboarding-finish"><h2>${input.pairing.status === "verified" ? "Agent 已通过验证" : "连接后继续留在 Agent 对话里"}</h2><p>${input.pairing.status === "verified" ? "现在回到 Agent，继续告诉它长期关注什么，以及希望什么时候更新。" : "授权只是第一步。Agent 完成验证后，还会继续询问关注内容和更新时间，并立即生成第一份日报。"}</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/home"))}">先看看示例日报</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">无法自动连接？查看手动步骤</a></section>
+      <section class="onboarding-step" aria-labelledby="token-title"><div class="step-number">2</div><div><h2 id="token-title">等 Agent 向你索取 Token</h2><p>收到 Agent 请求后再创建。页面加载不会提前生成 Token。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/onboarding/token"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="onboarding-token-name">Token 名称</label><input class="auth-form__input" id="onboarding-token-name" name="name" value="我的 Agent" maxlength="80" aria-describedby="onboarding-token-help" required><p id="onboarding-token-help" class="form-helper">1–80 个可见字符，用来区分不同 Agent。</p><button class="button" type="submit">创建 Token</button><p class="form-status" data-form-status aria-live="polite"></p></form></div></section>
+      <section class="onboarding-finish"><h2>创建后继续留在 Agent 对话里</h2><p>完整 Token 只显示一次。把它发给刚才主动索取的受信任 Agent，然后由 Agent 完成 MCP 工具发现和连接验证。</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/home"))}">先看看示例日报</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent"))}">管理 Agent Token →</a></section>
     </main>`,
   });
 }
 
-export function renderAgentSettingsPage(input: { basePath: string; shell: ReadingShell; credentials: CredentialRecord[]; pairings: Array<PairingRecord & { code?: string | null }>; csrfToken: string; operationId: string; activeLimit: number }): string {
+export function renderAgentSettingsPage(input: { basePath: string; shell: ReadingShell; credentials: CredentialRecord[]; csrfToken: string; operationId: string; activeLimit: number }): string {
   const active = input.credentials.filter((item) => item.status === "active");
-  const pending = input.pairings.find((item) => item.status !== "verified" && item.status !== "cancelled");
   return renderSettingsDocument({
     basePath: input.basePath,
     shell: input.shell,
@@ -460,30 +445,30 @@ export function renderAgentSettingsPage(input: { basePath: string; shell: Readin
     title: "Agent 授权",
     kicker: "Agent Access",
     summary: "这里只显示服务端能够确认的授权与最近请求，不判断 Agent 是否在线。",
-    content: `<section class="settings-section"><div class="section-heading"><h2>当前授权</h2><span>${active.length} / ${input.activeLimit}</span></div>${active.length ? `<div class="agent-list">${active.map((item) => `<article><div><p class="paper-label">已授权</p><h3>${escapeHtml(item.name)}</h3><p>创建于 ${escapeHtml(displayTime(item.createdAt, input.shell.timeZone))}</p></div><dl><dt>最近一次请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/agent/connections/${item.id}/remove`))}">移除 Agent</a></article>`).join("")}</div>` : "<p>还没有已授权的 Agent。</p>"}</section><section class="settings-section"><h2>连接另一个 Agent</h2>${active.length >= input.activeLimit ? "<p>授权数量已达上限，请先移除不再使用的 Agent。</p>" : pending ? `<a class="button" href="${escapeHtml(path(input.basePath, `/settings/agent/connections/${pending.id}/pair`))}">继续当前连接</a>` : `<form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/agent/connections"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="connection-name">连接名称</label><input class="auth-form__input" id="connection-name" name="name" value="我的 Agent" maxlength="80" required><button class="button" type="submit">开始连接</button></form>`}</section><section class="settings-section"><h2>高级接入</h2><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">手动 Token 与接口地址 →</a></section>`,
+    content: `<section class="settings-section"><div class="section-heading"><h2>创建 Agent Token</h2><span>${active.length} / ${input.activeLimit}</span></div>${active.length >= input.activeLimit ? "<p>活动 Token 数量已达上限，请先撤销不再使用的 Token。</p>" : `<p>完整值只在创建成功后显示一次。每个 Agent 使用独立 Token，便于单独轮换或撤销。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/agent/tokens"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="token-name">Token 名称</label><input class="auth-form__input" id="token-name" name="name" value="我的 Agent" maxlength="80" required><button class="button" type="submit">创建 Token</button><p class="form-status" data-form-status aria-live="polite"></p></form>`}</section><section class="settings-section"><h2>Token 记录</h2>${input.credentials.length ? `<div class="agent-list">${input.credentials.map((item) => `<article><div><p class="paper-label">${item.status === "active" ? "使用中" : item.status === "rotated" ? "已轮换" : "已撤销"}</p><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.tokenHint)} · 创建于 ${escapeHtml(displayTime(item.createdAt, input.shell.timeZone))}</p></div><dl><dt>最近一次请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl>${item.status === "active" ? `<div class="record-actions"><a href="${escapeHtml(path(input.basePath, `/settings/agent/tokens/${item.id}/rotate`))}">轮换</a><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/agent/tokens/${item.id}/revoke`))}">撤销</a></div>` : ""}</article>`).join("")}</div>` : "<p>还没有 Agent Token。</p>"}</section><section class="settings-section"><h2>高级接入</h2><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">查看 MCP、JSON API 与 OpenAPI →</a></section>`,
   });
 }
 
-export function renderAdvancedAccessPage(input: { basePath: string; shell: ReadingShell; credentials: CredentialRecord[]; csrfToken: string; operationId: string; apiBaseUrl: string; mcpUrl: string }): string {
+export function renderAdvancedAccessPage(input: { basePath: string; shell: ReadingShell; apiBaseUrl: string; mcpUrl: string }): string {
   return renderSettingsDocument({
     basePath: input.basePath,
     shell: input.shell,
     current: "advanced",
-    title: "手动接入",
+    title: "高级接入",
     kicker: "Advanced Access",
-    summary: "仅用于自己的脚本或不能自动配置的客户端。普通 Agent 接入不需要这里的内容。",
-    content: `<section class="settings-section"><h2>接口地址</h2><dl><div><dt>JSON API</dt><dd><code>${escapeHtml(input.apiBaseUrl)}</code></dd></div><div><dt>MCP</dt><dd><code>${escapeHtml(input.mcpUrl)}</code></dd></div></dl><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced/openapi.yaml"))}">下载 OpenAPI 契约 →</a></section><section class="settings-section"><h2>创建个人访问令牌</h2><p>完整令牌只在本次成功响应中显示一次。每个客户端使用独立令牌，便于单独撤销。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/advanced/tokens"))}"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="token-name">连接名称</label><input class="auth-form__input" id="token-name" name="name" maxlength="80" required><button class="button" type="submit">创建令牌</button></form></section><section class="settings-section"><h2>令牌记录</h2>${input.credentials.length ? `<div class="agent-list">${input.credentials.map((item) => `<article><div><p class="paper-label">${escapeHtml(item.status)}</p><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.tokenHint)}</p></div><dl><dt>最近请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl>${item.status === "active" ? `<div class="record-actions"><a href="${escapeHtml(path(input.basePath, `/settings/advanced/tokens/${item.id}/rotate`))}">轮换</a><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/advanced/tokens/${item.id}/revoke`))}">撤销</a></div>` : ""}</article>`).join("")}</div>` : "<p>还没有手动令牌。</p>"}</section>`,
+    summary: "为自己的脚本或高级客户端提供协议地址与机器可读契约。Token 统一在 Agent 授权中管理。",
+    content: `<section class="settings-section"><h2>接口地址</h2><dl><div><dt>JSON API</dt><dd><code>${escapeHtml(input.apiBaseUrl)}</code></dd></div><div><dt>MCP</dt><dd><code>${escapeHtml(input.mcpUrl)}</code></dd></div></dl><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced/openapi.yaml"))}">下载 OpenAPI 契约 →</a></section><section class="settings-section"><h2>Agent Token</h2><p>MCP 与 JSON API 使用同一套 Agent Token。创建、一次性查看、轮换和撤销都在 Agent 授权页面完成。</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/settings/agent"))}">前往 Agent 授权</a></section><section class="settings-section"><h2>高级说明</h2><p>JSON API 使用 Bearer 鉴权和 Idempotency-Key；MCP 使用远程 Streamable HTTP。具体字段以 OpenAPI 与 MCP 工具 Schema 为准。</p></section>`,
   });
 }
 
-export function renderCredentialSecretPage(input: { basePath: string; shell: ReadingShell; token: string | null; title: string }): string {
+export function renderCredentialSecretPage(input: { basePath: string; shell: ReadingShell; token: string | null; title: string; returnPath?: string }): string {
   return shell({
     basePath: input.basePath,
     title: input.title,
     page: "agent-settings",
     privatePage: true,
     nav: pageNav(input.shell, "settings"),
-    body: `<main class="empty-reading secret-page" id="content"><p>一次性凭证</p><h1>${escapeHtml(input.title)}</h1>${input.token ? `<p>这是唯一一次显示完整令牌。请立即保存到客户端的安全凭证存储，不要发送到聊天、日志或项目文件。</p><code class="secret-value" data-copy-source="secret">${escapeHtml(input.token)}</code><button class="button" type="button" data-copy="secret">复制令牌</button><p class="copy-status" data-copy-status="secret" aria-live="polite"></p>` : "<p>这个操作已经处理过。为避免重放明文，DailyNews 不会再次显示之前的令牌；如未保存，请重新创建或轮换。</p>"}<a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">我已处理，返回高级接入 →</a></main>`,
+    body: `<main class="empty-reading secret-page" id="content" data-secret-return="${escapeHtml(path(input.basePath, input.returnPath ?? "/settings/agent"))}"><p>一次性凭证</p><h1>${escapeHtml(input.title)}</h1>${input.token ? `<p>这是唯一一次显示完整 Token。请把它发给刚才主动向你索取的受信任 Agent；不要公开或发送给其他人。</p><code class="secret-value" data-copy-source="secret">${escapeHtml(input.token)}</code><button class="button" type="button" data-copy="secret">复制 Token</button><p class="copy-status" data-copy-status="secret" aria-live="polite"></p>` : "<p>这个操作已经处理过。为避免重放明文，DailyNews 不会再次显示之前的 Token；如未保存，请重新创建或轮换。</p>"}<a class="text-link" href="${escapeHtml(path(input.basePath, input.returnPath ?? "/settings/agent"))}">我已处理，返回 Agent 授权 →</a></main>`,
   });
 }
 

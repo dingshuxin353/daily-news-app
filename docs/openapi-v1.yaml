@@ -311,7 +311,7 @@
     },
     "responses": {
       "BadRequest": { "description": "Invalid request, schema, or future date", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "Unauthorized": { "description": "Missing, invalid, provisioning, rotated, or revoked PAT", "headers": { "WWW-Authenticate": { "schema": { "type": "string", "const": "Bearer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing, invalid, rotated, or revoked PAT", "headers": { "WWW-Authenticate": { "schema": { "type": "string", "const": "Bearer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "Target is missing or belongs to another Space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Conflict": { "description": "Idempotency, revision, confirmation, inactive Publication, disabled Todo, or Theme mutation conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "PayloadTooLarge": { "description": "Request body exceeds the configured limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },

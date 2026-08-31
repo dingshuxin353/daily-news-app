@@ -32,10 +32,6 @@
     "sessionExpiresInDays": 30
   },
   "agentAccess": {
-    "pairingCodeTtlSeconds": 600,
-    "provisioningTtlSeconds": 600,
-    "claimIpHourlyLimit": 20,
-    "verifyIpHourlyLimit": 40,
     "requestBodyLimitBytes": 16384,
     "rateLimitRetentionHours": 24,
     "auditRetentionDays": 90,

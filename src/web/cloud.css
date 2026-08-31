@@ -1233,37 +1233,11 @@ a[aria-disabled="true"] {
   white-space: pre-wrap;
 }
 
-.pairing-code {
-  width: fit-content;
-  max-width: 100%;
-  margin-block: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  border-block: var(--space-3xs) solid var(--color-ink);
-  font-family: var(--font-display);
-  font-size: clamp(1.75rem, 9vw, 3.5rem);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-
-.pairing-expiry,
 .copy-status {
   min-height: 1.4em;
   color: var(--color-muted);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
-}
-
-.pairing-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-}
-
-.pairing-actions form {
-  margin: 0;
 }
 
 .onboarding-finish {
