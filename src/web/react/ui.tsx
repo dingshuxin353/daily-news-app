@@ -5,7 +5,7 @@ import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 import { IconArrowNarrowRight } from "@tabler/icons-react";
 import type { ReadingShell } from "../../modules/private-reading/service.js";
 
-export type ReactPageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "agent-settings";
+export type ReactPageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings";
 
 export function appPath(basePath: string, pathname: string): string {
   return `${basePath}${pathname}`;
@@ -121,4 +121,45 @@ export function FieldShell(input: {
       {input.error ?? input.helper}
     </p>
   </div>;
+}
+
+export type SettingsSection = "sites" | "themes" | "agent" | "account" | "advanced";
+
+const settingsLinks: Array<{ number: string; key: SettingsSection; href: string; label: string }> = [
+  { number: "01", key: "sites", href: "/settings/sites", label: "日报站点" },
+  { number: "02", key: "themes", href: "/settings/themes", label: "主题库" },
+  { number: "03", key: "agent", href: "/settings/agent", label: "Agent 授权" },
+  { number: "04", key: "account", href: "/settings/account", label: "账户与安全" },
+  { number: "05", key: "advanced", href: "/settings/advanced", label: "高级接入" },
+];
+
+export function SettingsLayout(input: {
+  basePath: string;
+  shell: ReadingShell;
+  current: SettingsSection;
+  title: string;
+  kicker: string;
+  summary: string;
+  children: ReactNode;
+}) {
+  return <PageDocument basePath={input.basePath} title={input.title} page={input.current === "agent" ? "agent-settings" : "settings"} shell={input.shell} current="settings">
+    <main className="m51-settings" id="content">
+      <aside className="m51-settings-index" aria-label="设置分类">
+        <p>Settings</p>
+        <nav>
+          {settingsLinks.map((link) => <a key={link.key} href={appPath(input.basePath, link.href)} aria-current={input.current === link.key ? "page" : undefined}>
+            <span>{link.number}</span><strong>{link.label}</strong>
+          </a>)}
+        </nav>
+      </aside>
+      <div className="m51-settings-workspace">
+        <header className="m51-page-heading m51-page-heading--settings">
+          <p className="m51-kicker">{input.kicker}</p>
+          <h1>{input.title}</h1>
+          <p>{input.summary}</p>
+        </header>
+        {input.children}
+      </div>
+    </main>
+  </PageDocument>;
 }

@@ -86,7 +86,6 @@ const cloudAssets = {
   "cloud.css": { url: new URL("src/web/cloud.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
   "tokens.css": { url: new URL("tokens.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
   "cloud-auth.js": { url: new URL("src/web/cloud-auth.js", `file://${projectRoot}/`), contentType: "text/javascript; charset=utf-8", text: true },
-  "private-pages.js": { url: new URL("src/web/private-pages.js", `file://${projectRoot}/`), contentType: "text/javascript; charset=utf-8", text: true },
   "private-newsroom.png": { url: new URL("src/web/assets/private-newsroom-transparent.png", `file://${projectRoot}/`), contentType: "image/png", text: false },
 } as const;
 

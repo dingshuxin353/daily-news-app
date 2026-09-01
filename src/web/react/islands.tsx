@@ -236,3 +236,31 @@ export function CopySecretIsland({ sourceId, returnPath }: { sourceId: string; r
     </div>
   </Theme>;
 }
+
+export function LogoutIsland({ basePath }: { basePath: string }) {
+  const [state, setState] = useState<FormState>("idle");
+  const [message, setMessage] = useState("");
+  async function logout() {
+    setState("loading");
+    setMessage("");
+    try {
+      const response = await postJson(basePath, "/api/auth/sign-out", {});
+      if (!response.ok) {
+        setState("error");
+        setMessage("当前会话没有退出成功，请稍后重试。");
+        return;
+      }
+      setState("success");
+      window.location.assign(`${basePath}/login`);
+    } catch {
+      setState("error");
+      setMessage("网络请求没有完成。请检查连接后重试。");
+    }
+  }
+  return <Theme theme={neutralTheme} mode="light">
+    <div className="m51-session-form">
+      <Button className="m51-button" label={state === "loading" ? "正在退出" : "退出当前会话"} variant="secondary" size="md" type="button" isLoading={state === "loading"} onClick={logout} />
+      <p className={state === "error" ? "m51-field-message is-error" : "m51-field-message"} role={state === "error" ? "alert" : undefined} aria-live="polite">{message}</p>
+    </div>
+  </Theme>;
+}

@@ -13,6 +13,19 @@ import {
 } from "./pages.js";
 import { DailyPage, HomePage, PublicationsPage, TodoPage } from "./reading-pages.js";
 import type { DailyReading, PublicationReadingSummary } from "../../modules/private-reading/service.js";
+import type { UserProfile } from "../../modules/identity/profile-service.js";
+import type { ManagedPublication, SiteManagementSnapshot } from "../../modules/site-management/service.js";
+import type { BrowserTheme } from "../../modules/site-management/theme-catalog.js";
+import {
+  AccountSettingsPage,
+  AdvancedAccessPage,
+  HomeSettingsPage,
+  PublicationFormPage,
+  PublicationLimitPage,
+  SettingsConfirmPage,
+  SitesPage,
+  ThemeCatalogPage,
+} from "./settings-pages.js";
 
 function document(markup: ReactNode): string {
   return `<!doctype html>${renderToStaticMarkup(markup)}`;
@@ -60,6 +73,38 @@ export function renderDailyPage(input: { basePath: string; shell: ReadingShell; 
 
 export function renderTodoPage(input: { basePath: string; shell: ReadingShell; projection: any }): string {
   return document(<TodoPage {...input} />);
+}
+
+export function renderSitesPage(input: { basePath: string; shell: ReadingShell; snapshot: SiteManagementSnapshot; csrfToken: string; publicationLimit: number; themes: BrowserTheme[]; reason?: string; updated?: string; created?: ManagedPublication }): string {
+  return document(<SitesPage {...input} />);
+}
+
+export function renderHomeSettingsPage(input: { basePath: string; shell: ReadingShell; snapshot: SiteManagementSnapshot; themes: BrowserTheme[]; csrfToken: string; name?: string; themeId?: string; error?: string; saved?: boolean }): string {
+  return document(<HomeSettingsPage {...input} />);
+}
+
+export function renderPublicationFormPage(input: { basePath: string; shell: ReadingShell; themes: BrowserTheme[]; csrfToken: string; mode: "new" | "edit"; publication?: ManagedPublication; name?: string; publicationId?: string; theme?: { mode: "inherit" } | { mode: "override"; themeId: string }; error?: string; saved?: boolean }): string {
+  return document(<PublicationFormPage {...input} />);
+}
+
+export function renderPublicationLimitPage(input: { basePath: string; shell: ReadingShell; publicationLimit: number }): string {
+  return document(<PublicationLimitPage {...input} />);
+}
+
+export function renderThemeCatalogPage(input: { basePath: string; shell: ReadingShell; themes: BrowserTheme[] }): string {
+  return document(<ThemeCatalogPage {...input} />);
+}
+
+export function renderAccountSettingsPage(input: { basePath: string; shell: ReadingShell; csrfToken: string; profile: UserProfile; nickname?: string; error?: string; saved?: boolean }): string {
+  return document(<AccountSettingsPage {...input} />);
+}
+
+export function renderAdvancedAccessPage(input: { basePath: string; shell: ReadingShell; apiBaseUrl: string; mcpUrl: string }): string {
+  return document(<AdvancedAccessPage {...input} />);
+}
+
+export function renderSettingsConfirmPage(input: { basePath: string; shell: ReadingShell; title: string; description: string; action: string; csrfToken: string; submitLabel: string; hidden?: Record<string, string>; cancelPath: string; cancelLabel?: string }): string {
+  return document(<SettingsConfirmPage {...input} />);
 }
 
 export { parseTodoAnchorHash } from "./reading-interactions.js";
