@@ -9,10 +9,12 @@ import { AgentAccessError, type AgentCredentialService, type CredentialRecord } 
 import { assertBrowserMutation, createSettingsCsrfToken, readSettingsBody } from "./settings-security.js";
 import {
   renderAdvancedAccessPage,
-  renderAgentSettingsPage,
-  renderConfirmPage,
-  renderCredentialSecretPage,
 } from "./private-pages.js";
+import {
+  renderAgentConfirmPage,
+  renderAgentSettingsPage,
+  renderCredentialSecretPage,
+} from "./react/render.js";
 
 export interface AgentSettingsDependencies {
   basePath: string;
@@ -181,7 +183,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可轮换的 Agent Token。");
     const operationId = randomUUID();
     if (wantsHtml(context) && dependencies.privateReading) {
-      return context.html(renderConfirmPage({
+      return context.html(renderAgentConfirmPage({
         basePath: dependencies.basePath,
         shell: await dependencies.privateReading.readShell(access.tenant),
         title: `轮换 ${credential.name}？`,
@@ -221,7 +223,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
     if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可撤销的 Agent Token。");
     if (wantsHtml(context) && dependencies.privateReading) {
-      return context.html(renderConfirmPage({
+      return context.html(renderAgentConfirmPage({
         basePath: dependencies.basePath,
         shell: await dependencies.privateReading.readShell(access.tenant),
         title: `撤销 ${credential.name}？`,

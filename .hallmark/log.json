@@ -19,5 +19,12 @@
     "theme": "Newsprint",
     "enrichment": "none",
     "brief": "M4-C five-section settings, multi-publication controls, theme catalog, and account experience"
+  },
+  {
+    "date": "2026-09-01",
+    "macrostructure": "Split Studio + Narrative Workflow + Index-First",
+    "theme": "Editorial Newsroom Studio",
+    "enrichment": "approved transparent private-newsroom illustration",
+    "brief": "M5.1-A React SSR foundation, public and login entry, first-use workflow, Agent authorization, and one-time Token display"
   }
 ]

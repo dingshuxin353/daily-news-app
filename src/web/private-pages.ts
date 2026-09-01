@@ -5,7 +5,6 @@ import type {
   PublicationReadingSummary,
   ReadingShell,
 } from "../modules/private-reading/service.js";
-import type { CredentialRecord } from "../modules/agent-access/credential-service.js";
 import type { UserProfile } from "../modules/identity/profile-service.js";
 
 type PageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings";
@@ -92,72 +91,6 @@ function shell(options: PageShellOptions): string {
     <script type="module" src="${basePath}/assets/private-pages.js"></script>
   </body>
 </html>`;
-}
-
-export function renderPublicPage(input: { basePath: string; signedIn: boolean }): string {
-  const action = input.signedIn
-    ? `<a class="button" href="${escapeHtml(path(input.basePath, "/home"))}">进入私人日报</a>`
-    : `<a class="button" href="${escapeHtml(path(input.basePath, "/login"))}">登录 / 注册</a>`;
-  return shell({
-    basePath: input.basePath,
-    title: "你的私人日报",
-    page: "public",
-    body: `<main class="public-main" id="content">
-      <section class="public-hero" aria-labelledby="public-title">
-        <div class="public-hero__copy">
-          <h1 id="public-title">每天一份，只为你而编的私人日报。</h1>
-          <p class="public-hero__summary">把每天关心的事，交给你的私人编辑部。</p>
-          ${action}
-        </div>
-        <figure class="public-hero__figure">
-          <img src="${escapeHtml(path(input.basePath, "/assets/private-newsroom.png"))}" alt="几位 Agent 在编辑桌前协作整理私人日报" width="1400" height="466" fetchpriority="high">
-          <figcaption>一个 Agent 可以独立工作，多个 Agent 也可以组成团队；最后的授权始终由你掌握。</figcaption>
-        </figure>
-      </section>
-      <section class="public-principles" aria-label="产品原则">
-        <p>你只需要说清关心什么，以及希望什么时候看到更新。</p>
-        <p>DailyNews 保存正式日报和待办，不接管 Agent 所在环境里的定时任务。</p>
-        <p>每个 Agent 使用独立授权，可以单独添加或移除。</p>
-      </section>
-    </main>`,
-  });
-}
-
-export function renderLoginPage(basePath: string, input: { returnTo?: string; returnLabel?: string } = {}): string {
-  return shell({
-    basePath,
-    title: "邮箱登录",
-    page: "login",
-    returnTo: input.returnTo,
-    body: `<main class="cloud-main" id="content">
-      <section class="cloud-intro" aria-labelledby="login-title">
-        <p class="cloud-intro__kicker">私人空间</p>
-        <h1 id="login-title">邮箱登录</h1>
-        <p class="cloud-intro__summary">无需密码。输入邮箱并使用 6 位验证码，新邮箱会自动建立自己的私人空间。</p>
-        ${input.returnLabel ? `<p class="return-note">登录后返回：${escapeHtml(input.returnLabel)}</p>` : ""}
-      </section>
-      <section class="auth-workbench" aria-label="登录步骤">
-        <form class="auth-form" data-email-form data-state="idle" novalidate>
-          <div class="auth-form__field">
-            <label class="auth-form__label" for="email">邮箱地址</label>
-            <input class="auth-form__input" id="email" name="email" type="email" autocomplete="email" inputmode="email" aria-describedby="email-helper" aria-required="true" required>
-            <p class="auth-form__helper" id="email-helper" data-helper aria-live="polite">验证码有效期为 5 分钟。</p>
-          </div>
-          <button class="button" type="submit">发送验证码</button>
-        </form>
-        <form class="auth-form" data-otp-form data-state="idle" novalidate hidden>
-          <input name="email" type="hidden">
-          <div class="auth-form__field">
-            <label class="auth-form__label" for="otp">6 位验证码</label>
-            <input class="auth-form__input" id="otp" name="otp" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" aria-describedby="otp-helper" aria-required="true" required>
-            <p class="auth-form__helper" id="otp-helper" data-helper aria-live="polite">输入邮件中的验证码。</p>
-          </div>
-          <button class="button" type="submit">验证并进入</button>
-        </form>
-        <p class="privacy-note">验证码只用于本次登录；DailyNews 不提供密码登录，也不会在浏览器持久保存邮箱。</p>
-      </section>
-    </main>`,
-  });
 }
 
 const sampleIssue = {
@@ -411,44 +344,6 @@ export function renderTodoPage(input: { basePath: string; shell: ReadingShell; p
   });
 }
 
-function instruction(setupUrl: string): string {
-  return `请帮我把 DailyNews 用起来。\n请先完整阅读 ${setupUrl}，并按说明完成配置。`;
-}
-
-function displayTime(value: Date, timeZone: string): string {
-  return value.toLocaleString("zh-CN", { timeZone, hour12: false });
-}
-
-export function renderOnboardingPage(input: { basePath: string; shell: ReadingShell; csrfToken: string; operationId: string; setupUrl: string }): string {
-  const text = instruction(input.setupUrl);
-  return shell({
-    basePath: input.basePath,
-    title: "首次使用",
-    page: "onboarding",
-    privatePage: true,
-    nav: pageNav(input.shell, ""),
-    body: `<main class="onboarding-main" id="content">
-      <header class="onboarding-heading"><p>第一次使用</p><h1>把这段话发给你的 Agent</h1><p>设置话术不包含 Token。Agent 读完说明并确认客户端能力后，会主动向你索取。</p></header>
-      <section class="onboarding-step" aria-labelledby="instruction-title"><div class="step-number">1</div><div><h2 id="instruction-title">复制设置话术</h2><pre data-copy-source="instruction">${escapeHtml(text)}</pre><button class="button" type="button" data-copy="instruction">复制给 Agent</button><p class="copy-status" data-copy-status="instruction" aria-live="polite"></p></div></section>
-      <section class="onboarding-step" aria-labelledby="token-title"><div class="step-number">2</div><div><h2 id="token-title">等 Agent 向你索取 Token</h2><p>收到 Agent 请求后再创建。页面加载不会提前生成 Token。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/onboarding/token"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="onboarding-token-name">Token 名称</label><input class="auth-form__input" id="onboarding-token-name" name="name" value="我的 Agent" maxlength="80" aria-describedby="onboarding-token-help" required><p id="onboarding-token-help" class="form-helper">1–80 个可见字符，用来区分不同 Agent。</p><button class="button" type="submit">创建 Token</button><p class="form-status" data-form-status aria-live="polite"></p></form></div></section>
-      <section class="onboarding-finish"><h2>创建后继续留在 Agent 对话里</h2><p>完整 Token 只显示一次。把它发给刚才主动索取的受信任 Agent，然后由 Agent 完成 MCP 工具发现和连接验证。</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/home"))}">先看看示例日报</a><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/agent"))}">管理 Agent Token →</a></section>
-    </main>`,
-  });
-}
-
-export function renderAgentSettingsPage(input: { basePath: string; shell: ReadingShell; credentials: CredentialRecord[]; csrfToken: string; operationId: string; activeLimit: number }): string {
-  const active = input.credentials.filter((item) => item.status === "active");
-  return renderSettingsDocument({
-    basePath: input.basePath,
-    shell: input.shell,
-    current: "agent",
-    title: "Agent 授权",
-    kicker: "Agent Access",
-    summary: "这里只显示服务端能够确认的授权与最近请求，不判断 Agent 是否在线。",
-    content: `<section class="settings-section"><div class="section-heading"><h2>创建 Agent Token</h2><span>${active.length} / ${input.activeLimit}</span></div>${active.length >= input.activeLimit ? "<p>活动 Token 数量已达上限，请先撤销不再使用的 Token。</p>" : `<p>完整值只在创建成功后显示一次。每个 Agent 使用独立 Token，便于单独轮换或撤销。</p><form class="inline-form" method="post" action="${escapeHtml(path(input.basePath, "/settings/agent/tokens"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><input type="hidden" name="operationId" value="${escapeHtml(input.operationId)}"><label for="token-name">Token 名称</label><input class="auth-form__input" id="token-name" name="name" value="我的 Agent" maxlength="80" required><button class="button" type="submit">创建 Token</button><p class="form-status" data-form-status aria-live="polite"></p></form>`}</section><section class="settings-section"><h2>Token 记录</h2>${input.credentials.length ? `<div class="agent-list">${input.credentials.map((item) => `<article><div><p class="paper-label">${item.status === "active" ? "使用中" : item.status === "rotated" ? "已轮换" : "已撤销"}</p><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.tokenHint)} · 创建于 ${escapeHtml(displayTime(item.createdAt, input.shell.timeZone))}</p></div><dl><dt>最近一次请求</dt><dd>${item.lastUsedAt ? escapeHtml(displayTime(item.lastUsedAt, input.shell.timeZone)) : "尚无请求"}</dd></dl>${item.status === "active" ? `<div class="record-actions"><a href="${escapeHtml(path(input.basePath, `/settings/agent/tokens/${item.id}/rotate`))}">轮换</a><a class="danger-link" href="${escapeHtml(path(input.basePath, `/settings/agent/tokens/${item.id}/revoke`))}">撤销</a></div>` : ""}</article>`).join("")}</div>` : "<p>还没有 Agent Token。</p>"}</section><section class="settings-section"><h2>高级接入</h2><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced"))}">查看 MCP、JSON API 与 OpenAPI →</a></section>`,
-  });
-}
-
 export function renderAdvancedAccessPage(input: { basePath: string; shell: ReadingShell; apiBaseUrl: string; mcpUrl: string }): string {
   return renderSettingsDocument({
     basePath: input.basePath,
@@ -458,34 +353,6 @@ export function renderAdvancedAccessPage(input: { basePath: string; shell: Readi
     kicker: "Advanced Access",
     summary: "为自己的脚本或高级客户端提供协议地址与机器可读契约。Token 统一在 Agent 授权中管理。",
     content: `<section class="settings-section"><h2>接口地址</h2><dl><div><dt>JSON API</dt><dd><code>${escapeHtml(input.apiBaseUrl)}</code></dd></div><div><dt>MCP</dt><dd><code>${escapeHtml(input.mcpUrl)}</code></dd></div></dl><a class="text-link" href="${escapeHtml(path(input.basePath, "/settings/advanced/openapi.yaml"))}">下载 OpenAPI 契约 →</a></section><section class="settings-section"><h2>Agent Token</h2><p>MCP 与 JSON API 使用同一套 Agent Token。创建、一次性查看、轮换和撤销都在 Agent 授权页面完成。</p><a class="button button--quiet" href="${escapeHtml(path(input.basePath, "/settings/agent"))}">前往 Agent 授权</a></section><section class="settings-section"><h2>高级说明</h2><p>JSON API 使用 Bearer 鉴权和 Idempotency-Key；MCP 使用远程 Streamable HTTP。具体字段以 OpenAPI 与 MCP 工具 Schema 为准。</p></section>`,
-  });
-}
-
-export function renderCredentialSecretPage(input: { basePath: string; shell: ReadingShell; token: string | null; title: string; returnPath?: string }): string {
-  return shell({
-    basePath: input.basePath,
-    title: input.title,
-    page: "agent-settings",
-    privatePage: true,
-    nav: pageNav(input.shell, "settings"),
-    body: `<main class="empty-reading secret-page" id="content" data-secret-return="${escapeHtml(path(input.basePath, input.returnPath ?? "/settings/agent"))}"><p>一次性凭证</p><h1>${escapeHtml(input.title)}</h1>${input.token ? `<p>这是唯一一次显示完整 Token。请把它发给刚才主动向你索取的受信任 Agent；不要公开或发送给其他人。</p><code class="secret-value" data-copy-source="secret">${escapeHtml(input.token)}</code><button class="button" type="button" data-copy="secret">复制 Token</button><p class="copy-status" data-copy-status="secret" aria-live="polite"></p>` : "<p>这个操作已经处理过。为避免重放明文，DailyNews 不会再次显示之前的 Token；如未保存，请重新创建或轮换。</p>"}<a class="text-link" href="${escapeHtml(path(input.basePath, input.returnPath ?? "/settings/agent"))}">我已处理，返回 Agent 授权 →</a></main>`,
-  });
-}
-
-export function renderNicknameOnboardingPage(input: {
-  basePath: string;
-  shell: ReadingShell;
-  csrfToken: string;
-  nickname?: string;
-  error?: string;
-}): string {
-  return shell({
-    basePath: input.basePath,
-    title: "先写下你的称呼",
-    page: "onboarding",
-    privatePage: true,
-    nav: pageNav(input.shell, ""),
-    body: `<main class="onboarding-main onboarding-main--profile" id="content"><header class="onboarding-heading"><p>第一次使用</p><h1>先写下你的称呼</h1><p>之后的私人编辑部会用这个昵称称呼你。它不会从邮箱地址猜测。</p></header><form class="settings-form" method="post" action="${escapeHtml(path(input.basePath, "/onboarding/nickname"))}" data-settings-form novalidate><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><div class="form-field"><label for="nickname">昵称</label><input class="auth-form__input" id="nickname" name="nickname" value="${escapeHtml(input.nickname ?? "")}" maxlength="24" aria-describedby="nickname-help nickname-error"${input.error ? ' aria-invalid="true"' : ""} required autofocus><p id="nickname-help" class="form-helper">1–24 个可见字符，保存后仍可在账户设置中修改。</p>${input.error ? `<p id="nickname-error" class="form-error" role="alert">${escapeHtml(input.error)}</p>` : '<p id="nickname-error" class="form-error" aria-live="polite"></p>'}</div><button class="button" type="submit">保存并继续连接 Agent</button><p class="form-status" data-form-status aria-live="polite"></p></form></main>`,
   });
 }
 

@@ -1,5 +1,4 @@
 const body = document.body;
-const basePath = body.dataset.basePath || "";
 
 const pageSelect = document.querySelector("[data-page-select]");
 if (pageSelect instanceof HTMLSelectElement) {
@@ -46,26 +45,6 @@ if (sourceDialog instanceof HTMLDialogElement && typeof sourceDialog.showModal =
   });
 }
 
-for (const button of document.querySelectorAll("[data-copy]")) {
-  button.addEventListener("click", async () => {
-    const key = button.dataset.copy;
-    const source = document.querySelector(`[data-copy-source="${CSS.escape(key)}"]`);
-    const status = document.querySelector(`[data-copy-status="${CSS.escape(key)}"]`);
-    if (!source) return;
-    try {
-      await navigator.clipboard.writeText(source.textContent || "");
-      if (status) status.textContent = key === "secret" ? "Token 已复制。" : "设置话术已复制。";
-    } catch {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(source);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      if (status) status.textContent = "浏览器未允许自动复制，内容已选中，请手工复制。";
-    }
-  });
-}
-
 for (const form of document.querySelectorAll("[data-settings-form]")) {
   if (!(form instanceof HTMLFormElement)) continue;
   const status = form.querySelector("[data-form-status]");
@@ -99,15 +78,6 @@ for (const form of document.querySelectorAll("[data-settings-form]")) {
       return;
     }
   });
-}
-
-const oneTimeSecret = document.querySelector('[data-copy-source="secret"]');
-if (oneTimeSecret instanceof HTMLElement) {
-  const returnPath = oneTimeSecret.closest("[data-secret-return]")?.dataset.secretReturn || `${basePath}/settings/agent`;
-  window.history.replaceState(null, "", returnPath);
-  window.addEventListener("pagehide", () => {
-    oneTimeSecret.textContent = "";
-  }, { once: true });
 }
 
 if (window.location.hash) {

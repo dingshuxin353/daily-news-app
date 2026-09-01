@@ -18,13 +18,15 @@ import { renderSpacePage } from "../web/cloud-pages.js";
 import {
   renderDailyPage,
   renderHomePage,
+  renderPublicationsPage,
+  renderTodoPage,
+} from "../web/private-pages.js";
+import {
   renderLoginPage,
   renderNicknameOnboardingPage,
   renderOnboardingPage,
-  renderPublicationsPage,
   renderPublicPage,
-  renderTodoPage,
-} from "../web/private-pages.js";
+} from "../web/react/render.js";
 import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
 import { renderAgentSetupMarkdown } from "../web/agent-setup.js";
 import { registerSiteSettingsRoutes } from "../web/site-settings.js";
@@ -81,6 +83,7 @@ const agentSetupSource = new URL("docs/AGENT_SETUP.md", `file://${projectRoot}/`
 const agentSetupContentSource = new URL("docs/agent-setup/content.md", `file://${projectRoot}/`);
 const agentSetupTodoSource = new URL("docs/agent-setup/todo.md", `file://${projectRoot}/`);
 const agentSetupThemeSource = new URL("docs/agent-setup/theme.md", `file://${projectRoot}/`);
+const m51AssetRoot = new URL(".cloud-dist/client/", `file://${projectRoot}/`);
 const cloudAssets = {
   "cloud.css": { url: new URL("src/web/cloud.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
   "tokens.css": { url: new URL("tokens.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
@@ -253,6 +256,28 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
       try {
         const content = asset.text ? await readFile(asset.url, "utf8") : await readFile(asset.url);
         return context.body(content as any, 200, { "Content-Type": asset.contentType });
+      } catch {
+        return context.json({ error: "not_found" }, 404);
+      }
+    });
+
+    app.get(route("/assets/m5/*"), async (context) => {
+      const pathname = context.req.path.slice(route("/assets/m5/").length);
+      if (!/^(?:assets\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(pathname)) {
+        return context.json({ error: "not_found" }, 404);
+      }
+      const extension = pathname.slice(pathname.lastIndexOf(".") + 1);
+      const contentTypes: Record<string, string> = {
+        css: "text/css; charset=utf-8",
+        js: "text/javascript; charset=utf-8",
+        woff: "font/woff",
+        woff2: "font/woff2",
+      };
+      const contentType = contentTypes[extension];
+      if (!contentType) return context.json({ error: "not_found" }, 404);
+      try {
+        const content = await readFile(new URL(pathname, m51AssetRoot));
+        return context.body(content as any, 200, { "Content-Type": contentType });
       } catch {
         return context.json({ error: "not_found" }, 404);
       }
