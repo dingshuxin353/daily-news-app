@@ -294,6 +294,17 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(css, /Ecosystem Index \+ Editorial Reading Flow/);
   assert.match(css, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(css, /\.m51-source-action\[hidden\]\s*\{\s*display: none;/);
+  for (const mapping of [
+    "--color-text-primary: var(--m51-reading-ink)",
+    "--color-text-secondary: var(--m51-reading-muted)",
+    "--color-background-body: var(--m51-reading-bg)",
+    "--color-background-surface: var(--m51-reading-bg)",
+    "--color-border: var(--m51-reading-rule)",
+    "--color-accent: var(--m51-reading-accent)",
+  ]) {
+    assert.ok(css.includes(mapping));
+  }
+  assert.match(css, /color-mix\(in srgb, var\(--m51-paper\) 90%, var\(--color-background, var\(--m51-paper\)\) 10%\)/);
 });
 
 test("cloud config fails closed for missing or unsafe environment", async () => {
@@ -573,7 +584,7 @@ test("M5.1-C React settings shell exposes exactly five sections and keeps nickna
   assert.doesNotMatch(onboarding, /配对码|PAT|MCP/);
 });
 
-test("M5.1-C site and theme renderers preserve real forms while replacing placeholder theme blocks with fixed-content previews", () => {
+test("M5.1-C site and theme renderers preserve real forms while replacing placeholder theme blocks with fixed-content previews", async () => {
   const shell = {
     spaceName: "丁丁的编辑部",
     timeZone: "Asia/Shanghai",
@@ -612,7 +623,14 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
   assert.match(catalog, /夜间 &lt;编辑部&gt;/);
   assert.doesNotMatch(catalog, /夜间 <编辑部>/);
   assert.equal((catalog.match(/把重要信息排在前面/g) ?? []).length, 2);
-  assert.match(catalog, /--m51-preview-background:#171717/);
+  for (const [property, value] of Object.entries(themes[1].preview)) {
+    assert.match(catalog, new RegExp(`--m51-preview-${property}:${value}`));
+  }
+  assert.notEqual(themes[0].preview.background, themes[1].preview.background);
+
+  const css = await readFile(new URL("../../src/web/react/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.m51-settings-index nav\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/s);
+  assert.match(css, /@media \(min-width: 51\.25rem\)[^{]*\{[\s\S]*?\.m51-settings-index nav\s*\{[^}]*grid-template-columns: 1fr/s);
 
   const advanced = renderAdvancedAccessPage({ basePath: "/cloud", shell, apiBaseUrl: "https://dailynews.test/cloud/api/v1", mcpUrl: "https://dailynews.test/cloud/mcp" });
   assert.match(advanced, /https:\/\/dailynews\.test\/cloud\/api\/v1/);

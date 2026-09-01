@@ -848,22 +848,20 @@ body[data-page="login"] .m51-public-header p {
 }
 
 .m51-settings-index nav {
-  display: flex;
-  overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border-block: var(--m51-rule-width) solid var(--m51-rule);
 }
 
 .m51-settings-index a {
   min-height: 3.5rem;
   display: flex;
-  flex: none;
   align-items: center;
   gap: var(--m51-space-2);
   padding-inline: var(--m51-space-3);
   border-block-end: 3px solid transparent;
   color: var(--m51-muted);
   text-decoration: none;
-  white-space: nowrap;
 }
 
 .m51-settings-index a[aria-current="page"] {
@@ -1460,6 +1458,7 @@ body[data-page="login"] .m51-public-header p {
 
   .m51-settings-index nav {
     display: grid;
+    grid-template-columns: 1fr;
     overflow: visible;
     border-block-end: 0;
   }

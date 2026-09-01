@@ -169,7 +169,7 @@ function privateResponseHeaders(context: Context): void {
   if (!context.res.headers.has("Cache-Control")) {
     context.header("Cache-Control", "private, no-store");
   }
-  context.header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  context.header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
   context.header("Referrer-Policy", "no-referrer");
   context.header("X-Content-Type-Options", "nosniff");
   context.header("X-Frame-Options", "DENY");
