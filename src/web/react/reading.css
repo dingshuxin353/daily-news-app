@@ -83,10 +83,13 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 }
 
 .m51-home {
-  position: relative;
-  overflow: hidden;
-  min-height: calc(100vh - 4.9375rem);
   padding-block: var(--m51-space-8) var(--m51-space-12);
+}
+
+.m51-home-stage {
+  position: relative;
+  min-height: calc(100vh - 6.9375rem);
+  overflow: hidden;
 }
 
 .m51-home-grid {
@@ -730,6 +733,11 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
     margin-inline: -1rem;
     width: calc(100% + 2rem);
     overflow: hidden;
+  }
+
+  .m51-home-stage {
+    min-height: 0;
+    overflow: visible;
   }
 
   .m51-home-illustration img {

@@ -525,6 +525,19 @@ test("M5.1 public page and sample Home use the editorial React shell", () => {
   assert.match(homeHtml, /设置自动日报/);
   assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
   assert.match(homeHtml, /data-theme-id="newspaper-default"/);
+
+  const homeWithMore = renderHomePage({
+    basePath: "/cloud",
+    shell: { ...shell, todoEnabled: true, todoHasFormalData: true },
+    daily: null,
+    publications: [{
+      publication: { ...shell.publication, publicationId: "other-daily", displayName: "其他日报", isDefault: false, sortOrder: 1 },
+      latest: null,
+    }],
+    todoProjection: { homeItems: [{ id: "todo-a1b2c3d4", title: "完成验收", dueDate: "2026-09-02" }] },
+  });
+  assert.match(homeWithMore, /m51-home-stage.*m51-home-illustration[^>]*><img[^>]*><\/div><\/div><section class="m51-home-index"/s);
+  assert.match(homeWithMore, /m51-home-index.*m51-home-todo/s);
 });
 
 test("M5.1-C React settings shell exposes exactly five sections and keeps nickname independent from site names", () => {
