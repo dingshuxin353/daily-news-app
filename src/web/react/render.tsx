@@ -61,3 +61,5 @@ export function renderDailyPage(input: { basePath: string; shell: ReadingShell; 
 export function renderTodoPage(input: { basePath: string; shell: ReadingShell; projection: any }): string {
   return document(<TodoPage {...input} />);
 }
+
+export { parseTodoAnchorHash } from "./reading-interactions.js";

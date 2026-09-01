@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { IconExternalLink, IconX } from "@tabler/icons-react";
+import { parseTodoAnchorHash } from "./reading-interactions.js";
 
 export interface ReadingSource {
   name: string;
@@ -23,13 +24,13 @@ function SourceList({ sources }: { sources: ReadingSource[] }) {
             ? <time dateTime={source.publishedAt}>{source.publishedAt}</time>
             : null}
           <a href={source.url} target="_blank" rel="noopener noreferrer">
-            打开原文{" "}
+            <span>打开原文</span>
             <IconExternalLink size={15} stroke={1.8} aria-hidden="true" />
           </a>
           {source.via
             ? (
-              <p>
-                经由{" "}
+              <p className="m51-source-via">
+                <span>经由</span>
                 <a
                   href={source.via.url}
                   target="_blank"
@@ -130,13 +131,17 @@ export function ImageFallbackIsland({ imageId }: { imageId: string }) {
 export function TodoAnchorIsland() {
   useEffect(() => {
     const resolveAnchor = () => {
-      if (!window.location.hash) return;
-      const target = document.getElementById(
-        decodeURIComponent(window.location.hash.slice(1)),
-      );
       const status = document.querySelector<HTMLElement>(
         "[data-anchor-status]",
       );
+      const anchor = parseTodoAnchorHash(window.location.hash);
+      if (anchor.kind === "none") {
+        if (status) status.hidden = true;
+        return;
+      }
+      const target = anchor.kind === "valid"
+        ? document.getElementById(anchor.id)
+        : null;
       if (target instanceof HTMLElement) {
         if (status) status.hidden = true;
         target.focus({ preventScroll: true });

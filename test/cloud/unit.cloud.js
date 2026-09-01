@@ -25,6 +25,7 @@ import {
   renderAccountSettingsPage,
 } from "../../.cloud-dist/src/web/private-pages.js";
 import {
+  parseTodoAnchorHash,
   renderAgentSettingsPage,
   renderCredentialSecretPage,
   renderDailyPage,
@@ -239,6 +240,8 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(dailyHtml, /referrerPolicy="no-referrer"/);
   assert.match(dailyHtml, /data-react-island="sources"/);
   assert.match(dailyHtml, /<dialog class="m51-source-dialog"/);
+  assert.match(dailyHtml, />打开原文<\/span><svg/);
+  assert.doesNotMatch(dailyHtml, />打开原文 <svg/);
   assert.match(dailyHtml, /href="#sources-multi-source-story"/);
   assert.match(dailyHtml, /class="m51-source-archive"/);
   assert.match(dailyHtml, /补充来源/);
@@ -263,6 +266,12 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(todoHtml, /data-react-island="todo-anchor"/);
   assert.match(todoHtml, /需要处理的正式待办/);
   assert.doesNotMatch(todoHtml, /<form|checkbox|拖动/);
+  assert.deepEqual(parseTodoAnchorHash(""), { kind: "none" });
+  assert.deepEqual(parseTodoAnchorHash("#todo-a1b2c3d4"), { kind: "valid", id: "todo-a1b2c3d4" });
+  assert.deepEqual(parseTodoAnchorHash("#%E4%BB%8A%E5%A4%A9"), { kind: "valid", id: "今天" });
+  assert.deepEqual(parseTodoAnchorHash("#%E0%A4%AA"), { kind: "valid", id: "प" });
+  assert.deepEqual(parseTodoAnchorHash("#%E0%A4%A"), { kind: "invalid" });
+  assert.deepEqual(parseTodoAnchorHash("#"), { kind: "invalid" });
 
   const islands = await readFile(new URL("../../src/web/react/reading-islands.tsx", import.meta.url), "utf8");
   assert.match(islands, /dialogRef\.current\?\.showModal\(\)/);

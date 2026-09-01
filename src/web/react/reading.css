@@ -465,6 +465,12 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   font-size: 0.75rem;
 }
 
+.m51-source-via {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--m51-space-2);
+}
+
 .m51-source-dialog {
   width: min(100% - 2rem, 46rem);
   max-height: min(80vh, 50rem);
