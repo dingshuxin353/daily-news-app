@@ -17,9 +17,9 @@ import {
   escapeHtml,
   renderAccountSettingsPage,
   renderConfirmPage,
-  renderNicknameOnboardingPage,
   renderSettingsDocument,
 } from "./private-pages.js";
+import { renderNicknameOnboardingPage } from "./react/render.js";
 
 export interface SiteSettingsDependencies {
   basePath: string;

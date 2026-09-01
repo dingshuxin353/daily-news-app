@@ -391,6 +391,14 @@ test("Fake mail reader exists only when explicitly injected into a test app", as
   assert.equal(css.status, 200);
   assert.match(css.headers.get("content-type"), /text\/css/);
   assert.match(await css.text(), /macrostructure: Split Studio \+ Index-First settings \+ reading projection/);
+  const m51Css = await hidden.app.request("https://dailynews.test/assets/m5/m5.css");
+  assert.equal(m51Css.status, 200);
+  assert.match(m51Css.headers.get("content-type"), /text\/css/);
+  assert.match(await m51Css.text(), /--m51-paper:/);
+  const m51Client = await hidden.app.request("https://dailynews.test/assets/m5/m5-client.js");
+  assert.equal(m51Client.status, 200);
+  assert.match(m51Client.headers.get("content-type"), /text\/javascript/);
+  assert.equal((await hidden.app.request("https://dailynews.test/assets/m5/%2e%2e%2fcloud.css")).status, 404);
 });
 
 test("cross-origin first sign-in with a valid OTP is rejected without consuming it or creating identity state", async () => {

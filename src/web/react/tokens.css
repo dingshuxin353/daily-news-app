@@ -1,0 +1,39 @@
+:root {
+  --m51-paper: oklch(96.2% 0.015 82);
+  --m51-paper-deep: oklch(92.8% 0.02 82);
+  --m51-paper-raised: oklch(98.4% 0.009 82);
+  --m51-ink: oklch(18.2% 0.014 62);
+  --m51-ink-soft: oklch(31% 0.014 68);
+  --m51-muted: oklch(42.5% 0.014 72);
+  --m51-rule: oklch(58% 0.018 78);
+  --m51-rule-soft: oklch(82% 0.015 78);
+  --m51-orange: oklch(65.5% 0.19 44);
+  --m51-orange-dark: oklch(45% 0.15 42);
+  --m51-accent-ink: oklch(18.2% 0.014 62);
+  --m51-on-danger: oklch(98% 0.008 82);
+  --m51-success: oklch(42% 0.105 145);
+  --m51-error: oklch(46% 0.18 28);
+  --m51-focus: oklch(45% 0.15 42);
+
+  --m51-font-wordmark: "Newsreader Variable", "Noto Serif SC", serif;
+  --m51-font-editorial: "Noto Serif SC", serif;
+  --m51-font-ui: "Noto Sans SC", sans-serif;
+
+  --m51-space-1: 0.25rem;
+  --m51-space-2: 0.5rem;
+  --m51-space-3: 0.75rem;
+  --m51-space-4: 1rem;
+  --m51-space-5: 1.25rem;
+  --m51-space-6: 1.5rem;
+  --m51-space-8: 2rem;
+  --m51-space-10: 2.5rem;
+  --m51-space-12: 3rem;
+  --m51-space-16: 4rem;
+  --m51-space-20: 5rem;
+  --m51-content: 78rem;
+  --m51-reading: 46rem;
+  --m51-control-height: 3.25rem;
+  --m51-rule-width: 1px;
+  --m51-focus-width: 2px;
+  --m51-focus-offset: 1px;
+}

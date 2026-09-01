@@ -18,7 +18,7 @@
     "build": "node scripts/prepare-data.js && node scripts/build.js",
     "start": "node scripts/prepare-data.js && node scripts/build.js && node scripts/serve.js",
     "test": "node --test test/*.test.js",
-    "build:cloud": "tsc -p tsconfig.cloud.json",
+    "build:cloud": "node scripts/build-cloud.js",
     "start:cloud": "node .cloud-dist/src/cloud/server.js",
     "db:migrate": "npm run build:cloud --silent && node .cloud-dist/src/cloud/migrate.js",
     "test:cloud": "npm run build:cloud --silent && node --test test/cloud/unit.cloud.js",
@@ -30,11 +30,20 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@astryxdesign/core": "0.5.2",
+    "@astryxdesign/theme-neutral": "0.5.2",
+    "@fontsource-variable/newsreader": "5.2.8",
+    "@fontsource/noto-sans-sc": "5.2.8",
+    "@fontsource/noto-serif-sc": "5.2.8",
     "@hono/node-server": "2.1.1",
     "@modelcontextprotocol/server": "2.0.0",
+    "@stylexjs/stylex": "0.19.0",
+    "@tabler/icons-react": "3.34.1",
     "better-auth": "1.7.1",
     "hono": "4.13.4",
     "pg": "8.23.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "tencentcloud-sdk-nodejs-ses": "4.1.271",
     "zod": "4.2.0"
   },
@@ -42,7 +51,11 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "22.20.1",
     "@types/pg": "8.23.1",
-    "typescript": "7.0.2"
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
   },
   "overrides": {
     "uuid": "11.1.1"

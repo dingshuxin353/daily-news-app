@@ -24,12 +24,17 @@ import {
 import {
   renderHomePage,
   renderDailyPage,
-  renderLoginPage,
   renderAccountSettingsPage,
-  renderNicknameOnboardingPage,
-  renderPublicPage,
   renderPublicationsPage,
 } from "../../.cloud-dist/src/web/private-pages.js";
+import {
+  renderAgentSettingsPage,
+  renderCredentialSecretPage,
+  renderLoginPage,
+  renderNicknameOnboardingPage,
+  renderOnboardingPage,
+  renderPublicPage,
+} from "../../.cloud-dist/src/web/react/render.js";
 import {
   CanonicalJsonError,
   canonicalJson,
@@ -399,18 +404,73 @@ test("mail adapters keep Fake delivery in memory and require both SES identifier
 
 test("login page contains no account-discovery copy or persistent email storage", () => {
   const html = renderLoginPage("/cloud");
-  assert.match(html, /\/cloud\/assets\/cloud-auth\.js/);
-  assert.match(html, /autocomplete="email"/);
+  assert.match(html, /\/cloud\/assets\/m5\/m5-client\.js/);
+  assert.match(html, /\/cloud\/assets\/m5\/m5\.css/);
+  assert.match(html, /data-react-island="login"/);
+  assert.match(html, /autocomplete="email"/i);
   assert.doesNotMatch(html, /localStorage|sessionStorage|邮箱不存在|已注册/);
 });
 
-test("M3 public and sample Home pages keep confirmed copy, privacy boundaries, and responsive assets", () => {
+test("M5.1 first-use React journey stays API-first and keeps one-time secrets isolated", async () => {
+  const shell = {
+    spaceName: "我的日报",
+    timeZone: "Asia/Shanghai",
+    publication: { publicationId: "daily-news", displayName: "DailyNews", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
+    theme: { id: "newspaper-default", revision: 1, colorScheme: "light" },
+    todoEnabled: false,
+    todoHasFormalData: false,
+    nickname: "丁丁",
+  };
+  const onboarding = renderOnboardingPage({
+    basePath: "/cloud",
+    shell,
+    csrfToken: "csrf-placeholder",
+    operationId: "operation-placeholder",
+    setupUrl: "https://dailynews.test/cloud/agent-setup.md",
+  });
+  assert.match(onboarding, /data-react-island="copy-instruction"/);
+  assert.match(onboarding, /https:\/\/dailynews\.test\/cloud\/agent-setup\.md/);
+  assert.match(onboarding, /HTTPS JSON API/);
+  assert.doesNotMatch(onboarding, /MCP 工具发现|MCP 工具|配对码/);
+  assert.doesNotMatch(onboarding, /dn_pat_|Bearer /);
+
+  const settings = renderAgentSettingsPage({
+    basePath: "/cloud",
+    shell,
+    credentials: [],
+    csrfToken: "csrf-placeholder",
+    operationId: "operation-placeholder",
+    activeLimit: 10,
+  });
+  assert.match(settings, /data-page="agent-settings"/);
+  assert.match(settings, /<nav[^>]*>[\s\S]*日报站点[\s\S]*主题库[\s\S]*Agent 授权[\s\S]*账户与安全[\s\S]*高级接入/);
+  assert.doesNotMatch(settings, /assets\/cloud\.css|assets\/private-pages\.js/);
+
+  const secret = renderCredentialSecretPage({
+    basePath: "/cloud",
+    shell,
+    token: "dn_pat_test-only-placeholder",
+    title: "Agent Token 已创建",
+  });
+  assert.match(secret, /data-react-island="copy-secret"/);
+  assert.match(secret, /id="agent-token-secret">dn_pat_test-only-placeholder/);
+  assert.match(secret, /data-return-path="\/cloud\/settings\/agent"/);
+
+  const legacySource = await readFile(new URL("../../src/web/private-pages.ts", import.meta.url), "utf8");
+  for (const renderer of ["renderPublicPage", "renderLoginPage", "renderOnboardingPage", "renderNicknameOnboardingPage", "renderAgentSettingsPage", "renderCredentialSecretPage"]) {
+    assert.doesNotMatch(legacySource, new RegExp(`export function ${renderer}`));
+  }
+});
+
+test("M5.1 public page uses the editorial React shell while sample Home remains unchanged", () => {
   const publicHtml = renderPublicPage({ basePath: "/cloud", signedIn: false });
-  assert.match(publicHtml, /每天一份，只为你而编的私人日报/);
-  assert.match(publicHtml, /把每天关心的事，交给你的私人编辑部/);
+  assert.match(publicHtml, /每天一份，.*只为你而编。/s);
+  assert.match(publicHtml, /把每天关心的事交给你的私人编辑部/);
   assert.match(publicHtml, /private-newsroom\.png/);
   assert.match(publicHtml, /width="1400" height="466"/);
   assert.match(publicHtml, /\/cloud\/login/);
+  assert.match(publicHtml, /data-page="public"/);
+  assert.doesNotMatch(publicHtml, /assets\/cloud\.css|assets\/private-pages\.js/);
 
   const shell = {
     spaceName: "我的日报",
@@ -536,6 +596,48 @@ test("health routes honor the explicit base path", async () => {
   const app = createCloudApp({ basePath: "/cloud", readinessCheck: async () => {} });
   assert.equal((await app.request("http://localhost/health/live")).status, 404);
   assert.equal((await app.request("http://localhost/cloud/health/live")).status, 200);
+});
+
+test("M5.1 client assets are served only from the configured base path and fixed build root", async () => {
+  const app = createCloudApp({
+    basePath: "/cloud",
+    readinessCheck: async () => {},
+    identity: { getSession: async () => null, handle: () => new Response(null, { status: 404 }) },
+    tenancy: {},
+    defaults: validProductConfig.defaults,
+  });
+  assert.equal((await app.request("https://dailynews.test/assets/m5/m5.css")).status, 404);
+  const css = await app.request("https://dailynews.test/cloud/assets/m5/m5.css");
+  assert.equal(css.status, 200);
+  assert.equal(css.headers.get("content-type"), "text/css; charset=utf-8");
+  const cssText = await css.text();
+  assert.match(cssText, /--m51-paper:/);
+  const referencedAssets = [...cssText.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((match) => match[1]);
+  assert.equal(referencedAssets.length, 6);
+  assert.ok(referencedAssets.every((value) => value.startsWith("./assets/") && value.endsWith(".woff2")));
+  const client = await app.request("https://dailynews.test/cloud/assets/m5/m5-client.js");
+  assert.equal(client.status, 200);
+  assert.equal(client.headers.get("content-type"), "text/javascript; charset=utf-8");
+  assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/%2e%2e%2fcloud.css")).status, 404);
+  assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/not-allowed.txt")).status, 404);
+
+  const server = createAdaptorServer({ fetch: app.fetch, hostname: "127.0.0.1" });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const cssUrl = new URL(`/cloud/assets/m5/m5.css`, `http://127.0.0.1:${address.port}`);
+    const networkCss = await fetch(cssUrl);
+    assert.equal(networkCss.status, 200);
+    for (const assetPath of referencedAssets) {
+      const font = await fetch(new URL(assetPath, cssUrl));
+      assert.equal(font.status, 200, assetPath);
+      assert.equal(font.headers.get("content-type"), "font/woff2", assetPath);
+      assert.ok((await font.arrayBuffer()).byteLength > 0, assetPath);
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test("Agent setup exposes only the API-first Markdown contracts at the configured base path", async () => {

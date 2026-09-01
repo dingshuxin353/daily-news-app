@@ -1,0 +1,118 @@
+import type { ReactNode } from "react";
+import { Button } from "@astryxdesign/core/Button";
+import { Theme } from "@astryxdesign/core/theme";
+import { neutralTheme } from "@astryxdesign/theme-neutral/built";
+import { IconArrowNarrowRight } from "@tabler/icons-react";
+import type { ReadingShell } from "../../modules/private-reading/service.js";
+
+export type ReactPageName = "public" | "login" | "onboarding" | "agent-settings";
+
+export function appPath(basePath: string, pathname: string): string {
+  return `${basePath}${pathname}`;
+}
+
+function Wordmark({ basePath, privatePage = false }: { basePath: string; privatePage?: boolean }) {
+  return <a className="m51-wordmark" href={appPath(basePath, privatePage ? "/home" : "/")}>DailyNews</a>;
+}
+
+function PublicHeader({ basePath }: { basePath: string }) {
+  return <header className="m51-public-header">
+    <div className="m51-header-inner">
+      <Wordmark basePath={basePath} />
+      <p>每天一份 · 私人编写</p>
+    </div>
+  </header>;
+}
+
+function ProductHeader(input: { basePath: string; shell: ReadingShell; current: string }) {
+  const links = [
+    { key: "home", href: "/home", label: "总览" },
+    { key: "publications", href: "/publications/", label: "我的日报" },
+    ...(input.shell.todoEnabled && input.shell.todoHasFormalData
+      ? [{ key: "todo", href: "/todo/", label: "Todo" }]
+      : []),
+    { key: "settings", href: "/settings", label: "编辑部设置" },
+  ];
+  const nickname = input.shell.nickname?.trim() || "你";
+  return <header className="m51-product-header">
+    <div className="m51-header-inner m51-header-inner--product">
+      <div className="m51-brand-group">
+        <Wordmark basePath={input.basePath} privatePage />
+        <span>你的私人编辑部</span>
+      </div>
+      <nav className="m51-primary-nav" aria-label="私人空间">
+        {links.map((link) => <a
+          key={link.key}
+          href={appPath(input.basePath, link.href)}
+          aria-current={input.current === link.key ? "page" : undefined}
+        >{link.label}</a>)}
+      </nav>
+      <a className="m51-account" href={appPath(input.basePath, "/settings/account")} aria-label={`账户：${nickname}`}>
+        <span aria-hidden="true">{[...nickname][0] ?? "你"}</span>
+        <strong>{nickname}</strong>
+      </a>
+    </div>
+  </header>;
+}
+
+export function PageDocument(input: {
+  basePath: string;
+  title: string;
+  page: ReactPageName;
+  children: ReactNode;
+  shell?: ReadingShell;
+  current?: string;
+}) {
+  const privatePage = Boolean(input.shell);
+  return <html lang="zh-CN" data-theme="light">
+    <head>
+      <meta charSet="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      <meta name="color-scheme" content="light" />
+      <meta name="robots" content="noindex, nofollow" />
+      <link rel="icon" href="data:," />
+      <title>{`${input.title} · DailyNews`}</title>
+      <link rel="stylesheet" href={appPath(input.basePath, "/assets/m5/m5.css")} />
+    </head>
+    <body data-page={input.page} data-base-path={input.basePath}>
+      <a className="m51-skip-link" href="#content">跳到正文</a>
+      <Theme theme={neutralTheme} mode="light">
+        {input.shell
+          ? <ProductHeader basePath={input.basePath} shell={input.shell} current={input.current ?? ""} />
+          : <PublicHeader basePath={input.basePath} />}
+        {input.children}
+        <footer className="m51-footer">
+          <p>DailyNews · 内容属于你，控制权也属于你。</p>
+        </footer>
+      </Theme>
+      <script type="module" src={appPath(input.basePath, "/assets/m5/m5-client.js")} />
+    </body>
+  </html>;
+}
+
+export function PrimaryLink({ href, label }: { href: string; label: string }) {
+  return <Button
+    className="m51-button"
+    label={label}
+    variant="primary"
+    size="lg"
+    href={href}
+    endContent={<IconArrowNarrowRight size={18} stroke={1.8} aria-hidden="true" />}
+  />;
+}
+
+export function FieldShell(input: {
+  id: string;
+  label: string;
+  helper: string;
+  error?: string;
+  children: ReactNode;
+}) {
+  return <div className="m51-field">
+    <label htmlFor={input.id}>{input.label}</label>
+    {input.children}
+    <p id={`${input.id}-message`} className={input.error ? "m51-field-message is-error" : "m51-field-message"} role={input.error ? "alert" : undefined}>
+      {input.error ?? input.helper}
+    </p>
+  </div>;
+}
