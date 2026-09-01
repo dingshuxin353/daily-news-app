@@ -78,6 +78,10 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   white-space: nowrap;
 }
 
+.m51-source-action[hidden] {
+  display: none;
+}
+
 .m51-home {
   position: relative;
   padding-block: var(--m51-space-8) var(--m51-space-12);

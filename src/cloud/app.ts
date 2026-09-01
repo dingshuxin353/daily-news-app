@@ -14,7 +14,6 @@ import type { SiteManagementService } from "../modules/site-management/service.j
 import type { SiteThemeCatalogService } from "../modules/site-management/theme-catalog.js";
 import type { UserProfileService } from "../modules/identity/profile-service.js";
 import type { PostgresTenancyStore } from "../adapters/postgres/tenancy.js";
-import { renderSpacePage } from "../web/cloud-pages.js";
 import {
   renderDailyPage,
   renderHomePage,
@@ -82,10 +81,7 @@ const agentSetupContentSource = new URL("docs/agent-setup/content.md", `file://$
 const agentSetupTodoSource = new URL("docs/agent-setup/todo.md", `file://${projectRoot}/`);
 const agentSetupThemeSource = new URL("docs/agent-setup/theme.md", `file://${projectRoot}/`);
 const m51AssetRoot = new URL(".cloud-dist/client/", `file://${projectRoot}/`);
-const cloudAssets = {
-  "cloud.css": { url: new URL("src/web/cloud.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
-  "tokens.css": { url: new URL("tokens.css", `file://${projectRoot}/`), contentType: "text/css; charset=utf-8", text: true },
-  "cloud-auth.js": { url: new URL("src/web/cloud-auth.js", `file://${projectRoot}/`), contentType: "text/javascript; charset=utf-8", text: true },
+const publicAssets = {
   "private-newsroom.png": { url: new URL("src/web/assets/private-newsroom-transparent.png", `file://${projectRoot}/`), contentType: "image/png", text: false },
 } as const;
 
@@ -247,8 +243,8 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
     const defaults = dependencies.defaults;
 
     app.get(route("/assets/:name"), async (context) => {
-      const name = context.req.param("name") as keyof typeof cloudAssets;
-      const asset = cloudAssets[name];
+      const name = context.req.param("name") as keyof typeof publicAssets;
+      const asset = publicAssets[name];
       if (!asset) return context.json({ error: "not_found" }, 404);
       try {
         const content = asset.text ? await readFile(asset.url, "utf8") : await readFile(asset.url);
@@ -363,14 +359,7 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
       try {
         const access = await requirePrivateAccess(context);
         if (access instanceof Response) return access;
-        if (!dependencies.privateReading) {
-          const repository = tenancy.forTenant(access.tenant);
-          const [home, publications, todo, themes] = await Promise.all([repository.getHomeProfile(), repository.listPublications(), repository.getTodoProfile(), repository.listThemeSelections()]);
-          const publication = publications.find((item) => item.isDefault);
-          const homeTheme = themes.find((item) => item.targetType === "home");
-          if (!home || !publication || !todo || !homeTheme?.themeId) throw new Error("bootstrap unavailable");
-          return context.html(renderSpacePage({ basePath: dependencies.basePath, spaceName: home.displayName, publicationName: publication.displayName, publicationId: publication.publicationId, todoEnabled: todo.enabled, themeName: homeTheme.themeId }));
-        }
+        if (!dependencies.privateReading) return context.text("服务暂时不可用，请稍后重试。", 503);
         const reading = await dependencies.privateReading.readHome(access.tenant);
         return context.html(renderHomePage({
           basePath: dependencies.basePath,

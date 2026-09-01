@@ -241,6 +241,8 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(dailyHtml, /referrerPolicy="no-referrer"/);
   assert.match(dailyHtml, /data-react-island="sources"/);
   assert.match(dailyHtml, /<dialog class="m51-source-dialog"/);
+  assert.match(dailyHtml, /<button[^>]*class="m51-source-action"[^>]*hidden=""[^>]*>查看全部 2 个来源<\/button>/);
+  assert.match(dailyHtml, /<a class="m51-source-action" href="#sources-multi-source-story">查看全部 2 个来源<\/a>/);
   assert.match(dailyHtml, />打开原文<\/span><svg/);
   assert.doesNotMatch(dailyHtml, />打开原文 <svg/);
   assert.match(dailyHtml, /href="#sources-multi-source-story"/);
@@ -278,10 +280,20 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(islands, /dialogRef\.current\?\.showModal\(\)/);
   assert.match(islands, /triggerRef\.current\?\.focus\(\)/);
   assert.match(islands, /image\.complete && image\.naturalWidth === 0/);
-  await assert.rejects(() => readFile(new URL("../../src/web/private-pages.js", import.meta.url), "utf8"), { code: "ENOENT" });
+  for (const retiredPath of [
+    "../../src/web/private-pages.js",
+    "../../src/web/private-pages.ts",
+    "../../src/web/cloud-pages.ts",
+    "../../src/web/cloud-auth.js",
+    "../../src/web/cloud.css",
+    "../../tokens.css",
+  ]) {
+    await assert.rejects(() => readFile(new URL(retiredPath, import.meta.url), "utf8"), { code: "ENOENT" });
+  }
   const css = await readFile(new URL("../../src/web/react/reading.css", import.meta.url), "utf8");
   assert.match(css, /Ecosystem Index \+ Editorial Reading Flow/);
   assert.match(css, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.m51-source-action\[hidden\]\s*\{\s*display: none;/);
 });
 
 test("cloud config fails closed for missing or unsafe environment", async () => {
@@ -696,7 +708,9 @@ test("M5.1 client assets are served only from the configured base path and fixed
   const client = await app.request("https://dailynews.test/cloud/assets/m5/m5-client.js");
   assert.equal(client.status, 200);
   assert.equal(client.headers.get("content-type"), "text/javascript; charset=utf-8");
-  assert.equal((await app.request("https://dailynews.test/cloud/assets/private-pages.js")).status, 404);
+  for (const retiredAsset of ["private-pages.js", "cloud.css", "cloud-auth.js", "tokens.css"]) {
+    assert.equal((await app.request(`https://dailynews.test/cloud/assets/${retiredAsset}`)).status, 404);
+  }
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/%2e%2e%2fcloud.css")).status, 404);
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/not-allowed.txt")).status, 404);
 
@@ -717,6 +731,20 @@ test("M5.1 client assets are served only from the configured base path and fixed
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+
+  const incompleteRuntime = createCloudApp({
+    basePath: "/cloud",
+    readinessCheck: async () => {},
+    identity: {
+      getSession: async () => ({ user: { id: "user" }, session: { id: "session" } }),
+      handle: () => new Response(null, { status: 404 }),
+    },
+    tenancy: { ensureSpaceForUser: async () => ({ spaceId: "space" }) },
+    defaults: validProductConfig.defaults,
+  });
+  const incompleteHome = await incompleteRuntime.request("https://dailynews.test/cloud/home");
+  assert.equal(incompleteHome.status, 503);
+  assert.doesNotMatch(await incompleteHome.text(), /M2 云端|Space 摘要|assets\/cloud\.css/);
 });
 
 test("Agent setup exposes only the API-first Markdown contracts at the configured base path", async () => {
