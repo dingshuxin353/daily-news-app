@@ -1,29 +1,39 @@
 import { Button } from "@astryxdesign/core/Button";
-import { IconArrowNarrowRight, IconExternalLink, IconKey, IconShieldLock } from "@tabler/icons-react";
+import { IconArrowNarrowRight, IconCircleFilled, IconExternalLink, IconKey, IconShieldLock } from "@tabler/icons-react";
 import type { CredentialRecord } from "../../modules/agent-access/credential-service.js";
 import type { ReadingShell } from "../../modules/private-reading/service.js";
 import { CopyInstructionIsland, CopySecretIsland, LoginIsland } from "./islands.js";
 import { appPath, FieldShell, PageDocument, PrimaryLink, SettingsLayout } from "./ui.js";
 
 export function PublicPage({ basePath, signedIn }: { basePath: string; signedIn: boolean }) {
-  return <PageDocument basePath={basePath} title="你的私人日报" page="public">
+  const destination = appPath(basePath, signedIn ? "/home" : "/login");
+  const action = signedIn ? "进入私人日报" : "登录 / 注册";
+  return <PageDocument basePath={basePath} title="你的私人日报" page="public" publicAction={{ href: destination, label: action }}>
     <main className="m51-public-main" id="content">
       <section className="m51-public-hero" aria-labelledby="public-title">
         <div className="m51-public-copy">
           <p className="m51-kicker">Your private newsroom</p>
-          <h1 id="public-title">每天一份，<br />只为你而编。</h1>
-          <p>把每天关心的事交给你的私人编辑部。DailyNews 保存经过校验的正式日报与待办，阅读位置始终属于你。</p>
-          <PrimaryLink href={appPath(basePath, signedIn ? "/home" : "/login")} label={signedIn ? "进入私人日报" : "登录 / 注册"} />
+          <h1 id="public-title">每天一份，<br />只为你而编的<br />私人日报。</h1>
+          <p>把每天关心的事交给 Agent。DailyNews 负责把结果整理成稳定、可追溯、只属于你的正式日报。</p>
+          <PrimaryLink href={destination} label={action} />
         </div>
-        <figure className="m51-public-figure">
-          <img src={appPath(basePath, "/assets/private-newsroom.png")} alt="几位 Agent 在编辑桌前协作整理私人日报" width="1400" height="466" fetchPriority="high" />
-          <figcaption>一个 Agent 可以独立工作，多个 Agent 也可以组成团队；最后的授权始终由你掌握。</figcaption>
-        </figure>
+        <img src={appPath(basePath, "/assets/private-newsroom.png")} alt="几位 Agent 在编辑桌前协作整理私人日报" width="1400" height="466" fetchPriority="high" />
       </section>
-      <section className="m51-principles" aria-label="DailyNews 的工作边界">
-        <p>你只需要说清关心什么，以及希望什么时候看到更新。</p>
-        <p>DailyNews 保存正式结果，不接管 Agent 所在环境里的定时任务。</p>
-        <p>每个 Agent 使用独立授权，可以单独添加、轮换或移除。</p>
+      <section className="m51-public-steps" aria-labelledby="public-steps-title">
+        <div className="m51-public-section-heading">
+          <p className="m51-kicker">How it works</p>
+          <h2 id="public-steps-title">把编辑部交给 Agent，三步开始。</h2>
+        </div>
+        <ol>
+          <li><span>01</span><h3>发送公开说明</h3><p>把 DailyNews 的接入说明发给你信任的 Agent。</p></li>
+          <li><span>02</span><h3>交付一次 Token</h3><p>Agent 主动索取时，回到 DailyNews 创建并交付授权。</p></li>
+          <li><span>03</span><h3>阅读正式结果</h3><p>Agent 完成工作后，回到私人日报阅读并核对来源。</p></li>
+        </ol>
+      </section>
+      <section className="m51-public-control" aria-labelledby="public-control-title">
+        <p className="m51-kicker">Your newsroom, your control</p>
+        <h2 id="public-control-title">控制权始终属于你。</h2>
+        <p>日报、主题和 Agent 授权都由你管理。你可以随时轮换或撤销 Token；私人内容不会成为公开页面的一部分。</p>
       </section>
     </main>
   </PageDocument>;
@@ -39,6 +49,7 @@ export function LoginPage(input: { basePath: string; returnTo?: string; returnLa
           <p>没有密码，也不需要先判断自己是在登录还是注册。</p>
           {input.returnLabel ? <p className="m51-return-note">登录后返回：{input.returnLabel}</p> : null}
         </div>
+        <IconCircleFilled className="m51-login-sun" size={112} aria-hidden="true" />
         <img src={appPath(input.basePath, "/assets/private-newsroom.png")} alt="几位 Agent 在编辑桌前协作整理私人日报" width="1400" height="466" fetchPriority="high" />
       </section>
       <section className="m51-login-panel" aria-label="邮箱验证码登录">

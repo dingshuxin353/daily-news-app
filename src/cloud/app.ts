@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono, type Context } from "hono";
+import { etag } from "hono/etag";
 import type { CloudFileConfig } from "./config.js";
 import type { IdentityService } from "../modules/identity/auth.js";
 import { normalizeEmail, resolveTrustedClientIp } from "../modules/identity/security.js";
@@ -165,7 +166,9 @@ function resolveNodeRequestOrigin(context: Context, configuredOrigin: string): s
 }
 
 function privateResponseHeaders(context: Context): void {
-  context.header("Cache-Control", "private, no-store");
+  if (!context.res.headers.has("Cache-Control")) {
+    context.header("Cache-Control", "private, no-store");
+  }
   context.header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
   context.header("Referrer-Policy", "no-referrer");
   context.header("X-Content-Type-Options", "nosniff");
@@ -182,6 +185,14 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
     await next();
     privateResponseHeaders(context);
   });
+
+  app.use(route("/assets/*"), async (context, next) => {
+    await next();
+    if (context.res.ok || context.res.status === 304) {
+      context.header("Cache-Control", "public, max-age=0, must-revalidate");
+    }
+  });
+  app.use(route("/assets/*"), etag());
 
   app.get(route("/health/live"), (context) => context.json({ status: "ok" }, 200));
   app.get(route("/health/ready"), async (context) => {
@@ -204,6 +215,10 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
   }
 
   if (dependencies.agentMcp) {
+    app.use(route("/mcp"), async (context, next) => {
+      await next();
+      context.header("Cache-Control", "private, no-store");
+    });
     registerAgentMcpRoute(app, {
       basePath: dependencies.basePath,
       origin: dependencies.agentMcp.origin,
@@ -263,8 +278,6 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
       const contentTypes: Record<string, string> = {
         css: "text/css; charset=utf-8",
         js: "text/javascript; charset=utf-8",
-        woff: "font/woff",
-        woff2: "font/woff2",
       };
       const contentType = contentTypes[extension];
       if (!contentType) return context.json({ error: "not_found" }, 404);

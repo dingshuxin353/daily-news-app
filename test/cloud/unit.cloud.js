@@ -504,8 +504,8 @@ test("M5.1 first-use React journey stays API-first and keeps one-time secrets is
 
 test("M5.1 public page and sample Home use the editorial React shell", () => {
   const publicHtml = renderPublicPage({ basePath: "/cloud", signedIn: false });
-  assert.match(publicHtml, /每天一份，.*只为你而编。/s);
-  assert.match(publicHtml, /把每天关心的事交给你的私人编辑部/);
+  assert.match(publicHtml, /每天一份，.*只为你而编的.*私人日报。/s);
+  assert.match(publicHtml, /把每天关心的事交给 Agent/);
   assert.match(publicHtml, /private-newsroom\.png/);
   assert.match(publicHtml, /width="1400" height="466"/);
   assert.match(publicHtml, /\/cloud\/login/);
@@ -525,6 +525,19 @@ test("M5.1 public page and sample Home use the editorial React shell", () => {
   assert.match(homeHtml, /设置自动日报/);
   assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
   assert.match(homeHtml, /data-theme-id="newspaper-default"/);
+
+  const homeWithMore = renderHomePage({
+    basePath: "/cloud",
+    shell: { ...shell, todoEnabled: true, todoHasFormalData: true },
+    daily: null,
+    publications: [{
+      publication: { ...shell.publication, publicationId: "other-daily", displayName: "其他日报", isDefault: false, sortOrder: 1 },
+      latest: null,
+    }],
+    todoProjection: { homeItems: [{ id: "todo-a1b2c3d4", title: "完成验收", dueDate: "2026-09-02" }] },
+  });
+  assert.match(homeWithMore, /m51-home-stage.*m51-home-illustration[^>]*><img[^>]*><\/div><\/div><section class="m51-home-index"/s);
+  assert.match(homeWithMore, /m51-home-index.*m51-home-todo/s);
 });
 
 test("M5.1-C React settings shell exposes exactly five sections and keeps nickname independent from site names", () => {
@@ -700,19 +713,22 @@ test("M5.1 client assets are served only from the configured base path and fixed
   const css = await app.request("https://dailynews.test/cloud/assets/m5/m5.css");
   assert.equal(css.status, 200);
   assert.equal(css.headers.get("content-type"), "text/css; charset=utf-8");
+  assert.equal(css.headers.get("cache-control"), "public, max-age=0, must-revalidate");
+  assert.ok(css.headers.get("etag"));
   const cssText = await css.text();
   assert.match(cssText, /--m51-paper:/);
-  const referencedAssets = [...cssText.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((match) => match[1]);
-  assert.equal(referencedAssets.length, 6);
-  assert.ok(referencedAssets.every((value) => value.startsWith("./assets/") && value.endsWith(".woff2")));
+  assert.doesNotMatch(cssText, /@font-face|\.woff2?/);
   const client = await app.request("https://dailynews.test/cloud/assets/m5/m5-client.js");
   assert.equal(client.status, 200);
   assert.equal(client.headers.get("content-type"), "text/javascript; charset=utf-8");
+  assert.equal(client.headers.get("cache-control"), "public, max-age=0, must-revalidate");
+  assert.ok(client.headers.get("etag"));
   for (const retiredAsset of ["private-pages.js", "cloud.css", "cloud-auth.js", "tokens.css"]) {
     assert.equal((await app.request(`https://dailynews.test/cloud/assets/${retiredAsset}`)).status, 404);
   }
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/%2e%2e%2fcloud.css")).status, 404);
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/not-allowed.txt")).status, 404);
+  assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/retired.woff2")).status, 404);
 
   const server = createAdaptorServer({ fetch: app.fetch, hostname: "127.0.0.1" });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -722,12 +738,12 @@ test("M5.1 client assets are served only from the configured base path and fixed
     const cssUrl = new URL(`/cloud/assets/m5/m5.css`, `http://127.0.0.1:${address.port}`);
     const networkCss = await fetch(cssUrl);
     assert.equal(networkCss.status, 200);
-    for (const assetPath of referencedAssets) {
-      const font = await fetch(new URL(assetPath, cssUrl));
-      assert.equal(font.status, 200, assetPath);
-      assert.equal(font.headers.get("content-type"), "font/woff2", assetPath);
-      assert.ok((await font.arrayBuffer()).byteLength > 0, assetPath);
-    }
+    const networkEtag = networkCss.headers.get("etag");
+    assert.ok(networkEtag);
+    const unchangedCss = await fetch(cssUrl, { headers: { "If-None-Match": networkEtag } });
+    assert.equal(unchangedCss.status, 304);
+    assert.equal(unchangedCss.headers.get("cache-control"), "public, max-age=0, must-revalidate");
+    assert.equal((await unchangedCss.arrayBuffer()).byteLength, 0);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

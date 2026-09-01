@@ -180,73 +180,83 @@ export function HomePage(
         data-theme-id={input.shell.theme.id}
         data-theme-revision={input.shell.theme.revision}
       >
-        <div className="m51-home-grid">
-          <section className="m51-home-lead" aria-labelledby="home-title">
-            <p className="m51-reading-meta">
-              {input.daily?.date ?? "系统内置 · 不代表今日"}
-            </p>
-            <div className="m51-edition-name">
-              <h2>
-                {input.daily ? input.shell.publication.displayName : "示例日报"}
-              </h2>
-              <span>{input.daily ? "个性化正式日报" : "阅读预览"}</span>
-            </div>
-            <p className="m51-kicker">{leadItem.category ?? "阅读方式"}</p>
-            <h1 id="home-title">{leadItem.title ?? "日报尚未准备好"}</h1>
-            <p>
-              {leadItem.summary ?? leadItem.brief ??
-                "连接 Agent 后，这里会显示第一份个性化正式日报。"}
-            </p>
-            <a className="m51-reading-link" href={href}>
-              {input.daily ? "阅读完整日报" : "设置自动日报"}
-              <IconArrowNarrowRight size={18} aria-hidden="true" />
-            </a>
-          </section>
-          <section className="m51-home-digest" aria-labelledby="digest-title">
-            <header>
-              <div>
-                <h2 id="digest-title">今日总览</h2>
-                <p>
-                  {input.daily?.date ?? "系统示例"} · {modules.length} 条内容
-                </p>
+        <div className="m51-home-stage">
+          <div className="m51-home-grid">
+            <section className="m51-home-lead" aria-labelledby="home-title">
+              <p className="m51-reading-meta">
+                {input.daily?.date ?? "系统内置 · 不代表今日"}
+              </p>
+              <div className="m51-edition-name">
+                <h2>
+                  {input.daily ? input.shell.publication.displayName : "示例日报"}
+                </h2>
+                <span>{input.daily ? "个性化正式日报" : "阅读预览"}</span>
               </div>
-              <a href={href}>阅读完整日报</a>
-            </header>
-            <ol>
-              {digest.map((module, index) => (
-                <li key={module.item.id ?? index}>
-                  <span>{String(index + 2).padStart(2, "0")}</span>
-                  <div>
-                    <p className="m51-kicker">
-                      {module.item.category ?? "今日编辑"}
-                    </p>
-                    <h3>{module.item.title}</h3>
-                    <p>{module.item.brief ?? module.item.summary}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="m51-home-primary">
-              <div>
-                <p className="m51-kicker">首要日报</p>
-                <h3>{input.shell.publication.displayName}</h3>
-                <p>
-                  {input.daily
-                    ? `最新一期 · ${input.daily.date} · 共 ${modules.length} 条`
-                    : "等待第一份正式日报"}
-                </p>
-              </div>
-              <a
-                className="m51-reading-link"
-                href={appPath(input.basePath, "/publications/")}
-              >
-                查看我的日报<IconArrowNarrowRight
-                  size={17}
-                  aria-hidden="true"
-                />
+              <p className="m51-kicker">{leadItem.category ?? "阅读方式"}</p>
+              <h1 id="home-title">{leadItem.title ?? "日报尚未准备好"}</h1>
+              <p>
+                {leadItem.summary ?? leadItem.brief ??
+                  "连接 Agent 后，这里会显示第一份个性化正式日报。"}
+              </p>
+              <a className="m51-reading-link" href={href}>
+                {input.daily ? "阅读完整日报" : "设置自动日报"}
+                <IconArrowNarrowRight size={18} aria-hidden="true" />
               </a>
-            </div>
-          </section>
+            </section>
+            <section className="m51-home-digest" aria-labelledby="digest-title">
+              <header>
+                <div>
+                  <h2 id="digest-title">今日总览</h2>
+                  <p>
+                    {input.daily?.date ?? "系统示例"} · {modules.length} 条内容
+                  </p>
+                </div>
+                <a href={href}>阅读完整日报</a>
+              </header>
+              <ol>
+                {digest.map((module, index) => (
+                  <li key={module.item.id ?? index}>
+                    <span>{String(index + 2).padStart(2, "0")}</span>
+                    <div>
+                      <p className="m51-kicker">
+                        {module.item.category ?? "今日编辑"}
+                      </p>
+                      <h3>{module.item.title}</h3>
+                      <p>{module.item.brief ?? module.item.summary}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <div className="m51-home-primary">
+                <div>
+                  <p className="m51-kicker">首要日报</p>
+                  <h3>{input.shell.publication.displayName}</h3>
+                  <p>
+                    {input.daily
+                      ? `最新一期 · ${input.daily.date} · 共 ${modules.length} 条`
+                      : "等待第一份正式日报"}
+                  </p>
+                </div>
+                <a
+                  className="m51-reading-link"
+                  href={appPath(input.basePath, "/publications/")}
+                >
+                  查看我的日报<IconArrowNarrowRight
+                    size={17}
+                    aria-hidden="true"
+                  />
+                </a>
+              </div>
+            </section>
+          </div>
+          <div className="m51-home-illustration" aria-hidden="true">
+            <img
+              src={appPath(input.basePath, "/assets/private-newsroom.png")}
+              alt=""
+              width="1400"
+              height="466"
+            />
+          </div>
         </div>
         {input.publications.length > 0
           ? (
