@@ -84,6 +84,8 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home {
   position: relative;
+  overflow: hidden;
+  min-height: calc(100vh - 4.9375rem);
   padding-block: var(--m51-space-8) var(--m51-space-12);
 }
 
@@ -126,9 +128,9 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 }
 
 .m51-home-lead h1 {
-  max-width: 13ch;
+  max-width: 20.625rem;
   margin-block-end: var(--m51-space-5);
-  font-size: clamp(2.5rem, 10vw, 4.25rem);
+  font-size: clamp(2.375rem, 10vw, 4.25rem);
 }
 
 .m51-home-lead > p:not(.m51-kicker, .m51-reading-meta) {
@@ -231,6 +233,18 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-home-primary div > p:last-child {
   color: var(--m51-reading-muted);
   font-size: 0.75rem;
+}
+
+.m51-home-illustration {
+  position: absolute;
+  inset-inline: 6% 5%;
+  inset-block-end: -1.25rem;
+  pointer-events: none;
+}
+
+.m51-home-illustration img {
+  width: 100%;
+  height: auto;
 }
 
 .m51-home-index,
@@ -639,13 +653,29 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   }
 
   .m51-home-grid {
-    grid-template-columns: minmax(20rem, 0.82fr) minmax(28rem, 1.18fr);
-    gap: var(--m51-space-12);
+    grid-template-columns: minmax(20rem, 30rem) minmax(28rem, 38.75rem);
+    gap: 2.625rem;
+    margin-inline-start: 0.75rem;
   }
 
   .m51-home-lead,
   .m51-home-digest {
-    padding-block-end: var(--m51-space-10);
+    padding-block-end: 12.8125rem;
+  }
+
+  .m51-home-lead h1 {
+    font-size: 2.375rem;
+    line-height: 1.13;
+  }
+
+  .m51-home-lead > p:not(.m51-kicker, .m51-reading-meta) {
+    max-width: 26.5rem;
+    font-size: 0.75rem;
+    line-height: 1.9;
+  }
+
+  .m51-home-digest h3 {
+    font-size: 1.25rem;
   }
 
   .m51-publication-index > li {
@@ -693,6 +723,21 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
   .m51-home-primary {
     padding-inline-start: calc(2rem + var(--m51-space-4));
+  }
+
+  .m51-home-illustration {
+    position: static;
+    margin-inline: -1rem;
+    width: calc(100% + 2rem);
+    overflow: hidden;
+  }
+
+  .m51-home-illustration img {
+    width: 170%;
+    max-width: none;
+    height: 4.75rem;
+    object-fit: cover;
+    object-position: center bottom;
   }
 
   .m51-date-nav {

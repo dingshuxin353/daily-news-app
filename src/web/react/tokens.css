@@ -15,9 +15,9 @@
   --m51-error: oklch(46% 0.18 28);
   --m51-focus: oklch(45% 0.15 42);
 
-  --m51-font-wordmark: "Newsreader Variable", "Noto Serif SC", serif;
-  --m51-font-editorial: "Noto Serif SC", serif;
-  --m51-font-ui: "Noto Sans SC", sans-serif;
+  --m51-font-wordmark: Georgia, "Songti SC", STSong, SimSun, serif;
+  --m51-font-editorial: Georgia, "Songti SC", STSong, SimSun, serif;
+  --m51-font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
 
   --m51-space-1: 0.25rem;
   --m51-space-2: 0.5rem;
@@ -30,7 +30,7 @@
   --m51-space-12: 3rem;
   --m51-space-16: 4rem;
   --m51-space-20: 5rem;
-  --m51-content: 78rem;
+  --m51-content: 84rem;
   --m51-reading: 46rem;
   --m51-control-height: 3.25rem;
   --m51-rule-width: 1px;

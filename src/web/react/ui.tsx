@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Theme } from "@astryxdesign/core/theme";
 import { neutralTheme } from "@astryxdesign/theme-neutral/built";
-import { IconArrowNarrowRight } from "@tabler/icons-react";
+import { IconArrowNarrowRight, IconCircleHalf2 } from "@tabler/icons-react";
 import type { ReadingShell } from "../../modules/private-reading/service.js";
 
 export type ReactPageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings";
@@ -12,14 +12,17 @@ export function appPath(basePath: string, pathname: string): string {
 }
 
 function Wordmark({ basePath, privatePage = false }: { basePath: string; privatePage?: boolean }) {
-  return <a className="m51-wordmark" href={appPath(basePath, privatePage ? "/home" : "/")}>DailyNews</a>;
+  return <a className="m51-wordmark" href={appPath(basePath, privatePage ? "/home" : "/")} aria-label="DailyNews">
+    <IconCircleHalf2 className="m51-wordmark-mark" size={privatePage ? 27 : 21} stroke={2.4} aria-hidden="true" />
+    <span>DailyNews</span>
+  </a>;
 }
 
-function PublicHeader({ basePath }: { basePath: string }) {
+function PublicHeader({ basePath, action }: { basePath: string; action?: { href: string; label: string } }) {
   return <header className="m51-public-header">
     <div className="m51-header-inner">
       <Wordmark basePath={basePath} />
-      <p>每天一份 · 私人编写</p>
+      {action ? <a className="m51-public-action" href={action.href}>{action.label}</a> : <p>每天一份 · 私人编写</p>}
     </div>
   </header>;
 }
@@ -63,6 +66,7 @@ export function PageDocument(input: {
   shell?: ReadingShell;
   current?: string;
   readingTheme?: boolean;
+  publicAction?: { href: string; label: string };
 }) {
   const privatePage = Boolean(input.shell);
   const colorScheme = input.readingTheme ? input.shell?.theme.colorScheme ?? "light" : "light";
@@ -85,11 +89,11 @@ export function PageDocument(input: {
       <Theme theme={neutralTheme} mode={colorScheme}>
         {input.shell
           ? <ProductHeader basePath={input.basePath} shell={input.shell} current={input.current ?? ""} />
-          : <PublicHeader basePath={input.basePath} />}
+          : <PublicHeader basePath={input.basePath} action={input.publicAction} />}
         {input.children}
-        <footer className="m51-footer">
+        {input.page !== "public" && input.page !== "login" ? <footer className="m51-footer">
           <p>DailyNews · 内容属于你，控制权也属于你。</p>
-        </footer>
+        </footer> : null}
       </Theme>
       <script type="module" src={appPath(input.basePath, "/assets/m5/m5-client.js")} />
     </body>

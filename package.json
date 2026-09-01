@@ -32,9 +32,6 @@
   "dependencies": {
     "@astryxdesign/core": "0.5.2",
     "@astryxdesign/theme-neutral": "0.5.2",
-    "@fontsource-variable/newsreader": "5.2.8",
-    "@fontsource/noto-sans-sc": "5.2.8",
-    "@fontsource/noto-serif-sc": "5.2.8",
     "@hono/node-server": "2.1.1",
     "@modelcontextprotocol/server": "2.0.0",
     "@stylexjs/stylex": "0.19.0",

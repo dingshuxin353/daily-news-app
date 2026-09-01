@@ -248,6 +248,9 @@ export function HomePage(
             </div>
           </section>
         </div>
+        <div className="m51-home-illustration" aria-hidden="true">
+          <img src={appPath(input.basePath, "/assets/private-newsroom.png")} alt="" width="1400" height="466" />
+        </div>
         {input.publications.length > 0
           ? (
             <section
