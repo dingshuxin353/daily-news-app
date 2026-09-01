@@ -390,10 +390,9 @@ test("Fake mail reader exists only when explicitly injected into a test app", as
   const login = await hidden.app.request("https://dailynews.test/login");
   assert.equal(login.status, 200);
   assert.match(login.headers.get("content-security-policy"), /default-src 'self'/);
-  const css = await hidden.app.request("https://dailynews.test/assets/cloud.css");
-  assert.equal(css.status, 200);
-  assert.match(css.headers.get("content-type"), /text\/css/);
-  assert.match(await css.text(), /macrostructure: Split Studio \+ Index-First settings \+ reading projection/);
+  for (const retiredAsset of ["cloud.css", "cloud-auth.js", "tokens.css", "private-pages.js"]) {
+    assert.equal((await hidden.app.request(`https://dailynews.test/assets/${retiredAsset}`)).status, 404);
+  }
   const m51Css = await hidden.app.request("https://dailynews.test/assets/m5/m5.css");
   assert.equal(m51Css.status, 200);
   assert.match(m51Css.headers.get("content-type"), /text\/css/);
