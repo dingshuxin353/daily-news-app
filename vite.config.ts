@@ -5,6 +5,9 @@ import { defineConfig } from "vite";
 export default defineConfig(({ mode }) => {
   const server = mode === "server";
   return {
+    // Runtime basePath is deployment-specific. Relative client URLs keep CSS
+    // fonts and lazy chunks under <basePath>/assets/m5/ without rebuilding.
+    base: "./",
     plugins: [react()],
     build: server
       ? {

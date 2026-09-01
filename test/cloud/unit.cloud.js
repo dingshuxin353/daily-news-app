@@ -610,12 +610,34 @@ test("M5.1 client assets are served only from the configured base path and fixed
   const css = await app.request("https://dailynews.test/cloud/assets/m5/m5.css");
   assert.equal(css.status, 200);
   assert.equal(css.headers.get("content-type"), "text/css; charset=utf-8");
-  assert.match(await css.text(), /--m51-paper:/);
+  const cssText = await css.text();
+  assert.match(cssText, /--m51-paper:/);
+  const referencedAssets = [...cssText.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((match) => match[1]);
+  assert.equal(referencedAssets.length, 6);
+  assert.ok(referencedAssets.every((value) => value.startsWith("./assets/") && value.endsWith(".woff2")));
   const client = await app.request("https://dailynews.test/cloud/assets/m5/m5-client.js");
   assert.equal(client.status, 200);
   assert.equal(client.headers.get("content-type"), "text/javascript; charset=utf-8");
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/%2e%2e%2fcloud.css")).status, 404);
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/not-allowed.txt")).status, 404);
+
+  const server = createAdaptorServer({ fetch: app.fetch, hostname: "127.0.0.1" });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const cssUrl = new URL(`/cloud/assets/m5/m5.css`, `http://127.0.0.1:${address.port}`);
+    const networkCss = await fetch(cssUrl);
+    assert.equal(networkCss.status, 200);
+    for (const assetPath of referencedAssets) {
+      const font = await fetch(new URL(assetPath, cssUrl));
+      assert.equal(font.status, 200, assetPath);
+      assert.equal(font.headers.get("content-type"), "font/woff2", assetPath);
+      assert.ok((await font.arrayBuffer()).byteLength > 0, assetPath);
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test("Agent setup exposes only the API-first Markdown contracts at the configured base path", async () => {
