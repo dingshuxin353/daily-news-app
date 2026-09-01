@@ -11,6 +11,8 @@ import {
   OnboardingPage,
   PublicPage,
 } from "./pages.js";
+import { DailyPage, HomePage, PublicationsPage, TodoPage } from "./reading-pages.js";
+import type { DailyReading, PublicationReadingSummary } from "../../modules/private-reading/service.js";
 
 function document(markup: ReactNode): string {
   return `<!doctype html>${renderToStaticMarkup(markup)}`;
@@ -43,3 +45,21 @@ export function renderCredentialSecretPage(input: { basePath: string; shell: Rea
 export function renderAgentConfirmPage(input: { basePath: string; shell: ReadingShell; title: string; description: string; action: string; csrfToken: string; submitLabel: string; hidden?: Record<string, string> }): string {
   return document(<AgentConfirmPage {...input} />);
 }
+
+export function renderHomePage(input: { basePath: string; shell: ReadingShell; daily: DailyReading | null; publications?: PublicationReadingSummary[]; todoProjection?: any }): string {
+  return document(<HomePage {...input} publications={input.publications ?? []} />);
+}
+
+export function renderPublicationsPage(input: { basePath: string; shell: ReadingShell; publications: PublicationReadingSummary[] }): string {
+  return document(<PublicationsPage {...input} />);
+}
+
+export function renderDailyPage(input: { basePath: string; shell: ReadingShell; daily: DailyReading | null; dates?: string[]; requestedDate?: string }): string {
+  return document(<DailyPage {...input} />);
+}
+
+export function renderTodoPage(input: { basePath: string; shell: ReadingShell; projection: any }): string {
+  return document(<TodoPage {...input} />);
+}
+
+export { parseTodoAnchorHash } from "./reading-interactions.js";

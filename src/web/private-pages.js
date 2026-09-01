@@ -1,50 +1,3 @@
-const body = document.body;
-
-const pageSelect = document.querySelector("[data-page-select]");
-if (pageSelect instanceof HTMLSelectElement) {
-  pageSelect.addEventListener("change", () => window.location.assign(pageSelect.value));
-}
-
-for (const image of document.querySelectorAll("[data-reading-image]")) {
-  if (!(image instanceof HTMLImageElement)) continue;
-  const showImageFallback = () => {
-    image.hidden = true;
-    const fallback = image.parentElement?.querySelector("[data-image-fallback]");
-    if (fallback instanceof HTMLElement) fallback.hidden = false;
-  };
-  image.addEventListener("error", showImageFallback, { once: true });
-  if (image.complete && image.naturalWidth === 0) showImageFallback();
-}
-
-const sourceDialog = document.querySelector("[data-source-dialog]");
-if (sourceDialog instanceof HTMLDialogElement && typeof sourceDialog.showModal === "function") {
-  const sourceArchive = document.querySelector(".source-archive");
-  const sourceDialogTitle = sourceDialog.querySelector("[data-source-dialog-title]");
-  const sourceDialogContent = sourceDialog.querySelector("[data-source-dialog-content]");
-  const sourceDialogClose = sourceDialog.querySelector("[data-source-close]");
-  let sourceTrigger = null;
-  if (sourceArchive instanceof HTMLElement) sourceArchive.hidden = true;
-  for (const trigger of document.querySelectorAll("[data-source-open]")) {
-    if (!(trigger instanceof HTMLButtonElement)) continue;
-    trigger.hidden = false;
-    trigger.addEventListener("click", () => {
-      const sourceSet = document.getElementById(trigger.dataset.sourceOpen || "");
-      const list = sourceSet?.querySelector("ol");
-      if (!sourceSet || !list || !sourceDialogContent || !sourceDialogTitle) return;
-      sourceTrigger = trigger;
-      sourceDialogTitle.textContent = sourceSet.dataset.sourceTitle || "全部来源";
-      sourceDialogContent.replaceChildren(list.cloneNode(true));
-      sourceDialog.showModal();
-      if (sourceDialogClose instanceof HTMLButtonElement) sourceDialogClose.focus();
-    });
-  }
-  sourceDialogClose?.addEventListener("click", () => sourceDialog.close());
-  sourceDialog.addEventListener("close", () => {
-    if (sourceTrigger instanceof HTMLElement) sourceTrigger.focus();
-    sourceTrigger = null;
-  });
-}
-
 for (const form of document.querySelectorAll("[data-settings-form]")) {
   if (!(form instanceof HTMLFormElement)) continue;
   const status = form.querySelector("[data-form-status]");
@@ -75,19 +28,6 @@ for (const form of document.querySelectorAll("[data-settings-form]")) {
       event.preventDefault();
       form.reportValidity();
       if (status) status.textContent = "请先修正标出的内容。";
-      return;
     }
   });
-}
-
-if (window.location.hash) {
-  const target = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
-  const status = document.querySelector("[data-anchor-status]");
-  if (target instanceof HTMLElement) {
-    target.focus({ preventScroll: true });
-    target.scrollIntoView({ block: "center" });
-  } else if (body.dataset.page === "todo" && status instanceof HTMLElement) {
-    status.hidden = false;
-    status.focus();
-  }
 }
