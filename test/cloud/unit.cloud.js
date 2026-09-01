@@ -23,8 +23,7 @@ import {
 } from "../../.cloud-dist/src/modules/identity/security.js";
 import {
   renderAccountSettingsPage,
-} from "../../.cloud-dist/src/web/private-pages.js";
-import {
+  renderAdvancedAccessPage,
   parseTodoAnchorHash,
   renderAgentSettingsPage,
   renderCredentialSecretPage,
@@ -36,6 +35,8 @@ import {
   renderPublicationsPage,
   renderPublicPage,
   renderTodoPage,
+  renderSitesPage,
+  renderThemeCatalogPage,
 } from "../../.cloud-dist/src/web/react/render.js";
 import {
   CanonicalJsonError,
@@ -277,8 +278,7 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(islands, /dialogRef\.current\?\.showModal\(\)/);
   assert.match(islands, /triggerRef\.current\?\.focus\(\)/);
   assert.match(islands, /image\.complete && image\.naturalWidth === 0/);
-  const legacyScript = await readFile(new URL("../../src/web/private-pages.js", import.meta.url), "utf8");
-  assert.doesNotMatch(legacyScript, /data-page-select|data-reading-image|data-source-dialog|data-anchor-status/);
+  await assert.rejects(() => readFile(new URL("../../src/web/private-pages.js", import.meta.url), "utf8"), { code: "ENOENT" });
   const css = await readFile(new URL("../../src/web/react/reading.css", import.meta.url), "utf8");
   assert.match(css, /Ecosystem Index \+ Editorial Reading Flow/);
   assert.match(css, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
@@ -487,10 +487,7 @@ test("M5.1 first-use React journey stays API-first and keeps one-time secrets is
   assert.match(secret, /id="agent-token-secret">dn_pat_test-only-placeholder/);
   assert.match(secret, /data-return-path="\/cloud\/settings\/agent"/);
 
-  const legacySource = await readFile(new URL("../../src/web/private-pages.ts", import.meta.url), "utf8");
-  for (const renderer of ["renderPublicPage", "renderLoginPage", "renderOnboardingPage", "renderNicknameOnboardingPage", "renderAgentSettingsPage", "renderCredentialSecretPage", "renderHomePage", "renderPublicationsPage", "renderDailyPage", "renderTodoPage"]) {
-    assert.doesNotMatch(legacySource, new RegExp(`export function ${renderer}`));
-  }
+  await assert.rejects(() => readFile(new URL("../../src/web/private-pages.ts", import.meta.url), "utf8"), { code: "ENOENT" });
 });
 
 test("M5.1 public page and sample Home use the editorial React shell", () => {
@@ -518,7 +515,7 @@ test("M5.1 public page and sample Home use the editorial React shell", () => {
   assert.match(homeHtml, /data-theme-id="newspaper-default"/);
 });
 
-test("M4 settings shell exposes exactly five sections and keeps nickname independent from site names", () => {
+test("M5.1-C React settings shell exposes exactly five sections and keeps nickname independent from site names", () => {
   const shell = {
     spaceName: "Home 名称",
     timeZone: "Asia/Shanghai",
@@ -536,16 +533,66 @@ test("M4 settings shell exposes exactly five sections and keeps nickname indepen
   for (const label of ["日报站点", "主题库", "Agent 授权", "账户与安全", "高级接入"]) {
     assert.match(account, new RegExp(`>${label}<`));
   }
-  assert.equal((account.match(/class="settings-index"/g) ?? []).length, 1);
+  assert.equal((account.match(/class="m51-settings-index"/g) ?? []).length, 1);
   assert.match(account, /aria-label="账户：丁丁"/);
   assert.match(account, /reader@example\.test/);
   assert.match(account, /邮箱验证码/);
   assert.doesNotMatch(account, /settings\/todo|manual-tokens|Home 名称|日报名称.*昵称/);
+  assert.match(account, /data-react-island="logout"/);
+  assert.match(account, /\/cloud\/assets\/m5\/m5-client\.js/);
+  assert.doesNotMatch(account, /assets\/cloud\.css|assets\/private-pages\.js/);
 
   const onboarding = renderNicknameOnboardingPage({ basePath: "/cloud", shell: { ...shell, nickname: null }, csrfToken: "csrf-placeholder", nickname: " 保留输入 " , error: "昵称需要是 1–24 个可见字符。" });
   assert.match(onboarding, /value=" 保留输入 "/);
   assert.match(onboarding, /昵称需要是 1–24 个可见字符/);
   assert.doesNotMatch(onboarding, /配对码|PAT|MCP/);
+});
+
+test("M5.1-C site and theme renderers preserve real forms while replacing placeholder theme blocks with fixed-content previews", () => {
+  const shell = {
+    spaceName: "丁丁的编辑部",
+    timeZone: "Asia/Shanghai",
+    publication: { publicationId: "daily-news", displayName: "AI 日报", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
+    theme: { id: "newspaper-default", revision: 1, colorScheme: "light" },
+    todoEnabled: false,
+    todoHasFormalData: false,
+    nickname: "丁丁",
+  };
+  const themes = [
+    { themeId: "newspaper-default", name: "经典报纸", source: "official", revision: 1, preview: { background: "#f5f1e9", text: "#12100d", muted: "#69635a", accent: "#e85a18", rule: "#c9c1b5" } },
+    { themeId: "editorial-night", name: "夜间 <编辑部>", source: "custom", revision: 2, preview: { background: "#171717", text: "#f5f1e9", muted: "#aaaaaa", accent: "#ef6b35", rule: "#555555" } },
+  ];
+  const snapshot = {
+    home: { name: "我的日报", themeId: "newspaper-default" },
+    publications: [
+      { publicationId: "daily-news", name: "AI 日报", status: "active", sortOrder: 0, isPrimary: true, theme: { mode: "inherit" } },
+      { publicationId: "archive-news", name: "归档日报", status: "inactive", sortOrder: null, isPrimary: false, theme: { mode: "override", themeId: "editorial-night" } },
+    ],
+    todo: { enabled: false, hasFormalData: true },
+  };
+  const sites = renderSitesPage({ basePath: "/cloud", shell, snapshot, themes, csrfToken: "csrf-placeholder", publicationLimit: 8 });
+  assert.match(sites, /data-page="settings"/);
+  assert.match(sites, /m51-site-card/);
+  assert.match(sites, /上移 AI 日报/);
+  assert.match(sites, /<svg/);
+  assert.match(sites, /Personal Todo/);
+  assert.match(sites, /已保留正式 Todo 数据，本页不读取任务正文/);
+  assert.match(sites, /把重要信息排在前面/);
+  assert.match(sites, /三条与你有关的更新/);
+  assert.doesNotMatch(sites, /<i><\/i><b><\/b><em><\/em><small><\/small>/);
+  assert.doesNotMatch(sites, /assets\/cloud\.css|assets\/private-pages\.js/);
+
+  const catalog = renderThemeCatalogPage({ basePath: "/cloud", shell, themes });
+  assert.match(catalog, /经典报纸/);
+  assert.match(catalog, /夜间 &lt;编辑部&gt;/);
+  assert.doesNotMatch(catalog, /夜间 <编辑部>/);
+  assert.equal((catalog.match(/把重要信息排在前面/g) ?? []).length, 2);
+  assert.match(catalog, /--m51-preview-background:#171717/);
+
+  const advanced = renderAdvancedAccessPage({ basePath: "/cloud", shell, apiBaseUrl: "https://dailynews.test/cloud/api/v1", mcpUrl: "https://dailynews.test/cloud/mcp" });
+  assert.match(advanced, /https:\/\/dailynews\.test\/cloud\/api\/v1/);
+  assert.match(advanced, /https:\/\/dailynews\.test\/cloud\/mcp/);
+  assert.doesNotMatch(advanced, /assets\/cloud\.css|assets\/private-pages\.js/);
 });
 
 test("PG_SSL_MODE is the authoritative pg Pool TLS setting", async () => {
@@ -649,6 +696,7 @@ test("M5.1 client assets are served only from the configured base path and fixed
   const client = await app.request("https://dailynews.test/cloud/assets/m5/m5-client.js");
   assert.equal(client.status, 200);
   assert.equal(client.headers.get("content-type"), "text/javascript; charset=utf-8");
+  assert.equal((await app.request("https://dailynews.test/cloud/assets/private-pages.js")).status, 404);
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/%2e%2e%2fcloud.css")).status, 404);
   assert.equal((await app.request("https://dailynews.test/cloud/assets/m5/not-allowed.txt")).status, 404);
 

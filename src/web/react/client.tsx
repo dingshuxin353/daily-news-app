@@ -6,7 +6,7 @@ import "./styles.css";
 import "./reading.css";
 
 import { hydrateRoot } from "react-dom/client";
-import { CopyInstructionIsland, CopySecretIsland, LoginIsland } from "./islands.js";
+import { CopyInstructionIsland, CopySecretIsland, LoginIsland, LogoutIsland } from "./islands.js";
 import { ImageFallbackIsland, SourceDialogIsland, TodoAnchorIsland, type ReadingSource } from "./reading-islands.js";
 
 for (const root of document.querySelectorAll<HTMLElement>("[data-react-island]")) {
@@ -25,5 +25,7 @@ for (const root of document.querySelectorAll<HTMLElement>("[data-react-island]")
     hydrateRoot(root, <ImageFallbackIsland imageId={root.dataset.imageId ?? ""} />);
   } else if (island === "todo-anchor") {
     hydrateRoot(root, <TodoAnchorIsland />);
+  } else if (island === "logout") {
+    hydrateRoot(root, <LogoutIsland basePath={root.dataset.basePath ?? ""} />);
   }
 }

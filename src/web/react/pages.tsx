@@ -3,7 +3,7 @@ import { IconArrowNarrowRight, IconExternalLink, IconKey, IconShieldLock } from 
 import type { CredentialRecord } from "../../modules/agent-access/credential-service.js";
 import type { ReadingShell } from "../../modules/private-reading/service.js";
 import { CopyInstructionIsland, CopySecretIsland, LoginIsland } from "./islands.js";
-import { appPath, FieldShell, PageDocument, PrimaryLink } from "./ui.js";
+import { appPath, FieldShell, PageDocument, PrimaryLink, SettingsLayout } from "./ui.js";
 
 export function PublicPage({ basePath, signedIn }: { basePath: string; signedIn: boolean }) {
   return <PageDocument basePath={basePath} title="你的私人日报" page="public">
@@ -140,28 +140,7 @@ export function AgentSettingsPage(input: {
   activeLimit: number;
 }) {
   const active = input.credentials.filter((item) => item.status === "active");
-  return <PageDocument basePath={input.basePath} title="Agent 授权" page="agent-settings" shell={input.shell} current="settings">
-    <main className="m51-settings" id="content">
-      <aside className="m51-settings-index" aria-label="设置分类">
-        <p>Settings</p>
-        <nav>
-          {[
-            ["01", "日报站点", "/settings/sites"],
-            ["02", "主题库", "/settings/themes"],
-            ["03", "Agent 授权", "/settings/agent"],
-            ["04", "账户与安全", "/settings/account"],
-            ["05", "高级接入", "/settings/advanced"],
-          ].map(([number, label, pathname]) => <a key={pathname} href={appPath(input.basePath, pathname)} aria-current={pathname === "/settings/agent" ? "page" : undefined}>
-            <span>{number}</span><strong>{label}</strong>
-          </a>)}
-        </nav>
-      </aside>
-      <div className="m51-settings-workspace">
-        <header className="m51-page-heading m51-page-heading--settings">
-          <p className="m51-kicker">Agent access</p>
-          <h1>Agent 授权</h1>
-          <p>这里只显示服务端能够确认的授权与最近请求，不判断 Agent 是否在线。</p>
-        </header>
+  return <SettingsLayout basePath={input.basePath} shell={input.shell} current="agent" title="Agent 授权" kicker="Agent access" summary="这里只显示服务端能够确认的授权与最近请求，不判断 Agent 是否在线。">
         <section className="m51-settings-section">
           <div className="m51-section-heading">
             <div><h2>创建 Agent Token</h2><p>完整值只在创建成功后显示一次。</p></div>
@@ -197,9 +176,7 @@ export function AgentSettingsPage(input: {
           <div><h2>高级接入</h2><p>MCP、JSON API 与 OpenAPI 的协议地址继续放在单独页面。</p></div>
           <a className="m51-text-link" href={appPath(input.basePath, "/settings/advanced")}>查看高级接入 <IconExternalLink size={16} aria-hidden="true" /></a>
         </section>
-      </div>
-    </main>
-  </PageDocument>;
+  </SettingsLayout>;
 }
 
 export function CredentialSecretPage(input: { basePath: string; shell: ReadingShell; token: string | null; title: string; returnPath?: string }) {

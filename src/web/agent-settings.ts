@@ -9,8 +9,6 @@ import { AgentAccessError, type AgentCredentialService, type CredentialRecord } 
 import { assertBrowserMutation, createSettingsCsrfToken, readSettingsBody } from "./settings-security.js";
 import {
   renderAdvancedAccessPage,
-} from "./private-pages.js";
-import {
   renderAgentConfirmPage,
   renderAgentSettingsPage,
   renderCredentialSecretPage,
