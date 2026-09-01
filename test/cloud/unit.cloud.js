@@ -22,18 +22,19 @@ import {
   resolveTrustedClientIp,
 } from "../../.cloud-dist/src/modules/identity/security.js";
 import {
-  renderHomePage,
-  renderDailyPage,
   renderAccountSettingsPage,
-  renderPublicationsPage,
 } from "../../.cloud-dist/src/web/private-pages.js";
 import {
   renderAgentSettingsPage,
   renderCredentialSecretPage,
+  renderDailyPage,
+  renderHomePage,
   renderLoginPage,
   renderNicknameOnboardingPage,
   renderOnboardingPage,
+  renderPublicationsPage,
   renderPublicPage,
+  renderTodoPage,
 } from "../../.cloud-dist/src/web/react/render.js";
 import {
   CanonicalJsonError,
@@ -158,7 +159,7 @@ test("cloud config loads explicit runtime values and loopback defaults", async (
   assert.equal(config.product.agentAccess.mcpRequestBodyLimitBytes, 262144);
 });
 
-test("M4 reading renderers expose the fixed navigation, compact publication index, formal dates, sources, images, and inactive state", async () => {
+test("M5.1-B React reading renderers expose the fixed navigation, publication index, formal dates, sources, images, and inactive state", async () => {
   const shell = {
     spaceName: "丁丁的编辑部",
     timeZone: "Asia/Shanghai",
@@ -189,6 +190,10 @@ test("M4 reading renderers expose the fixed navigation, compact publication inde
   assert.match(home, /第二份日报的正式主标题/);
   assert.match(home, /正式待办/);
   assert.doesNotMatch(home, /日报名称.*AI 日报.*产品观察/s);
+  assert.match(home, /data-page="home"/);
+  assert.match(home, /\/cloud\/assets\/m5\/m5-client\.js/);
+  assert.match(home, /\/cloud\/assets\/themes\/newspaper-default\/1\.css/);
+  assert.doesNotMatch(home, /assets\/cloud\.css|assets\/private-pages\.js/);
 
   const directory = renderPublicationsPage({
     basePath: "/cloud",
@@ -225,17 +230,17 @@ test("M4 reading renderers expose the fixed navigation, compact publication inde
   const dailyHtml = renderDailyPage({ basePath: "/cloud", shell: { ...shell, publication: { ...shell.publication, status: "inactive", sortOrder: null, isDefault: false } }, daily });
   assert.match(dailyHtml, /已停用 · 只读归档/);
   assert.match(dailyHtml, /2026-08-28/);
-  assert.match(dailyHtml, /data-reading-image/);
-  assert.match(dailyHtml, /daily-module--span-4/);
+  assert.match(dailyHtml, /data-react-island="image-fallback"/);
+  assert.match(dailyHtml, /m51-story--span-4/);
   assert.doesNotMatch(dailyHtml, /style="--(?:module-span|row-capacity)/);
   const darkDailyHtml = renderDailyPage({ basePath: "/cloud", shell: { ...shell, theme: { id: "midnight-tech", revision: 1, colorScheme: "dark" } }, daily });
-  assert.match(darkDailyHtml, /<html lang="zh-CN" data-color-scheme="dark">/);
-  assert.match(darkDailyHtml, /<meta name="color-scheme" content="dark">/);
-  assert.match(dailyHtml, /referrerpolicy="no-referrer"/);
-  assert.match(dailyHtml, /data-source-open="sources-multi-source-story"/);
-  assert.match(dailyHtml, /data-source-dialog/);
-  assert.match(dailyHtml, /<noscript>.*主要来源/s);
-  assert.match(dailyHtml, /class="source-archive"/);
+  assert.match(darkDailyHtml, /<html lang="zh-CN" data-theme="dark" data-color-scheme="dark">/);
+  assert.match(darkDailyHtml, /<meta name="color-scheme" content="dark"\s*\/>/);
+  assert.match(dailyHtml, /referrerPolicy="no-referrer"/);
+  assert.match(dailyHtml, /data-react-island="sources"/);
+  assert.match(dailyHtml, /<dialog class="m51-source-dialog"/);
+  assert.match(dailyHtml, /href="#sources-multi-source-story"/);
+  assert.match(dailyHtml, /class="m51-source-archive"/);
   assert.match(dailyHtml, /补充来源/);
 
   const missing = renderDailyPage({ basePath: "/cloud", shell, daily: null, dates: [issue.date], requestedDate: "2026-08-27" });
@@ -243,15 +248,31 @@ test("M4 reading renderers expose the fixed navigation, compact publication inde
   assert.match(missing, /没有替你回退/);
   assert.match(missing, /阅读最近一期 · 2026-08-29/);
 
-  const script = await readFile(new URL("../../src/web/private-pages.js", import.meta.url), "utf8");
-  assert.match(script, /sourceDialog\.showModal\(\)/);
-  assert.match(script, /sourceTrigger\.focus\(\)/);
-  assert.match(script, /data-image-fallback/);
-  assert.match(script, /image\.complete && image\.naturalWidth === 0/);
-  const css = await readFile(new URL("../../src/web/cloud.css", import.meta.url), "utf8");
-  assert.match(css, /html,\s*body\s*{\s*min-width: 0;\s*overflow-x: clip;/);
-  assert.doesNotMatch(css, /min-width:\s*20rem/);
-  assert.match(css, /\[hidden\]\s*{\s*display: none !important;/);
+  const todoHtml = renderTodoPage({
+    basePath: "/cloud",
+    shell,
+    projection: {
+      asOfDate: "2026-08-29",
+      groups: {
+        overdue: [{ id: "todo-a1b2c3d4", title: "需要处理的正式待办", note: "仅展示正式 State", dueDate: "2026-08-28", dueTime: null }],
+        today: [], upcoming: [], undated: [], completedToday: [],
+      },
+    },
+  });
+  assert.match(todoHtml, /data-page="todo"/);
+  assert.match(todoHtml, /data-react-island="todo-anchor"/);
+  assert.match(todoHtml, /需要处理的正式待办/);
+  assert.doesNotMatch(todoHtml, /<form|checkbox|拖动/);
+
+  const islands = await readFile(new URL("../../src/web/react/reading-islands.tsx", import.meta.url), "utf8");
+  assert.match(islands, /dialogRef\.current\?\.showModal\(\)/);
+  assert.match(islands, /triggerRef\.current\?\.focus\(\)/);
+  assert.match(islands, /image\.complete && image\.naturalWidth === 0/);
+  const legacyScript = await readFile(new URL("../../src/web/private-pages.js", import.meta.url), "utf8");
+  assert.doesNotMatch(legacyScript, /data-page-select|data-reading-image|data-source-dialog|data-anchor-status/);
+  const css = await readFile(new URL("../../src/web/react/reading.css", import.meta.url), "utf8");
+  assert.match(css, /Ecosystem Index \+ Editorial Reading Flow/);
+  assert.match(css, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
 });
 
 test("cloud config fails closed for missing or unsafe environment", async () => {
@@ -445,6 +466,7 @@ test("M5.1 first-use React journey stays API-first and keeps one-time secrets is
   assert.match(settings, /data-page="agent-settings"/);
   assert.match(settings, /<nav[^>]*>[\s\S]*日报站点[\s\S]*主题库[\s\S]*Agent 授权[\s\S]*账户与安全[\s\S]*高级接入/);
   assert.doesNotMatch(settings, /assets\/cloud\.css|assets\/private-pages\.js/);
+  assert.doesNotMatch(settings, /assets\/themes\//);
 
   const secret = renderCredentialSecretPage({
     basePath: "/cloud",
@@ -457,12 +479,12 @@ test("M5.1 first-use React journey stays API-first and keeps one-time secrets is
   assert.match(secret, /data-return-path="\/cloud\/settings\/agent"/);
 
   const legacySource = await readFile(new URL("../../src/web/private-pages.ts", import.meta.url), "utf8");
-  for (const renderer of ["renderPublicPage", "renderLoginPage", "renderOnboardingPage", "renderNicknameOnboardingPage", "renderAgentSettingsPage", "renderCredentialSecretPage"]) {
+  for (const renderer of ["renderPublicPage", "renderLoginPage", "renderOnboardingPage", "renderNicknameOnboardingPage", "renderAgentSettingsPage", "renderCredentialSecretPage", "renderHomePage", "renderPublicationsPage", "renderDailyPage", "renderTodoPage"]) {
     assert.doesNotMatch(legacySource, new RegExp(`export function ${renderer}`));
   }
 });
 
-test("M5.1 public page uses the editorial React shell while sample Home remains unchanged", () => {
+test("M5.1 public page and sample Home use the editorial React shell", () => {
   const publicHtml = renderPublicPage({ basePath: "/cloud", signedIn: false });
   assert.match(publicHtml, /每天一份，.*只为你而编。/s);
   assert.match(publicHtml, /把每天关心的事交给你的私人编辑部/);

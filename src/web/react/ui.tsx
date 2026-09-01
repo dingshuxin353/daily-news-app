@@ -5,7 +5,7 @@ import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 import { IconArrowNarrowRight } from "@tabler/icons-react";
 import type { ReadingShell } from "../../modules/private-reading/service.js";
 
-export type ReactPageName = "public" | "login" | "onboarding" | "agent-settings";
+export type ReactPageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "agent-settings";
 
 export function appPath(basePath: string, pathname: string): string {
   return `${basePath}${pathname}`;
@@ -62,21 +62,27 @@ export function PageDocument(input: {
   children: ReactNode;
   shell?: ReadingShell;
   current?: string;
+  readingTheme?: boolean;
 }) {
   const privatePage = Boolean(input.shell);
-  return <html lang="zh-CN" data-theme="light">
+  const colorScheme = input.readingTheme ? input.shell?.theme.colorScheme ?? "light" : "light";
+  return <html lang="zh-CN" data-theme={colorScheme} data-color-scheme={colorScheme}>
     <head>
       <meta charSet="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-      <meta name="color-scheme" content="light" />
+      <meta name="color-scheme" content={colorScheme} />
       <meta name="robots" content="noindex, nofollow" />
       <link rel="icon" href="data:," />
       <title>{`${input.title} · DailyNews`}</title>
       <link rel="stylesheet" href={appPath(input.basePath, "/assets/m5/m5.css")} />
+      {input.readingTheme && input.shell ? <link
+        rel="stylesheet"
+        href={appPath(input.basePath, `/assets/themes/${encodeURIComponent(input.shell.theme.id)}/${input.shell.theme.revision}.css`)}
+      /> : null}
     </head>
     <body data-page={input.page} data-base-path={input.basePath}>
       <a className="m51-skip-link" href="#content">跳到正文</a>
-      <Theme theme={neutralTheme} mode="light">
+      <Theme theme={neutralTheme} mode={colorScheme}>
         {input.shell
           ? <ProductHeader basePath={input.basePath} shell={input.shell} current={input.current ?? ""} />
           : <PublicHeader basePath={input.basePath} />}

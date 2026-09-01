@@ -217,6 +217,9 @@ test("Fake mode completes OTP sign-in, bootstraps one Space, persists the sessio
   assert.match(html, /示例日报/);
   assert.match(html, /设置自动日报/);
   assert.match(html, /data-theme-id="newspaper-default"/);
+  assert.match(html, /\/assets\/m5\/m5-client\.js/);
+  assert.match(html, /\/assets\/themes\/newspaper-default\/1\.css/);
+  assert.doesNotMatch(html, /assets\/cloud\.css|assets\/private-pages\.js/);
   assert.doesNotMatch(html, /下次更新时间|负责 Agent|调度健康|迟到/);
   assert.equal(privatePage.headers.get("x-robots-tag"), "noindex, nofollow");
   assert.equal(privatePage.headers.get("cache-control"), "private, no-store");

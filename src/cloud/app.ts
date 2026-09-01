@@ -18,14 +18,12 @@ import { renderSpacePage } from "../web/cloud-pages.js";
 import {
   renderDailyPage,
   renderHomePage,
-  renderPublicationsPage,
-  renderTodoPage,
-} from "../web/private-pages.js";
-import {
   renderLoginPage,
   renderNicknameOnboardingPage,
   renderOnboardingPage,
+  renderPublicationsPage,
   renderPublicPage,
+  renderTodoPage,
 } from "../web/react/render.js";
 import { registerAgentSettingsRoutes } from "../web/agent-settings.js";
 import { renderAgentSetupMarkdown } from "../web/agent-setup.js";
