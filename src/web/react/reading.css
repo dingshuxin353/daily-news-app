@@ -11,6 +11,12 @@
   --m51-reading-muted: var(--color-muted, var(--m51-muted));
   --m51-reading-rule: var(--color-rule, var(--m51-rule));
   --m51-reading-accent: var(--color-accent-text, var(--m51-orange-dark));
+  --color-text-primary: var(--m51-reading-ink);
+  --color-text-secondary: var(--m51-reading-muted);
+  --color-background-body: var(--m51-reading-bg);
+  --color-background-surface: var(--m51-reading-bg);
+  --color-border: var(--m51-reading-rule);
+  --color-accent: var(--m51-reading-accent);
   --m51-font-editorial: var(--font-headline);
   --m51-font-ui: var(--font-ui);
   --m51-focus: var(--color-focus);
@@ -23,7 +29,13 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   background: var(--color-background, var(--m51-paper));
 }
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) :is(.m51-product-header, .m51-footer) {
+body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-product-header {
+  border-block-end-color: var(--color-rule, var(--m51-rule));
+  background: color-mix(in srgb, var(--m51-paper) 90%, var(--color-background, var(--m51-paper)) 10%);
+  color: var(--m51-ink);
+}
+
+body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-footer {
   background: var(--m51-paper);
   color: var(--m51-ink);
 }
