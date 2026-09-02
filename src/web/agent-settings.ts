@@ -178,7 +178,7 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     const access = await browserAccess(context);
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
-    if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可轮换的 Agent Token。");
+    if (!credential) throw new AgentAccessError(404, "target_not_found", "找不到可轮换的 Agent Token。");
     const operationId = randomUUID();
     if (wantsHtml(context) && dependencies.privateReading) {
       return context.html(renderAgentConfirmPage({
@@ -219,13 +219,13 @@ export function registerAgentSettingsRoutes(app: Hono, dependencies: AgentSettin
     const access = await browserAccess(context);
     const credential = (await dependencies.agentAccess.listCredentials(access.tenant))
       .find(({ id, status }) => id === context.req.param("id") && status === "active");
-    if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可撤销的 Agent Token。");
+    if (!credential) throw new AgentAccessError(404, "target_not_found", "找不到可撤销的 Agent Token。");
     if (wantsHtml(context) && dependencies.privateReading) {
       return context.html(renderAgentConfirmPage({
         basePath: dependencies.basePath,
         shell: await dependencies.privateReading.readShell(access.tenant),
         title: `撤销 ${credential.name}？`,
-        description: "这个 Token 会立即失效；它已经提交的正式内容不会删除。",
+        description: "这个 Token 会立即失效；它已经提交的日报不会删除。",
         action: route(`/settings/agent/tokens/${credential.id}/revoke`),
         csrfToken: access.csrfToken,
         submitLabel: "撤销 Token",

@@ -56,7 +56,7 @@ export function LoginIsland({ basePath, returnTo }: { basePath: string; returnTo
       setStep("otp");
     } catch {
       setState("error");
-      setMessage("网络请求没有完成。请检查连接后重试。");
+      setMessage("暂时无法连接。请检查网络后重试。");
     }
   }
 
@@ -70,7 +70,7 @@ export function LoginIsland({ basePath, returnTo }: { basePath: string; returnTo
       return;
     }
     setState("loading");
-    setMessage("正在验证验证码…");
+    setMessage("正在验证…");
     try {
       const response = await postJson(basePath, "/api/auth/sign-in/email-otp", { email, otp });
       if (!response.ok) {
@@ -88,17 +88,17 @@ export function LoginIsland({ basePath, returnTo }: { basePath: string; returnTo
       window.location.assign(`${destination.pathname}${destination.search}`);
     } catch {
       setState("error");
-      setMessage("网络请求没有完成。请检查连接后重试。");
+      setMessage("暂时无法连接。请检查网络后重试。");
     }
   }
 
   const error = state === "error" ? message : undefined;
   return <Theme theme={neutralTheme} mode="light">
     <div className="m51-login-form-island" data-state={state}>
-      <p className="m51-kicker">Sign in or create account</p>
+      <p className="m51-kicker">进入私人编辑部</p>
       <h2>{step === "email" ? "邮箱登录" : "输入验证码"}</h2>
       <p className="m51-form-lede">{step === "email"
-        ? "如果这个邮箱还没有账户，验证后会自动建立自己的私有空间。"
+        ? "首次验证邮箱后，会自动创建你的私有空间。"
         : `验证码已发送到 ${email}`}</p>
       {step === "email" ? <form onSubmit={sendOtp} noValidate>
         <FieldShell id="email" label="邮箱地址" helper={message} error={error}>
@@ -192,7 +192,7 @@ export function CopyInstructionIsland({ text }: { text: string }) {
       <pre ref={sourceRef}>{text}</pre>
       <Button
         className="m51-button"
-        label={copyState === "copied" ? "设置话术已复制" : copyState === "manual" ? "已选中，请手动复制" : "复制给 Agent"}
+        label={copyState === "copied" ? "接入说明已复制" : copyState === "manual" ? "接入说明已选中，请手动复制" : "复制给 Agent"}
         variant="secondary"
         size="lg"
         icon={copyState === "copied" ? <IconCheck size={17} aria-hidden="true" /> : <IconCopy size={17} aria-hidden="true" />}
@@ -200,7 +200,7 @@ export function CopyInstructionIsland({ text }: { text: string }) {
       />
       <p className="m51-copy-status" aria-live="polite">{copyState === "copied"
         ? "现在回到 Agent 对话并发送。"
-        : copyState === "manual" ? "浏览器未允许自动复制，设置话术已选中。" : ""}</p>
+        : copyState === "manual" ? "浏览器未允许自动复制，接入说明已选中。" : ""}</p>
     </div>
   </Theme>;
 }
@@ -220,7 +220,7 @@ export function CopySecretIsland({ sourceId, returnPath }: { sourceId: string; r
     <div className="m51-secret-copy">
       <Button
         className="m51-button"
-        label={copyState === "copied" ? "Token 已复制" : copyState === "manual" ? "已选中，请手动复制" : "复制 Token"}
+        label={copyState === "copied" ? "Token 已复制" : copyState === "manual" ? "Token 已选中，请手动复制" : "复制 Token"}
         variant="primary"
         size="lg"
         icon={copyState === "copied" ? <IconCheck size={17} aria-hidden="true" /> : <IconCopy size={17} aria-hidden="true" />}
@@ -254,7 +254,7 @@ export function LogoutIsland({ basePath }: { basePath: string }) {
       window.location.assign(`${basePath}/login`);
     } catch {
       setState("error");
-      setMessage("网络请求没有完成。请检查连接后重试。");
+      setMessage("暂时无法连接。请检查网络后重试。");
     }
   }
   return <Theme theme={neutralTheme} mode="light">

@@ -4,9 +4,9 @@
 - 所有请求：`Authorization: Bearer <用户提供的 DailyNews Agent Token>`
 - JSON 写入：`Content-Type: application/json` 与 `Idempotency-Key: <8–80 位稳定 key>`
 
-本文只描述自定义 Theme 的读取与写入。每次操作都先读取当前 Theme Context，并以响应中的 `themeSchema`、约束、current revision 与使用关系为准；不要复制或猜测完整 Theme 定义。
+本文说明自定义 Theme 的读取与写入。每次操作都先读取当前 Theme Context，并以响应中的 `themeSchema`、约束、current revision 与使用关系为准；不要复制或猜测完整 Theme 定义。
 
-## 当前路径
+## 操作顺序
 
 1. `GET {{API_BASE_URL}}/themes/context`
 2. `GET {{API_BASE_URL}}/themes/{themeId}`

@@ -476,8 +476,8 @@ export class AgentOperationsService {
       });
       const [issue, compiled] = await Promise.all([storage.readIssue(date), storage.readCompiled(date)]);
       if (!issue || !compiled) {
-        if (!issue && !compiled) throw new AgentRequestError(404, "target_not_found", "没有找到这期正式日报。");
-        throw new AgentRequestError(503, "service_unavailable", "正式日报暂时不可完整读取。");
+        if (!issue && !compiled) throw new AgentRequestError(404, "target_not_found", "找不到这期日报。");
+        throw new AgentRequestError(503, "service_unavailable", "这期日报暂时无法完整读取。");
       }
       return {
         publicationId: target.record.publicationId,

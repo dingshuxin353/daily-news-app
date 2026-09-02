@@ -93,12 +93,12 @@ export function SourceDialogIsland(
       >
         <header>
           <div>
-            <p className="m51-kicker">来源清单</p>
+            <p className="m51-kicker">全部来源</p>
             <h2 id={`${input.archiveId}-dialog-title`}>{input.title}</h2>
           </div>
           <button
             type="button"
-            aria-label="关闭来源清单"
+            aria-label="关闭来源面板"
             onClick={() => dialogRef.current?.close()}
           >
             <IconX size={20} aria-hidden="true" />

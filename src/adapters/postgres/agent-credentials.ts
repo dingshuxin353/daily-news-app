@@ -48,7 +48,7 @@ function mapCredential(row: CredentialRow): CredentialRecord {
 
 async function lockSpace(client: PoolClient, spaceId: string): Promise<void> {
   const result = await client.query("SELECT id FROM app.spaces WHERE id = $1 FOR UPDATE", [spaceId]);
-  if (result.rowCount !== 1) throw new AgentAccessError(404, "target_not_found", "没有找到目标空间。");
+  if (result.rowCount !== 1) throw new AgentAccessError(404, "target_not_found", "找不到目标空间。");
 }
 
 async function enforceAvailableSlot(client: PoolClient, spaceId: string, limit: number): Promise<void> {
@@ -150,7 +150,7 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
       );
       const target = targetResult.rows[0];
       if (!target || target.status !== "active") {
-        throw new AgentAccessError(404, "target_not_found", "没有找到可轮换的 Agent Token。");
+        throw new AgentAccessError(404, "target_not_found", "找不到可轮换的 Agent Token。");
       }
       const credential = await this.insertActiveCredential(client, input, target.id);
       await client.query(
@@ -217,7 +217,7 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
         [input.targetCredentialId, input.tenant.spaceId],
       );
       const credential = result.rows[0];
-      if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可撤销的 Agent Token。");
+      if (!credential) throw new AgentAccessError(404, "target_not_found", "找不到可撤销的 Agent Token。");
       await insertAudit(client, this.retention.auditDays, {
         spaceId: input.tenant.spaceId,
         actorDigest: input.actorDigest,
@@ -241,7 +241,7 @@ export class PostgresAgentAccessRepository implements AgentAccessRepository {
         [input.targetCredentialId, input.tenant.spaceId, input.name],
       );
       const credential = result.rows[0];
-      if (!credential) throw new AgentAccessError(404, "target_not_found", "没有找到可修改的 Agent Token。");
+      if (!credential) throw new AgentAccessError(404, "target_not_found", "找不到可修改的 Agent Token。");
       await insertAudit(client, this.retention.auditDays, {
         spaceId: input.tenant.spaceId,
         actorDigest: input.actorDigest,

@@ -140,7 +140,7 @@ function dailyReading(snapshot: {
 
 function readingTitle(reading: DailyReading): string {
   const title = reading.projection.rows[0]?.modules[0]?.item.title;
-  return typeof title === "string" && title.trim() !== "" ? title : "打开这期正式日报";
+  return typeof title === "string" && title.trim() !== "" ? title : "打开这期日报";
 }
 
 export class PrivateReadingService {
