@@ -391,10 +391,10 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
         if (!dependencies.privateReading) return context.text("服务暂时不可用，请稍后重试。", 503);
         const publicationId = context.req.param("publicationId") ?? "";
         const readingShell = await dependencies.privateReading.readPublicationShell(access.tenant, publicationId);
-        if (!readingShell) return context.text("页面不存在。", 404);
+        if (!readingShell) return context.text("找不到这个页面。", 404);
         const requestedDate = context.req.query("date");
         const result = await dependencies.privateReading.readDailyResult(access.tenant, publicationId, requestedDate);
-        if (!result) return context.text("页面不存在。", 404);
+        if (!result) return context.text("找不到这个页面。", 404);
         return context.html(renderDailyPage({
           basePath: dependencies.basePath,
           shell: readingShell,

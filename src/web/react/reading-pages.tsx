@@ -32,10 +32,10 @@ const sampleIssue = {
   items: [
     {
       id: "sample-focus",
-      title: "把一天的信息，先整理成一条清晰主线",
-      brief: "私人日报先给出最重要的判断，再保留继续阅读的来源入口。",
+      title: "先看最重要的一条",
+      brief: "先看重点，再按来源继续阅读。",
       summary:
-        "这是一份不依赖实时事实的系统示例。正式使用后，你的 Agent 会根据长期关注方向整理内容，DailyNews 再把经过校验的正式结果稳定呈现在同一个阅读位置。",
+        "这是一份系统示例，不代表今天的新闻。你的 Agent 提交内容后，DailyNews 会根据你的关注方向生成日报，并在这里展示。",
       category: "阅读方式",
       editorial: {
         priority: "lead",
@@ -48,10 +48,10 @@ const sampleIssue = {
     },
     {
       id: "sample-control",
-      title: "每个 Agent 都有独立授权",
-      brief: "新增或移除某个 Agent，不会覆盖其他连接。",
+      title: "每个 Agent 使用独立授权",
+      brief: "新增或移除一个 Agent，不会影响其他授权。",
       summary:
-        "DailyNews 只显示服务端能够确认的授权事实，不会把客户端在线状态或本地定时任务猜成产品状态。你可以在编辑部设置中单独管理每一条连接。",
+        "页面只显示服务端确认过的授权和最近请求，不显示 Agent 是否在线。你可以在编辑部设置中分别管理它们。",
       category: "安全",
       editorial: { priority: "important", selectionReason: "解释用户控制边界" },
       sources: [{
@@ -61,10 +61,10 @@ const sampleIssue = {
     },
     {
       id: "sample-todo",
-      title: "Todo 只在需要时开启",
-      brief: "启用后 Agent 才能写入个人待办，关闭时保留已有内容。",
+      title: "需要时再开启 Todo",
+      brief: "开启后 Agent 才能写入个人待办；关闭后已有任务仍会保留。",
       summary:
-        "Personal Todo 属于整个私人空间。它默认关闭，不会为了展示功能而制造虚假任务；启用后页面只读取正式 Todo State，并沿用固定的五组排序。",
+        "Personal Todo 属于你的私人空间。页面只显示已经写入的待办，不会为了填满页面生成任务。",
       category: "个人待办",
       editorial: { priority: "normal", selectionReason: "说明按需启用原则" },
       sources: [{
@@ -126,7 +126,7 @@ function PublicationIndex(
                   <p>{summary.latest.title}</p>
                 </>
               )
-              : <p>第一份正式日报还没有到达。</p>}
+              : <p>还没有第一期日报。</p>}
           </div>
           <a
             href={readingHref(
@@ -135,7 +135,7 @@ function PublicationIndex(
               summary.latest?.date,
             )}
           >
-            {summary.latest ? "打开最新一期" : "打开日报"}
+            {summary.latest ? "查看最新一期" : "查看日报"}
             <IconArrowNarrowRight size={17} aria-hidden="true" />
           </a>
         </li>
@@ -179,28 +179,28 @@ export function HomePage(
         <div className="m51-home-grid">
             <section className="m51-home-lead" aria-labelledby="home-title">
               <p className="m51-reading-meta">
-                {input.daily?.date ?? "系统内置 · 不代表今日"}
+                {input.daily?.date ?? "系统示例 · 不代表今日"}
               </p>
               <div className="m51-edition-name">
                 <h2>
                   {input.daily ? input.shell.publication.displayName : "示例日报"}
                 </h2>
-                <span>{input.daily ? "个性化正式日报" : "阅读预览"}</span>
+                <span>{input.daily ? "个性化日报" : "系统示例"}</span>
               </div>
               <p className="m51-kicker">{leadItem.category ?? "阅读方式"}</p>
-              <h1 id="home-title">{leadItem.title ?? "日报尚未准备好"}</h1>
+              <h1 id="home-title">{leadItem.title ?? "还没有日报"}</h1>
               <p>
                 {leadItem.summary ?? leadItem.brief ??
-                  "连接 Agent 后，这里会显示第一份个性化正式日报。"}
+                  "你的 Agent 提交第一份日报后，这里会显示个性化内容。"}
               </p>
               {href ? <a className="m51-reading-link" href={href}>阅读完整日报<IconArrowNarrowRight size={18} aria-hidden="true" /></a> : null}
             </section>
             <section className="m51-home-digest" aria-labelledby="digest-title">
               <header>
                 <div>
-                  <h2 id="digest-title">今日总览</h2>
+                  <h2 id="digest-title">{input.daily ? "本期总览" : "内容预览"}</h2>
                   <p>
-                    {input.daily?.date ?? "系统示例"} · {modules.length} 条内容
+                    {input.daily ? `${input.daily.date} · ${modules.length} 条内容` : `系统示例 · ${modules.length} 条内容`}
                   </p>
                 </div>
                 {href ? <a href={href}>阅读完整日报</a> : null}
@@ -211,7 +211,7 @@ export function HomePage(
                     <span>{String(index + 2).padStart(2, "0")}</span>
                     <div>
                       <p className="m51-kicker">
-                        {module.item.category ?? "今日编辑"}
+                        {module.item.category ?? "编辑"}
                       </p>
                       <h3>{module.item.title}</h3>
                       <p>{module.item.brief ?? module.item.summary}</p>
@@ -226,10 +226,10 @@ export function HomePage(
                   <p>
                     {input.daily
                       ? `最新一期 · ${input.daily.date} · 共 ${modules.length} 条`
-                      : "等待第一份正式日报"}
+                      : "还没有日报"}
                   </p>
                 </div>
-                {href ? <a className="m51-reading-link" href={href}>打开首要日报<IconArrowNarrowRight size={17} aria-hidden="true" /></a> : null}
+                {href ? <a className="m51-reading-link" href={href}>查看首要日报<IconArrowNarrowRight size={17} aria-hidden="true" /></a> : null}
               </div>
             </section>
         </div>
@@ -297,7 +297,7 @@ function DateNavigation(
     ? input.dates[index + 1]
     : null;
   return (
-    <nav className="m51-date-nav" aria-label="正式日报期次">
+    <nav className="m51-date-nav" aria-label="日报期次">
       {older
         ? (
           <a
@@ -307,18 +307,18 @@ function DateNavigation(
             <IconChevronLeft aria-hidden="true" />更早一期
           </a>
         )
-        : <span>已经是最早一期</span>}
+        : <span>已是最早一期</span>}
       <time dateTime={input.date}>{input.date}</time>
       {newer
         ? (
           <a
             href={readingHref(input.basePath, input.publicationId, newer)}
-            aria-label={`更新一期 ${newer}`}
+            aria-label={`更晚一期 ${newer}`}
           >
-            更新一期<IconChevronRight aria-hidden="true" />
+            更晚一期<IconChevronRight aria-hidden="true" />
           </a>
         )
-        : <span>已经是最新一期</span>}
+        : <span>已是最新一期</span>}
     </nav>
   );
 }
@@ -356,7 +356,7 @@ function StoryImage(
           )
           : item.image.credit}
       </figcaption>
-      <p data-image-fallback hidden>配图暂不可用，不影响正文阅读。</p>
+      <p data-image-fallback hidden>图片暂时无法显示，正文仍可阅读。</p>
       <span data-react-island="image-fallback" data-image-id={imageId}>
         <ImageFallbackIsland imageId={imageId} />
       </span>
@@ -378,7 +378,7 @@ function StoryModule({ module, index }: { module: Module; index: number }) {
       id={item.id}
     >
       <header>
-        <span>{item.category ?? "今日编辑"}</span>
+        <span>{item.category ?? "编辑"}</span>
         <span>{String(index + 1).padStart(2, "0")}</span>
       </header>
       <h2>{item.title}</h2>
@@ -466,13 +466,13 @@ export function DailyPage(
           </p>
           <h1>
             {input.requestedDate
-              ? "这一天没有正式日报"
-              : "第一份正式日报还没有到达"}
+              ? "这一天没有日报"
+              : "还没有第一期日报"}
           </h1>
           <p>
             {input.requestedDate
-              ? `日期 ${input.requestedDate} 没有正式内容，DailyNews 没有替你回退到其他日期。`
-              : "这份日报会在第一份正式内容到达后出现在顶部切换器中。"}
+              ? `日期 ${input.requestedDate} 没有日报。DailyNews 不会自动改读其他日期。`
+              : "第一期日报发布后，会出现在顶部的“日报”切换器中。"}
           </p>
           <a
             className="m51-reading-link"
@@ -513,11 +513,11 @@ export function DailyPage(
             <p className="m51-kicker">
               {input.shell.publication.status === "inactive"
                 ? "已停用 · 只读归档"
-                : "正式日报"}
+                : "日报"}
             </p>
             <h1>{input.shell.publication.displayName}</h1>
           </div>
-          <span>{modules.length} 则内容</span>
+          <span>{modules.length} 条内容</span>
         </header>
         <DateNavigation
           basePath={input.basePath}
@@ -563,7 +563,7 @@ function todoDate(
       })
     }`;
   }
-  if (!item.dueDate) return "未设日期";
+  if (!item.dueDate) return "未设置日期";
   const time = item.dueTime ? ` ${item.dueTime}` : "";
   if (item.dueDate < asOfDate) return `逾期 · ${item.dueDate}${time}`;
   if (item.dueDate === asOfDate) return `今天${time}`;
@@ -601,7 +601,7 @@ export function TodoPage(
           </p>
           <h1>个人待办</h1>
           <p>
-            网页只读取正式结果。要新增、修改或完成任务，请继续告诉你的 Agent。
+            网页只读。新增、修改或完成任务，请告诉你的 Agent。
           </p>
         </header>
         <p
@@ -658,7 +658,7 @@ export function TodoPage(
                     ))}
                   </ol>
                 )
-                : <p className="m51-todo-empty">这一组暂时没有事项。</p>}
+                : <p className="m51-todo-empty">这一组暂无待办。</p>}
             </section>
           );
         })}

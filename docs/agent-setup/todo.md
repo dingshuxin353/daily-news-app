@@ -4,7 +4,7 @@
 - 所有请求：`Authorization: Bearer <用户提供的 DailyNews Agent Token>`
 - JSON 写入：`Content-Type: application/json` 与 `Idempotency-Key: <8–80 位稳定 key>`
 
-本文只描述 Personal Todo 闭环。Todo 只有用户在浏览器设置中明确启用后才允许写入，Agent 不能自行启用。
+本文说明 Personal Todo 的读取和写入。Todo 只有用户在浏览器设置中明确开启后才允许写入，Agent 不能自行开启。
 
 ## 请求顺序
 

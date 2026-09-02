@@ -205,8 +205,8 @@ test("new users reach onboarding without implicit Token creation and see only th
   const page = await getSettings(harness, "/onboarding", cookie, "text/html");
   assert.equal(page.response.status, 200);
   const html = await page.response.text();
-  assert.match(html, /请先完整阅读 https:\/\/dailynews\.test\/agent-setup\.md/);
-  assert.match(html, /等 Agent 向你索取 Token/);
+  assert.match(html, /请先阅读 https:\/\/dailynews\.test\/agent-setup\.md/);
+  assert.match(html, /等 Agent 索取 Token/);
   assert.match(html, /value="我的 Agent"/);
   assert.doesNotMatch(html, /配对|倒计时|刷新|取消|认领|等待 Agent/);
   assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials")).rows[0].count, 0);

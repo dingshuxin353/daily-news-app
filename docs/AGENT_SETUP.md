@@ -1,15 +1,15 @@
 ---
 name: dailynews
 version: 4.0.0
-description: Connect a user's AI Agent to DailyNews and create a continuously updated personal daily.
+description: Help an AI Agent connect to DailyNews and create a user's private daily.
 api_base: "{{API_BASE_URL}}"
 ---
 
 # DailyNews Agent API-first 接入说明
 
-本文是 DailyNews 面向 AI Agent 的普通接入合同。先完整阅读本文，再按当前任务读取对应的功能文档。
+本文说明普通 Agent 如何接入 DailyNews。先读完本文，再按任务读取对应的功能文档。
 
-## 目标结果
+## 接入后可以做什么
 
 完成普通接入后，你应当：
 
@@ -17,10 +17,10 @@ api_base: "{{API_BASE_URL}}"
 2. 为首次日报读取 [Content API 操作合同](./agent-setup/content.md)；Todo 或主题仅在用户实际需要时再读取对应文件。
 3. 能力确认后，向用户索取一枚 DailyNews Agent Token。
 4. 使用 Bearer Token 调用 `GET {{API_BASE_URL}}/publications`，再读取目标日报的 Daily Context。
-5. 用普通语言确认关注内容、更新时间和时区，立即生成首份正式日报。
+5. 用普通语言确认关注内容、更新时间和时区，再生成首份正式日报。
 6. 只有宿主确实保存了凭证并建立了持久任务，才告诉用户自动更新已经建立。
 
-不要把“说明已读取”“Token 已收到”或一次只读请求成功说成整个接入已经完成。
+不要把“说明已读取”“Token 已收到”或一次只读请求成功说成接入完成。
 
 ## 当前服务
 
@@ -42,7 +42,7 @@ DailyNews 不要求用户安装 Python、Node.js、curl、PowerShell 模块、�
 
 ## 功能文档
 
-按实际任务读取，不一次加载无关能力：
+按实际任务读取，不提前加载无关能力：
 
 | 任务 | 操作文档 | 当前用途 |
 | --- | --- | --- |
@@ -112,7 +112,7 @@ Authorization: Bearer <用户提供的 DailyNews Agent Token>
 
 ## 完成条件
 
-只有以下结果真实发生，才能告诉用户 DailyNews 已经用起来：
+只有以下结果全部真实发生，才能报告这次接入完成：
 
 - 本文和本次需要的功能文档已读取。
 - `GET /publications` 与目标 Daily Context 成功。

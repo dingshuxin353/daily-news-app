@@ -279,8 +279,8 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(dailyHtml, /补充来源/);
 
   const missing = renderDailyPage({ basePath: "/cloud", shell, daily: null, dates: [issue.date], requestedDate: "2026-08-27" });
-  assert.match(missing, /这一天没有正式日报/);
-  assert.match(missing, /没有替你回退/);
+  assert.match(missing, /这一天没有日报/);
+  assert.match(missing, /不会自动改读其他日期/);
   assert.match(missing, /阅读最近一期 · 2026-08-29/);
 
   const todoHtml = renderTodoPage({
@@ -582,7 +582,7 @@ test("M5.1 public page and sample Home use the editorial React shell", () => {
   };
   const homeHtml = renderHomePage({ basePath: "/cloud", shell, daily: null });
   assert.match(homeHtml, /示例日报/);
-  assert.match(homeHtml, /系统内置 · 不代表今日/);
+  assert.match(homeHtml, /系统示例 · 不代表今日/);
   assert.doesNotMatch(homeHtml, /设置自动日报|把自动日报真正用起来|href="\/cloud\/onboarding"/);
   assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
   assert.match(homeHtml, /data-theme-id="newspaper-default"/);
@@ -630,9 +630,9 @@ test("M5.1-C React settings shell exposes exactly five sections and keeps nickna
   assert.match(account, /\/cloud\/assets\/m5\/m5-client\.js/);
   assert.doesNotMatch(account, /assets\/cloud\.css|assets\/private-pages\.js/);
 
-  const onboarding = renderNicknameOnboardingPage({ basePath: "/cloud", shell: { ...shell, nickname: null }, csrfToken: "csrf-placeholder", nickname: " 保留输入 " , error: "昵称需要是 1–24 个可见字符。" });
+  const onboarding = renderNicknameOnboardingPage({ basePath: "/cloud", shell: { ...shell, nickname: null }, csrfToken: "csrf-placeholder", nickname: " 保留输入 " , error: "昵称须为 1–24 个可见字符。" });
   assert.match(onboarding, /value=" 保留输入 "/);
-  assert.match(onboarding, /昵称需要是 1–24 个可见字符/);
+  assert.match(onboarding, /昵称须为 1–24 个可见字符/);
   assert.doesNotMatch(onboarding, /配对码|PAT|MCP/);
 });
 
@@ -665,9 +665,9 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
   assert.match(sites, /上移 AI 日报/);
   assert.match(sites, /<svg/);
   assert.match(sites, /Personal Todo/);
-  assert.match(sites, /已保留正式 Todo 数据，本页不读取任务正文/);
-  assert.match(sites, /把重要信息排在前面/);
-  assert.match(sites, /三条与你有关的更新/);
+  assert.match(sites, /已有待办；本页不显示任务内容/);
+  assert.match(sites, /先看重要内容/);
+  assert.match(sites, /按阅读顺序整理几条内容/);
   assert.doesNotMatch(sites, /<i><\/i><b><\/b><em><\/em><small><\/small>/);
   assert.doesNotMatch(sites, /assets\/cloud\.css|assets\/private-pages\.js/);
 
@@ -679,7 +679,7 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
   assert.match(catalog, /经典报纸/);
   assert.match(catalog, /夜间 &lt;编辑部&gt;/);
   assert.doesNotMatch(catalog, /夜间 <编辑部>/);
-  assert.equal((catalog.match(/把重要信息排在前面/g) ?? []).length, 2);
+  assert.equal((catalog.match(/先看重要内容/g) ?? []).length, 2);
   for (const [property, value] of Object.entries(themes[1].preview)) {
     assert.match(catalog, new RegExp(`--m51-preview-${property}:${value}`));
   }

@@ -55,26 +55,26 @@ function formError(error: unknown): { message: string; status: 400 | 403 | 404 |
     return { message: error.message, status: error.status === 403 ? 403 : 400 };
   }
   if (error instanceof ProfileError) {
-    if (error.code === "PROFILE_INPUT_INVALID") return { message: "昵称需要是 1–24 个可见字符。", status: 400 };
-    if (error.code === "PROFILE_TARGET_NOT_FOUND") return { message: "没有找到这个账户。", status: 404 };
-    return { message: "账户设置暂时无法保存，请稍后重试。", status: 503 };
+    if (error.code === "PROFILE_INPUT_INVALID") return { message: "昵称须为 1–24 个可见字符。", status: 400 };
+    if (error.code === "PROFILE_TARGET_NOT_FOUND") return { message: "找不到这个账户。", status: 404 };
+    return { message: "账户设置未能保存，请稍后重试。", status: 503 };
   }
   if (error instanceof SiteManagementError) {
     const messages: Partial<Record<typeof error.code, string>> = {
-      SITE_INPUT_INVALID: "请检查名称、地址和主题选择后重试。",
-      SITE_NAME_CONFLICT: "这个站点名称已经在使用。",
-      SITE_ID_CONFLICT: "这个私有地址已经在使用。",
-      SITE_LIMIT_REACHED: "日报站点数量已达上限；停用的站点也计入上限。",
-      SITE_TARGET_NOT_FOUND: "没有找到这个日报站点。",
-      SITE_LAST_ACTIVE: "至少需要保留一个启用中的日报站点。",
+      SITE_INPUT_INVALID: "请检查名称、私有地址和主题后再试。",
+      SITE_NAME_CONFLICT: "这个名称已被使用，请换一个。",
+      SITE_ID_CONFLICT: "这个私有地址已被使用，请换一个。",
+      SITE_LIMIT_REACHED: "已达到日报数量上限；停用的日报也会计入。",
+      SITE_TARGET_NOT_FOUND: "找不到这个日报站点。",
+      SITE_LAST_ACTIVE: "至少保留一个启用中的日报站点。",
       SITE_THEME_NOT_FOUND: "所选主题已经不可用，请重新选择。",
-      SITE_STORAGE_FAILED: "设置暂时无法保存，请稍后重试。",
+      SITE_STORAGE_FAILED: "设置未能保存，请稍后重试。",
     };
     const status = error.code === "SITE_TARGET_NOT_FOUND" ? 404
       : error.code === "SITE_INPUT_INVALID" ? 400
       : error.code === "SITE_STORAGE_FAILED" ? 503
       : 409;
-    return { message: messages[error.code] ?? "设置暂时无法保存，请稍后重试。", status };
+    return { message: messages[error.code] ?? "设置未能保存，请稍后重试。", status };
   }
   return { message: "服务暂时不可用，请稍后重试。", status: 503 };
 }
@@ -160,7 +160,7 @@ export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettings
   });
 
   app.get(route("/settings/sites/:publicationId"), async (context) => {
-    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); const publication = data.snapshot.publications.find(({ publicationId }) => publicationId === context.req.param("publicationId")); if (!publication) return context.text("页面不存在。", 404); return context.html(renderPublicationFormPage({ basePath: dependencies.basePath, shell: data.shell, themes: data.themes, csrfToken: access.csrfToken, mode: "edit", publication, saved: context.req.query("saved") === "1" })); }
+    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); const publication = data.snapshot.publications.find(({ publicationId }) => publicationId === context.req.param("publicationId")); if (!publication) return context.text("找不到这个页面。", 404); return context.html(renderPublicationFormPage({ basePath: dependencies.basePath, shell: data.shell, themes: data.themes, csrfToken: access.csrfToken, mode: "edit", publication, saved: context.req.query("saved") === "1" })); }
     catch { return context.text("服务暂时不可用，请稍后重试。", 503); }
   });
 
@@ -168,7 +168,7 @@ export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettings
     let body: Record<string, unknown> = {};
     const targetId = context.req.param("publicationId") ?? "";
     try { const mutation = await browserMutation(context); if (mutation instanceof Response) return mutation; body = mutation.body; await dependencies.service.updatePublication(mutation.access.tenant, targetId, { name: body.name, theme: publicationTheme(body) }); return context.redirect(`${route(`/settings/sites/${encodeURIComponent(targetId)}`)}?saved=1`, 303); }
-    catch (error) { const safe = formError(error); if (safe.status === 403) return context.text(safe.message, 403); try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); const publication = data.snapshot.publications.find(({ publicationId }) => publicationId === context.req.param("publicationId")); if (!publication) return context.text("页面不存在。", 404); return context.html(renderPublicationFormPage({ basePath: dependencies.basePath, shell: data.shell, themes: data.themes, csrfToken: access.csrfToken, mode: "edit", publication, name: typeof body.name === "string" ? body.name : publication.name, theme: publicationTheme(body), error: safe.message }), safe.status); } catch { return context.text(safe.message, safe.status); } }
+    catch (error) { const safe = formError(error); if (safe.status === 403) return context.text(safe.message, 403); try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); const publication = data.snapshot.publications.find(({ publicationId }) => publicationId === context.req.param("publicationId")); if (!publication) return context.text("找不到这个页面。", 404); return context.html(renderPublicationFormPage({ basePath: dependencies.basePath, shell: data.shell, themes: data.themes, csrfToken: access.csrfToken, mode: "edit", publication, name: typeof body.name === "string" ? body.name : publication.name, theme: publicationTheme(body), error: safe.message }), safe.status); } catch { return context.text(safe.message, safe.status); } }
   });
 
   app.post(route("/settings/sites/:publicationId/move"), async (context) => {
@@ -177,7 +177,7 @@ export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettings
   });
 
   app.get(route("/settings/sites/:publicationId/status/disable"), async (context) => {
-    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); const publication = data.snapshot.publications.find((item) => item.publicationId === context.req.param("publicationId") && item.status === "active"); if (!publication) return context.text("页面不存在。", 404); return context.html(renderSettingsConfirmPage({ basePath: dependencies.basePath, shell: data.shell, title: `停用 ${publication.name}？`, description: "Agent 的新写入会被拒绝；已有正式日报仍可从原地址阅读。至少需要保留一个启用中的日报站点。", action: route(`/settings/sites/${encodeURIComponent(publication.publicationId)}/status/disable`), csrfToken: access.csrfToken, submitLabel: "确认停用", cancelPath: `/settings/sites/${encodeURIComponent(publication.publicationId)}` })); }
+    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); const publication = data.snapshot.publications.find((item) => item.publicationId === context.req.param("publicationId") && item.status === "active"); if (!publication) return context.text("找不到这个页面。", 404); return context.html(renderSettingsConfirmPage({ basePath: dependencies.basePath, shell: data.shell, title: `停用 ${publication.name}？`, description: "停用后，Agent 不能再写入；已有日报仍可从原地址阅读。至少保留一个启用中的日报站点。", action: route(`/settings/sites/${encodeURIComponent(publication.publicationId)}/status/disable`), csrfToken: access.csrfToken, submitLabel: "确认停用", cancelPath: `/settings/sites/${encodeURIComponent(publication.publicationId)}` })); }
     catch { return context.text("服务暂时不可用，请稍后重试。", 503); }
   });
 
@@ -189,7 +189,7 @@ export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettings
   }
 
   app.get(route("/settings/sites/todo/disable"), async (context) => {
-    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); if (!data.snapshot.todo.enabled) return context.redirect(`${route("/settings/sites")}#personal-todo`, 303); return context.html(renderSettingsConfirmPage({ basePath: dependencies.basePath, shell: data.shell, title: "关闭 Personal Todo？", description: "关闭后 Agent 的新写入会失败，Todo 页面停止展示；已有正式内容会完整保留，再次启用后恢复。", action: route("/settings/sites/todo/disable"), csrfToken: access.csrfToken, submitLabel: "确认关闭", cancelPath: "/settings/sites#personal-todo", cancelLabel: "保留并返回" })); }
+    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); if (!data.snapshot.todo.enabled) return context.redirect(`${route("/settings/sites")}#personal-todo`, 303); return context.html(renderSettingsConfirmPage({ basePath: dependencies.basePath, shell: data.shell, title: "关闭 Personal Todo？", description: "关闭后 Agent 不能再写入，Todo 页面也会隐藏；已有任务会保留，重新开启后恢复。", action: route("/settings/sites/todo/disable"), csrfToken: access.csrfToken, submitLabel: "确认关闭", cancelPath: "/settings/sites#personal-todo", cancelLabel: "保留并返回" })); }
     catch { return context.text("服务暂时不可用，请稍后重试。", 503); }
   });
 
@@ -206,14 +206,14 @@ export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettings
   });
 
   app.get(route("/settings/account"), async (context) => {
-    try { const access = await browserAccess(context); if (access instanceof Response) return access; const [shell, profile] = await Promise.all([dependencies.privateReading.readShell(access.tenant), dependencies.profiles.read(access.userId)]); if (!profile) return context.text("页面不存在。", 404); return context.html(renderAccountSettingsPage({ basePath: dependencies.basePath, shell, csrfToken: access.csrfToken, profile, saved: context.req.query("saved") === "1" })); }
+    try { const access = await browserAccess(context); if (access instanceof Response) return access; const [shell, profile] = await Promise.all([dependencies.privateReading.readShell(access.tenant), dependencies.profiles.read(access.userId)]); if (!profile) return context.text("找不到这个页面。", 404); return context.html(renderAccountSettingsPage({ basePath: dependencies.basePath, shell, csrfToken: access.csrfToken, profile, saved: context.req.query("saved") === "1" })); }
     catch { return context.text("服务暂时不可用，请稍后重试。", 503); }
   });
 
   app.post(route("/settings/account/nickname"), async (context) => {
     let nickname: unknown;
     try { const mutation = await browserMutation(context); if (mutation instanceof Response) return mutation; nickname = mutation.body.nickname; await dependencies.profiles.setNickname(mutation.access.userId, nickname); return context.redirect(`${route("/settings/account")}?saved=1`, 303); }
-    catch (error) { const safe = formError(error); if (safe.status === 403) return context.text(safe.message, 403); try { const access = await browserAccess(context); if (access instanceof Response) return access; const [shell, profile] = await Promise.all([dependencies.privateReading.readShell(access.tenant), dependencies.profiles.read(access.userId)]); if (!profile) return context.text("页面不存在。", 404); return context.html(renderAccountSettingsPage({ basePath: dependencies.basePath, shell, csrfToken: access.csrfToken, profile, nickname: typeof nickname === "string" ? nickname : "", error: safe.message }), safe.status); } catch { return context.text(safe.message, safe.status); } }
+    catch (error) { const safe = formError(error); if (safe.status === 403) return context.text(safe.message, 403); try { const access = await browserAccess(context); if (access instanceof Response) return access; const [shell, profile] = await Promise.all([dependencies.privateReading.readShell(access.tenant), dependencies.profiles.read(access.userId)]); if (!profile) return context.text("找不到这个页面。", 404); return context.html(renderAccountSettingsPage({ basePath: dependencies.basePath, shell, csrfToken: access.csrfToken, profile, nickname: typeof nickname === "string" ? nickname : "", error: safe.message }), safe.status); } catch { return context.text(safe.message, safe.status); } }
   });
 
   app.post(route("/onboarding/nickname"), async (context) => {

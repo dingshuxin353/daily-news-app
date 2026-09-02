@@ -157,7 +157,7 @@ export function SettingsLayout(input: {
   return <PageDocument basePath={input.basePath} title={input.title} page={input.current === "agent" ? "agent-settings" : "settings"} shell={input.shell} current="settings">
     <main className="m51-settings" id="content">
       <aside className="m51-settings-index" aria-label="设置分类">
-        <p>Settings</p>
+        <p>设置</p>
         <nav>
           {settingsLinks.map((link) => <a key={link.key} href={appPath(input.basePath, link.href)} aria-current={input.current === link.key ? "page" : undefined}>
             <span>{link.number}</span><strong>{link.label}</strong>

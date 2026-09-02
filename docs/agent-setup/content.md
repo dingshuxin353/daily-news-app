@@ -4,7 +4,7 @@
 - 所有请求：`Authorization: Bearer <用户提供的 DailyNews Agent Token>`
 - JSON 写入：`Content-Type: application/json` 与 `Idempotency-Key: <8–80 位稳定 key>`
 
-本文只描述日报内容闭环。不要凭记忆猜测字段；每次写入前都先读取当前 Publication 和 Daily Context，并使用 Context 返回的 Schema 版本、限制与确认规则。
+本文说明日报内容的读取和写入。每次写入前都先读取当前 Publication 和 Daily Context，并使用 Context 返回的 Schema 版本、限制与确认规则。
 
 ## 请求顺序
 
