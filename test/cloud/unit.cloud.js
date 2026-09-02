@@ -291,10 +291,18 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
     await assert.rejects(() => readFile(new URL(retiredPath, import.meta.url), "utf8"), { code: "ENOENT" });
   }
   const css = await readFile(new URL("../../src/web/react/reading.css", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../../src/web/react/styles.css", import.meta.url), "utf8");
+  const tokens = await readFile(new URL("../../src/web/react/tokens.css", import.meta.url), "utf8");
   assert.match(css, /Ecosystem Index \+ Editorial Reading Flow/);
   assert.match(css, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(css, /\.m51-source-action\[hidden\]\s*\{\s*display: none;/);
+  assert.match(css, /body:is\([^}]+\) \[data-astryx-theme="neutral"\] \{/);
   for (const mapping of [
+    "--m51-paper: var(--m51-reading-bg)",
+    "--m51-ink: var(--m51-reading-ink)",
+    "--m51-muted: var(--m51-reading-muted)",
+    "--m51-rule: var(--m51-reading-rule)",
+    "--m51-orange: var(--m51-reading-accent)",
     "--color-text-primary: var(--m51-reading-ink)",
     "--color-text-secondary: var(--m51-reading-muted)",
     "--color-background-body: var(--m51-reading-bg)",
@@ -304,7 +312,17 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   ]) {
     assert.ok(css.includes(mapping));
   }
-  assert.match(css, /color-mix\(in srgb, var\(--m51-paper\) 90%, var\(--color-background, var\(--m51-paper\)\) 10%\)/);
+  assert.match(css, /:is\(\.m51-product-header, \.m51-footer\)[^}]+background: var\(--m51-reading-bg\)/s);
+  assert.doesNotMatch(css, /90%|\.m51-footer::before/);
+  for (const role of ["meta", "control", "body", "lead", "section-title", "page-title", "brand-title", "display-title"]) {
+    assert.match(tokens, new RegExp(`--m51-type-${role}:`));
+  }
+  const productTextCss = styles.replace(/\.m51-theme-preview[^}]*\}/gs, "");
+  for (const source of [productTextCss, css]) {
+    for (const declaration of source.matchAll(/font-size:\s*([^;]+);/g)) {
+      assert.match(declaration[1], /^var\(--(?:m51-type|headline-)/);
+    }
+  }
 });
 
 test("cloud config fails closed for missing or unsafe environment", async () => {
