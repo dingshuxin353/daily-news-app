@@ -1,56 +1,62 @@
-/* Hallmark · macrostructure: Ecosystem Index + Editorial Reading Flow (knobs: asymmetric lead/digest, numbered publication index, continuous compiled edition) · theme: Editorial Newsroom Studio · palette: runtime theme inside fixed warm newsroom shell · contrast: pass (40–41) · nav: N3 masthead rail · footer: Ft1 statement · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · macrostructure: Ecosystem Index + Editorial Reading Flow (knobs: asymmetric lead/digest, numbered publication index, continuous compiled edition) · theme: Editorial Newsroom Studio · palette: runtime theme across the complete reading shell · contrast: pass (40–41) · nav: N3 masthead rail · footer: Ft1 statement · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
-.m51-home,
-.m51-directory,
-.m51-daily,
-.m51-todo,
-.m51-reading-empty {
+body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) {
   --m51-reading-bg: var(--color-background, var(--m51-paper));
   --m51-reading-ink: var(--color-text, var(--m51-ink));
   --m51-reading-muted: var(--color-muted, var(--m51-muted));
   --m51-reading-rule: var(--color-rule, var(--m51-rule));
   --m51-reading-accent: var(--color-accent-text, var(--m51-orange-dark));
+  background: var(--m51-reading-bg);
+}
+
+body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) [data-astryx-theme="neutral"] {
+  --m51-paper: var(--m51-reading-bg);
+  --m51-paper-deep: color-mix(in srgb, var(--m51-reading-bg) 88%, var(--m51-reading-ink));
+  --m51-paper-raised: var(--m51-reading-bg);
+  --m51-ink: var(--m51-reading-ink);
+  --m51-ink-soft: var(--m51-reading-muted);
+  --m51-muted: var(--m51-reading-muted);
+  --m51-rule: var(--m51-reading-rule);
+  --m51-rule-soft: var(--m51-reading-rule);
+  --m51-orange: var(--m51-reading-accent);
+  --m51-orange-dark: var(--m51-reading-accent);
+  --m51-accent-ink: var(--m51-reading-bg);
   --color-text-primary: var(--m51-reading-ink);
   --color-text-secondary: var(--m51-reading-muted);
   --color-background-body: var(--m51-reading-bg);
   --color-background-surface: var(--m51-reading-bg);
   --color-border: var(--m51-reading-rule);
   --color-accent: var(--m51-reading-accent);
+  --color-on-accent: var(--m51-reading-bg);
   --m51-font-editorial: var(--font-headline);
   --m51-font-ui: var(--font-ui);
   --m51-focus: var(--color-focus);
+  background: var(--m51-reading-bg);
+  color: var(--m51-reading-ink);
+}
+
+.m51-home,
+.m51-directory,
+.m51-daily,
+.m51-todo,
+.m51-reading-empty {
   width: min(100% - 2rem, var(--m51-content));
   margin-inline: auto;
   color: var(--m51-reading-ink);
 }
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) {
-  background: var(--color-background, var(--m51-paper));
+body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) :is(.m51-product-header, .m51-footer) {
+  border-color: var(--m51-reading-rule);
+  background: var(--m51-reading-bg);
 }
 
 body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-product-header {
-  border-block-end-color: var(--color-rule, var(--m51-rule));
-  background: color-mix(in srgb, var(--m51-paper) 90%, var(--color-background, var(--m51-paper)) 10%);
-  color: var(--m51-ink);
+  color: var(--m51-reading-ink);
 }
 
 body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-footer {
-  background: var(--m51-paper);
-  color: var(--m51-ink);
-}
-
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-footer {
-  position: relative;
-  isolation: isolate;
-}
-
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-footer::before {
-  position: absolute;
-  z-index: -1;
-  inset: 0 calc(50% - 50vw);
-  background: var(--m51-paper);
-  content: "";
+  color: var(--m51-reading-muted);
 }
 
 .m51-home .m51-kicker,
@@ -116,7 +122,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-reading-meta {
   margin-block-end: var(--m51-space-2);
   color: var(--m51-reading-muted);
-  font-size: 0.75rem;
+  font-size: var(--m51-type-meta);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -129,7 +135,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-edition-name h2 {
   margin-block-end: var(--m51-space-2);
   font-family: var(--m51-font-wordmark);
-  font-size: clamp(2rem, 8vw, 2.75rem);
+  font-size: var(--m51-type-page-title);
 }
 
 .m51-edition-name span,
@@ -138,14 +144,14 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   padding: var(--m51-space-1) var(--m51-space-2);
   background: var(--m51-paper-deep);
   color: var(--m51-ink);
-  font-size: 0.68rem;
+  font-size: var(--m51-type-meta);
   font-weight: 700;
 }
 
 .m51-home-lead h1 {
   max-width: 20.625rem;
   margin-block-end: var(--m51-space-5);
-  font-size: clamp(2.375rem, 10vw, 4.25rem);
+  font-size: var(--headline-medium, var(--m51-type-page-title));
 }
 
 .m51-home-lead > p:not(.m51-kicker, .m51-reading-meta) {
@@ -182,7 +188,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home-digest > header p {
   color: var(--m51-reading-muted);
-  font-size: 0.75rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-home-index > header > div {
@@ -218,14 +224,14 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home-digest h3 {
   margin-block-end: var(--m51-space-2);
-  font-size: clamp(1.25rem, 4vw, 1.65rem);
+  font-size: var(--headline-small, var(--m51-type-section-title));
 }
 
 .m51-home-digest li p:last-child {
   margin: 0;
   color: var(--m51-reading-muted);
   font-family: var(--m51-font-editorial);
-  font-size: 0.9rem;
+  font-size: var(--m51-type-control);
 }
 
 .m51-home-primary {
@@ -247,7 +253,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home-primary div > p:last-child {
   color: var(--m51-reading-muted);
-  font-size: 0.75rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-home-illustration {
@@ -277,13 +283,13 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-publication-index h2 {
   margin-block: var(--m51-space-2);
-  font-size: clamp(1.5rem, 5vw, 2.25rem);
+  font-size: var(--m51-type-section-title);
 }
 
 .m51-publication-index time,
 .m51-publication-index div > p:last-child {
   color: var(--m51-reading-muted);
-  font-size: 0.85rem;
+  font-size: var(--m51-type-control);
 }
 
 .m51-publication-index div > p:last-child {
@@ -309,7 +315,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home-todo > ol span {
   color: var(--m51-reading-muted);
-  font-size: 0.8rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-secondary-journey {
@@ -357,13 +363,13 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-daily-heading h1 {
   margin: 0;
   font-family: var(--m51-font-editorial);
-  font-size: clamp(3rem, 13vw, 7rem);
+  font-size: var(--headline-large, var(--m51-type-display-title));
   line-height: 0.9;
 }
 
 .m51-daily-heading > span {
   color: var(--m51-reading-muted);
-  font-size: 0.8rem;
+  font-size: var(--m51-type-meta);
   white-space: nowrap;
 }
 
@@ -374,7 +380,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   gap: var(--m51-space-3);
   padding-block: var(--m51-space-4);
   border-block-end: 1px solid var(--m51-reading-rule);
-  font-size: 0.75rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-date-nav a,
@@ -397,7 +403,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-date-nav time {
   font-family: var(--m51-font-editorial);
-  font-size: 1rem;
+  font-size: var(--m51-type-body);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -420,7 +426,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   gap: var(--m51-space-4);
   margin-block-end: var(--m51-space-4);
   color: var(--m51-reading-accent);
-  font-size: 0.72rem;
+  font-size: var(--m51-type-meta);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -428,15 +434,15 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-story h2 {
   margin-block-end: var(--m51-space-5);
-  font-size: var(--headline-small, clamp(1.75rem, 7vw, 2.5rem));
+  font-size: var(--headline-small, var(--m51-type-section-title));
 }
 
 .m51-story--large h2 {
-  font-size: var(--headline-large, clamp(2.75rem, 11vw, 5rem));
+  font-size: var(--headline-large, var(--m51-type-display-title));
 }
 
 .m51-story--medium h2 {
-  font-size: var(--headline-medium, clamp(2rem, 8vw, 3.25rem));
+  font-size: var(--headline-medium, var(--m51-type-page-title));
 }
 
 .m51-story > p {
@@ -464,7 +470,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-story-media [data-image-fallback] {
   margin-block-start: var(--m51-space-2);
   color: var(--m51-reading-muted);
-  font-size: 0.72rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-source-archive {
@@ -495,7 +501,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-source-list time,
 .m51-source-role {
   color: var(--m51-reading-muted);
-  font-size: 0.75rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-source-via {
@@ -574,7 +580,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-reading-empty h1 {
   margin-block-end: var(--m51-space-6);
-  font-size: clamp(2.5rem, 10vw, 4.75rem);
+  font-size: var(--m51-type-page-title);
 }
 
 .m51-reading-empty > p:not(.m51-kicker) {
@@ -627,7 +633,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-todo-group > header span,
 .m51-todo-empty {
   color: var(--m51-reading-muted);
-  font-size: 0.8rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-todo-group article {
@@ -646,7 +652,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-todo-group article > span,
 .m51-todo-group time {
   color: var(--m51-reading-muted);
-  font-size: 0.75rem;
+  font-size: var(--m51-type-meta);
 }
 
 .m51-todo-group h3,
@@ -679,18 +685,13 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   }
 
   .m51-home-lead h1 {
-    font-size: 2.375rem;
     line-height: 1.13;
   }
 
   .m51-home-lead > p:not(.m51-kicker, .m51-reading-meta) {
     max-width: 26.5rem;
-    font-size: 0.75rem;
+    font-size: var(--m51-type-body);
     line-height: 1.9;
-  }
-
-  .m51-home-digest h3 {
-    font-size: 1.25rem;
   }
 
   .m51-publication-index > li {
