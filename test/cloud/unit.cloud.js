@@ -263,7 +263,7 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(dailyHtml, /m51-story--span-4/);
   assert.doesNotMatch(dailyHtml, /style="--(?:module-span|row-capacity)/);
   const darkDailyHtml = renderDailyPage({ basePath: "/cloud", shell: { ...shell, theme: { id: "midnight-tech", revision: 1, colorScheme: "dark" } }, daily });
-  assert.match(darkDailyHtml, /<details class="m51-publication-switcher" data-current="true"><summary><span>AI 日报<\/span>/);
+  assert.match(darkDailyHtml, /<details class="m51-publication-switcher" data-current="true"><summary><span>日报<\/span>/);
   assert.match(darkDailyHtml, /href="\/cloud\/p\/daily-news\/\?date=2026-08-29" aria-current="page"/);
   assert.match(darkDailyHtml, /<html lang="zh-CN" data-theme="dark" data-color-scheme="dark">/);
   assert.match(darkDailyHtml, /<meta name="color-scheme" content="dark"\s*\/>/);
@@ -508,6 +508,7 @@ test("login page contains no account-discovery copy or persistent email storage"
   assert.match(html, /\/cloud\/assets\/m5\/m5\.css/);
   assert.match(html, /data-react-island="login"/);
   assert.match(html, /autocomplete="email"/i);
+  assert.doesNotMatch(html.match(/<h1 id="login-story-title">[\s\S]*?<\/h1>/)?.[0] ?? "", /<br/);
   assert.doesNotMatch(html, /localStorage|sessionStorage|邮箱不存在|已注册/);
 });
 
@@ -564,6 +565,7 @@ test("M5.1 first-use React journey stays API-first and keeps one-time secrets is
 test("M5.1 public page and sample Home use the editorial React shell", () => {
   const publicHtml = renderPublicPage({ basePath: "/cloud", signedIn: false });
   assert.match(publicHtml, /每天一份，.*只为你而编的.*私人日报。/s);
+  assert.doesNotMatch(publicHtml.match(/<h1 id="public-title">[\s\S]*?<\/h1>/)?.[0] ?? "", /<br/);
   assert.match(publicHtml, /把每天关心的事交给 Agent/);
   assert.match(publicHtml, /private-newsroom\.png/);
   assert.match(publicHtml, /width="1400" height="466"/);
@@ -655,6 +657,7 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
     home: { name: "我的日报", themeId: "newspaper-default" },
     publications: [
       { publicationId: "daily-news", name: "AI 日报", status: "active", sortOrder: 0, isPrimary: true, theme: { mode: "inherit" } },
+      { publicationId: "product-watch", name: "产品观察", status: "active", sortOrder: 1, isPrimary: false, theme: { mode: "inherit" } },
       { publicationId: "archive-news", name: "归档日报", status: "inactive", sortOrder: null, isPrimary: false, theme: { mode: "override", themeId: "editorial-night" } },
     ],
     todo: { enabled: false, hasFormalData: true },
@@ -666,8 +669,12 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
   assert.match(sites, /<svg/);
   assert.match(sites, /Personal Todo/);
   assert.match(sites, /已有待办；本页不显示任务内容/);
-  assert.match(sites, /先看重要内容/);
-  assert.match(sites, /按阅读顺序整理几条内容/);
+  assert.match(sites, /Home 主题 · 经典报纸/);
+  assert.match(sites, /跟随 Home · 经典报纸/);
+  assert.match(sites, /独立主题 · 夜间 &lt;编辑部&gt;/);
+  assert.doesNotMatch(sites, /主题预览|先看重要内容|按阅读顺序整理几条内容/);
+  assert.equal((sites.match(/>启用中<\/p>/g) ?? []).length, 1);
+  assert.ok(sites.indexOf("新建日报站点") < sites.indexOf('class="m51-site-list"'));
   assert.doesNotMatch(sites, /<i><\/i><b><\/b><em><\/em><small><\/small>/);
   assert.doesNotMatch(sites, /assets\/cloud\.css|assets\/private-pages\.js/);
 

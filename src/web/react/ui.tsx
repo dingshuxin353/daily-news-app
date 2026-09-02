@@ -40,11 +40,11 @@ function ProductHeader(input: { basePath: string; shell: ReadingShell; current: 
         <a href={appPath(input.basePath, "/home")} aria-current={input.current === "home" ? "page" : undefined}>总览</a>
         {publications.length === 1
           ? <a href={appPath(input.basePath, `/p/${encodeURIComponent(publications[0].publication.publicationId)}/`)} aria-current={input.current === "daily" ? "page" : undefined}>
-            {input.current === "daily" ? input.shell.publication.displayName : "日报"}
+            日报
           </a>
           : publications.length > 1
             ? <details className="m51-publication-switcher" data-current={input.current === "daily" ? "true" : undefined}>
-              <summary><span>{input.current === "daily" ? input.shell.publication.displayName : "日报"}</span><IconChevronDown size={16} aria-hidden="true" /></summary>
+              <summary><span>日报</span><IconChevronDown size={16} aria-hidden="true" /></summary>
               <ul>
                 {publications.map(({ publication, latest }) => <li key={publication.publicationId}><a
                   href={appPath(input.basePath, `/p/${encodeURIComponent(publication.publicationId)}/?date=${encodeURIComponent(latest!.date)}`)}

@@ -13,7 +13,7 @@ export function PublicPage({ basePath, signedIn }: { basePath: string; signedIn:
       <section className="m51-public-hero" aria-labelledby="public-title">
         <div className="m51-public-copy">
           <p className="m51-kicker">Your private newsroom</p>
-          <h1 id="public-title">每天一份，<br />只为你而编的<br />私人日报。</h1>
+          <h1 id="public-title">每天一份，只为你而编的私人日报。</h1>
           <p>把每天关心的事交给 Agent。DailyNews 会把 Agent 提交的内容整理成只属于你的正式日报，并保留来源。</p>
           <PrimaryLink href={destination} label={action} />
         </div>
@@ -45,7 +45,7 @@ export function LoginPage(input: { basePath: string; returnTo?: string; returnLa
       <section className="m51-login-story" aria-labelledby="login-story-title">
         <div>
           <p className="m51-kicker">One quiet doorway</p>
-          <h1 id="login-story-title">进入你的<br />私人编辑部。</h1>
+          <h1 id="login-story-title">进入你的私人编辑部。</h1>
           <p>不用密码；首次验证邮箱会自动创建私有空间。</p>
           {input.returnLabel ? <p className="m51-return-note">登录后返回：{input.returnLabel}</p> : null}
         </div>
