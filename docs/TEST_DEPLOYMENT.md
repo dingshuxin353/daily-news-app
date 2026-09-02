@@ -31,11 +31,12 @@
 | --- | --- |
 | release 目录 | 每个精确 commit 一个只读发布目录，不在运行中的目录执行 `git pull` |
 | `current` 指针 | 只指向当前 release；切换后由现有进程管理器重启 |
+| Node.js 22 runtime | 位于 release 之外的稳定只读目录，同时提供名为 `node` 和 `npm` 的入口；两者必须运行在同一个 Node.js 22 下 |
 | 运行配置 | 位于 Git 和 release 目录之外，普通文件权限 `0600`，仅服务账户可读 |
 | PostgreSQL 数据 | 由现有 PostgreSQL 15 管理，不位于源码或 release 目录 |
 | 日志 | 使用现有进程管理器与 Nginx 日志；不得记录请求正文或认证材料 |
 
-部署账户必须能够读取 release 和运行配置，但不应获得无关服务器 Secret。Node.js 与 PostgreSQL 的监听地址都必须是回环地址；宝塔管理入口继续沿用服务器已有访问控制。
+部署账户负责克隆、安装依赖和构建；服务账户只读取最终 release、Node.js 22 runtime 和运行配置，并执行 Migration 与应用进程。两者都不应获得无关服务器 Secret。Node.js 与 PostgreSQL 的监听地址都必须是回环地址；宝塔管理入口继续沿用服务器已有访问控制。
 
 ## 3. 部署前记录与自动化门禁
 
@@ -44,7 +45,7 @@
 - 部署时间与执行人。
 - 候选 commit 的完整 40 位 SHA。
 - 上一个已知可运行 commit 的完整 40 位 SHA。
-- 旧域名公开 Origin、`CLOUD_BASE_PATH`、应用回环端口、release 根目录、外置环境文件和进程名称。
+- 旧域名公开 Origin、`CLOUD_BASE_PATH`、应用回环端口、release 根目录、Node.js 22 runtime、服务账户 / 组、外置环境文件和进程名称。
 - 对应 PR 与成功 CI run；CI 必须包含核心测试、云端测试、PostgreSQL 15 集成测试及静态/云端构建。
 
 在干净工作区再次确认候选属于受保护版本线：
@@ -67,6 +68,16 @@ git diff --quiet "$M5_PREVIOUS_COMMIT" "$M5_DEPLOY_COMMIT" -- db/migrations
 ```bash
 M5_DEPLOY_ROOT='/absolute/path/outside-the-repository'
 M5_RELEASE_DIR="$M5_DEPLOY_ROOT/releases/$M5_DEPLOY_COMMIT"
+M5_NODE22_BIN='/absolute/path/outside-releases/node22/bin'
+M5_SERVICE_USER='replace-with-service-user'
+M5_SERVICE_GROUP='replace-with-service-group'
+M5_RUNTIME_PATH="$M5_NODE22_BIN:/usr/local/bin:/usr/bin:/bin"
+test -x "$M5_NODE22_BIN/node"
+test -x "$M5_NODE22_BIN/npm"
+test "$(PATH="$M5_RUNTIME_PATH" command -v node)" = "$M5_NODE22_BIN/node"
+test "$(PATH="$M5_RUNTIME_PATH" command -v npm)" = "$M5_NODE22_BIN/npm"
+test "$(PATH="$M5_RUNTIME_PATH" node -p 'process.versions.node.split(".")[0]')" = "22"
+test "$(PATH="$M5_RUNTIME_PATH" npm --versions --json | PATH="$M5_RUNTIME_PATH" node -e 'let value=""; process.stdin.on("data", (chunk) => value += chunk).on("end", () => process.stdout.write(JSON.parse(value).node.split(".")[0]))')" = "22"
 test ! -e "$M5_RELEASE_DIR"
 git clone --filter=blob:none https://github.com/dingshuxin353/daily-news-app.git "$M5_RELEASE_DIR"
 cd "$M5_RELEASE_DIR"
@@ -74,18 +85,23 @@ git fetch --prune origin version/v1.0.0
 git checkout --detach "$M5_DEPLOY_COMMIT"
 git rev-parse HEAD
 git status --short
-node --version
-npm --version
-npm ci
-npm run build:cloud
+PATH="$M5_RUNTIME_PATH" node --version
+PATH="$M5_RUNTIME_PATH" npm --version
+PATH="$M5_RUNTIME_PATH" npm ci
+PATH="$M5_RUNTIME_PATH" npm run build:cloud
+chown -R root:"$M5_SERVICE_GROUP" "$M5_RELEASE_DIR"
+chmod -R u=rwX,g=rX,o= "$M5_RELEASE_DIR"
+runuser -u "$M5_SERVICE_USER" -- test -r "$M5_RELEASE_DIR/.cloud-dist/src/cloud/server.js"
+runuser -u "$M5_SERVICE_USER" -- test ! -w "$M5_RELEASE_DIR"
 ```
 
 通过条件：
 
 - `HEAD` 精确等于候选 SHA，工作区为空。
-- Node.js 主版本为 22。
+- 当前 Shell 中的 `node` 与 `npm` 都来自记录中的稳定 runtime，且二者报告的 Node.js 主版本均为 22；不接受只给 systemd 指定 Node.js 22、部署命令仍落回系统默认版本的双路径。
 - `npm ci` 使用已提交的 lockfile 完成。
 - `.cloud-dist/src/cloud/server.js` 已生成；构建产物仍位于当前 release，不提交 Git。
+- 最终 release 对服务账户可读、不可写；后续 Migration 不得重新构建或改变 release。
 
 部署机不代替 CI 重跑全部测试。若部署机本身出现依赖或构建差异，停止并作为阻断记录，不能继续启动旧产物。
 
@@ -125,10 +141,23 @@ test "$AGENT_MCP_URL" = "${CLOUD_ORIGIN}${CLOUD_BASE_PATH}/mcp"
 
 使用现有 PostgreSQL 管理方式建立独立测试角色和数据库，并确认 PostgreSQL 只监听回环地址。数据库名和账号不写入仓库或公开报告。
 
-在已经加载外置环境的候选 release 中执行：
+确认第 4 节的 `M5_NODE22_BIN`、`M5_RUNTIME_PATH`、`M5_SERVICE_USER` 与 `M5_RELEASE_DIR` 仍是本次私有部署记录中的精确值。Migration 必须由服务账户在同一个 Node.js 22 runtime 中执行，并自行加载仅该账户可读的外置环境：
 
 ```bash
-npm run db:migrate
+runuser -u "$M5_SERVICE_USER" -- env \
+  PATH="$M5_RUNTIME_PATH" \
+  M5_ENV_FILE="$M5_ENV_FILE" \
+  M5_RELEASE_DIR="$M5_RELEASE_DIR" \
+  sh -c '
+    set -eu
+    set -a
+    . "$M5_ENV_FILE"
+    set +a
+    cd "$M5_RELEASE_DIR"
+    test "$(node -p "process.versions.node.split(\".\")[0]")" = "22"
+    test "$(npm --versions --json | node -e "let value=\"\"; process.stdin.on(\"data\", (chunk) => value += chunk).on(\"end\", () => process.stdout.write(JSON.parse(value).node.split(\".\")[0]))")" = "22"
+    npm run db:migrate
+  '
 ```
 
 这是唯一正式 Migration 入口。不要直接执行单个 SQL 文件，不要让进程管理器在每次启动时自动跑 Migration，也不要把 `npm run start:cloud` 当作 Migration 命令。
@@ -137,6 +166,7 @@ npm run db:migrate
 
 - 命令以成功状态结束，并只记录“已应用数量 / Migration 总数”等非敏感摘要。
 - 再次执行能够安全跳过已记录 Migration。
+- 命令前后 release 都保持不可写且 Git 工作区干净；`db:migrate` 只执行第 4 节已构建的 Runner，缺少产物时停止并重新准备 release。
 - 后续 `/health/ready` 能通过连接与 Migration 校验。
 
 失败时停止，不启动应用；不得手工补 `app.schema_migrations` 或修改校验和。
@@ -148,8 +178,8 @@ npm run db:migrate
 | 字段 | 必须值 |
 | --- | --- |
 | 工作目录 | `<release 根目录>/current` |
-| 启动命令 | `npm run start:cloud` |
-| Node.js | 明确使用 Node.js 22 的可执行环境 |
+| 启动命令 | `<Node.js 22 runtime>/node .cloud-dist/src/cloud/server.js` |
+| Node.js | 使用第 4 节核对过的稳定 runtime，不依赖系统默认 `node` 或登录 Shell `PATH` |
 | 环境 | 从外置 `0600` 环境文件注入；不依赖仓库 `.env` |
 | 停止信号 | `SIGTERM`，至少留出应用现有 10 秒关闭窗口 |
 | 故障恢复 | 进程异常退出时由现有管理器重启 |

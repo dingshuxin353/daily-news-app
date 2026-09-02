@@ -39,7 +39,7 @@ npm run db:migrate
 npm run start:cloud
 ```
 
-`npm run db:migrate` 是唯一正式 Migration 入口。正常 `npm run start:cloud` 不会建立或修改数据库结构；空数据库必须先显式执行 Migration。
+`npm run build:cloud` 只在 Migration 前构建一次云端产物；`npm run db:migrate` 是唯一正式 Migration 入口，只执行已经构建的 `.cloud-dist/src/cloud/migrate.js`，不会再次构建或写入 release。缺少该产物时必须先构建，不能在只读 release 中临时补产物。正常 `npm run start:cloud` 不会建立或修改数据库结构；空数据库必须先显式执行 Migration。
 
 Migration Runner 先持有固定的 PostgreSQL 会话级 advisory lock，再在显式 Migration 命令内建立自身的 `app.schema_migrations` 元数据表。编号 SQL 按四位数字前缀顺序逐个执行，每个文件拥有独立事务；表中记录文件名、原始内容的 SHA-256 摘要和执行时间。重复运行会跳过已记录文件；摘要变化、数据库存在本地未知记录、历史不连续或仍有待执行文件时，结构兼容检查失败关闭。项目不提供自动 Down Migration。
 

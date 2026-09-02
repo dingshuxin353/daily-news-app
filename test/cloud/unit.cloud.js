@@ -395,6 +395,11 @@ test("cloud config fails closed for missing or unsafe environment", async () => 
   );
 });
 
+test("release migration executes the prebuilt runner without rebuilding the release", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.scripts["db:migrate"], "node .cloud-dist/src/cloud/migrate.js");
+});
+
 test("identity configuration fails closed for missing secrets and incomplete SES mode", async () => {
   await withTempDirectory(async (directory) => {
     const configPath = path.join(directory, "cloud.json");

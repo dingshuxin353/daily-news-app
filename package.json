@@ -20,7 +20,7 @@
     "test": "node --test test/*.test.js",
     "build:cloud": "node scripts/build-cloud.js",
     "start:cloud": "node .cloud-dist/src/cloud/server.js",
-    "db:migrate": "npm run build:cloud --silent && node .cloud-dist/src/cloud/migrate.js",
+    "db:migrate": "node .cloud-dist/src/cloud/migrate.js",
     "test:cloud": "npm run build:cloud --silent && node --test test/cloud/unit.cloud.js",
     "test:cloud:integration": "npm run build:cloud --silent && node --test --test-concurrency=1 test/cloud/*.integration.cloud.js",
     "test:m3e:live": "node test/m3-e/run-live-mcp.js",
