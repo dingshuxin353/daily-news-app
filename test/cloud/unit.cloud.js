@@ -400,6 +400,14 @@ test("release migration executes the prebuilt runner without rebuilding the rele
   assert.equal(packageJson.scripts["db:migrate"], "node .cloud-dist/src/cloud/migrate.js");
 });
 
+test("release candidate metadata is prepared for v1.0.0", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
+  const packageLock = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.version, "1.0.0");
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[""].version, packageJson.version);
+});
+
 test("identity configuration fails closed for missing secrets and incomplete SES mode", async () => {
   await withTempDirectory(async (directory) => {
     const configPath = path.join(directory, "cloud.json");
