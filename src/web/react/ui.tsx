@@ -2,10 +2,10 @@ import type { ReactNode } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Theme } from "@astryxdesign/core/theme";
 import { neutralTheme } from "@astryxdesign/theme-neutral/built";
-import { IconArrowNarrowRight, IconCircleHalf2 } from "@tabler/icons-react";
+import { IconArrowNarrowRight, IconChevronDown, IconCircleHalf2 } from "@tabler/icons-react";
 import type { ReadingShell } from "../../modules/private-reading/service.js";
 
-export type ReactPageName = "public" | "login" | "onboarding" | "home" | "publications" | "daily" | "todo" | "settings" | "agent-settings";
+export type ReactPageName = "public" | "login" | "onboarding" | "home" | "daily" | "todo" | "settings" | "agent-settings";
 
 export function appPath(basePath: string, pathname: string): string {
   return `${basePath}${pathname}`;
@@ -28,14 +28,7 @@ function PublicHeader({ basePath, action }: { basePath: string; action?: { href:
 }
 
 function ProductHeader(input: { basePath: string; shell: ReadingShell; current: string }) {
-  const links = [
-    { key: "home", href: "/home", label: "总览" },
-    { key: "publications", href: "/publications/", label: "我的日报" },
-    ...(input.shell.todoEnabled && input.shell.todoHasFormalData
-      ? [{ key: "todo", href: "/todo/", label: "Todo" }]
-      : []),
-    { key: "settings", href: "/settings", label: "编辑部设置" },
-  ];
+  const publications = input.shell.readablePublications;
   const nickname = input.shell.nickname?.trim() || "你";
   return <header className="m51-product-header">
     <div className="m51-header-inner m51-header-inner--product">
@@ -44,11 +37,26 @@ function ProductHeader(input: { basePath: string; shell: ReadingShell; current: 
         <span>你的私人编辑部</span>
       </div>
       <nav className="m51-primary-nav" aria-label="私人空间">
-        {links.map((link) => <a
-          key={link.key}
-          href={appPath(input.basePath, link.href)}
-          aria-current={input.current === link.key ? "page" : undefined}
-        >{link.label}</a>)}
+        <a href={appPath(input.basePath, "/home")} aria-current={input.current === "home" ? "page" : undefined}>总览</a>
+        {publications.length === 1
+          ? <a href={appPath(input.basePath, `/p/${encodeURIComponent(publications[0].publication.publicationId)}/`)} aria-current={input.current === "daily" ? "page" : undefined}>
+            {input.current === "daily" ? input.shell.publication.displayName : "日报"}
+          </a>
+          : publications.length > 1
+            ? <details className="m51-publication-switcher" data-current={input.current === "daily" ? "true" : undefined}>
+              <summary><span>{input.current === "daily" ? input.shell.publication.displayName : "日报"}</span><IconChevronDown size={16} aria-hidden="true" /></summary>
+              <ul>
+                {publications.map(({ publication, latest }) => <li key={publication.publicationId}><a
+                  href={appPath(input.basePath, `/p/${encodeURIComponent(publication.publicationId)}/?date=${encodeURIComponent(latest!.date)}`)}
+                  aria-current={input.current === "daily" && input.shell.publication.publicationId === publication.publicationId ? "page" : undefined}
+                >{publication.displayName}</a></li>)}
+              </ul>
+            </details>
+            : null}
+        {input.shell.todoEnabled && input.shell.todoHasFormalData
+          ? <a href={appPath(input.basePath, "/todo/")} aria-current={input.current === "todo" ? "page" : undefined}>Todo</a>
+          : null}
+        <a href={appPath(input.basePath, "/settings")} aria-current={input.current === "settings" ? "page" : undefined}>编辑部设置</a>
       </nav>
       <a className="m51-account" href={appPath(input.basePath, "/settings/account")} aria-label={`账户：${nickname}`}>
         <span aria-hidden="true">{[...nickname][0] ?? "你"}</span>

@@ -11,7 +11,7 @@ import {
   OnboardingPage,
   PublicPage,
 } from "./pages.js";
-import { DailyPage, HomePage, PublicationsPage, TodoPage } from "./reading-pages.js";
+import { DailyPage, HomePage, TodoPage } from "./reading-pages.js";
 import type { DailyReading, PublicationReadingSummary } from "../../modules/private-reading/service.js";
 import type { UserProfile } from "../../modules/identity/profile-service.js";
 import type { ManagedPublication, SiteManagementSnapshot } from "../../modules/site-management/service.js";
@@ -61,10 +61,6 @@ export function renderAgentConfirmPage(input: { basePath: string; shell: Reading
 
 export function renderHomePage(input: { basePath: string; shell: ReadingShell; daily: DailyReading | null; publications?: PublicationReadingSummary[]; todoProjection?: any }): string {
   return document(<HomePage {...input} publications={input.publications ?? []} />);
-}
-
-export function renderPublicationsPage(input: { basePath: string; shell: ReadingShell; publications: PublicationReadingSummary[] }): string {
-  return document(<PublicationsPage {...input} />);
 }
 
 export function renderDailyPage(input: { basePath: string; shell: ReadingShell; daily: DailyReading | null; dates?: string[]; requestedDate?: string }): string {

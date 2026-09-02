@@ -32,7 +32,7 @@ import {
   renderLoginPage,
   renderNicknameOnboardingPage,
   renderOnboardingPage,
-  renderPublicationsPage,
+  renderPublicationFormPage,
   renderPublicPage,
   renderTodoPage,
   renderSitesPage,
@@ -56,6 +56,7 @@ import {
   resolveTrustedExternalOrigin,
   verifySettingsCsrfToken,
 } from "../../.cloud-dist/src/web/settings-security.js";
+import { newPublicationId } from "../../.cloud-dist/src/web/site-settings.js";
 import { AgentRequestError } from "../../.cloud-dist/src/modules/agent-access/request-policy.js";
 import { AgentCredentialService } from "../../.cloud-dist/src/modules/agent-access/credential-service.js";
 import { AGENT_API_ROUTE_CONTRACT } from "../../.cloud-dist/src/protocols/http-api/routes.js";
@@ -161,7 +162,28 @@ test("cloud config loads explicit runtime values and loopback defaults", async (
   assert.equal(config.product.agentAccess.mcpRequestBodyLimitBytes, 262144);
 });
 
+test("new Publication addresses use six random lowercase hex characters and never reuse an existing id", () => {
+  const existing = new Set(["daily-000000", "daily-ffffff"]);
+  for (let index = 0; index < 64; index += 1) {
+    const publicationId = newPublicationId(existing);
+    assert.match(publicationId, /^daily-[a-f0-9]{6}$/);
+    assert.equal(existing.has(publicationId), false);
+    existing.add(publicationId);
+  }
+});
+
+test("removed Publication directory returns the standard not-found response", async () => {
+  const app = createCloudApp({ basePath: "/cloud", readinessCheck: async () => {} });
+  const response = await app.request("https://dailynews.test/cloud/publications/");
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "not_found" });
+});
+
 test("M5.1-B React reading renderers expose the fixed navigation, publication index, formal dates, sources, images, and inactive state", async () => {
+  const additional = [{
+    publication: { publicationId: "product-watch", displayName: "产品观察", status: "active", isDefault: false, sortOrder: 1, spaceId: "space" },
+    latest: { date: "2026-08-28", title: "第二份日报的正式主标题" },
+  }];
   const shell = {
     spaceName: "丁丁的编辑部",
     timeZone: "Asia/Shanghai",
@@ -169,12 +191,9 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
     theme: { id: "newspaper-default", revision: 1 },
     todoEnabled: true,
     todoHasFormalData: true,
+    readablePublications: [{ publication: { publicationId: "daily-news", displayName: "AI 日报", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" }, latest: { date: "2026-08-29", title: "首要日报" } }, ...additional],
     nickname: "丁丁",
   };
-  const additional = [{
-    publication: { publicationId: "product-watch", displayName: "产品观察", status: "active", isDefault: false, sortOrder: 1, spaceId: "space" },
-    latest: { date: "2026-08-28", title: "第二份日报的正式主标题" },
-  }];
   const home = renderHomePage({
     basePath: "/cloud",
     shell,
@@ -182,12 +201,12 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
     publications: additional,
     todoProjection: { homeItems: [{ id: "todo-a1b2c3d4", title: "正式待办", dueDate: null }] },
   });
-  const expectedNavigation = ["总览", "我的日报", "Todo", "编辑部设置"];
-  for (const [index, label] of expectedNavigation.entries()) {
-    const position = home.indexOf(`>${label}<`);
-    assert.ok(position > -1);
-    if (index > 0) assert.ok(position > home.indexOf(`>${expectedNavigation[index - 1]}<`));
-  }
+  assert.match(home, /<details class="m51-publication-switcher"><summary><span>日报<\/span>/);
+  assert.ok(home.indexOf(">总览<") < home.indexOf(">日报<"));
+  assert.ok(home.indexOf(">日报<") < home.indexOf(">Todo<"));
+  assert.ok(home.indexOf(">Todo<") < home.indexOf(">编辑部设置<"));
+  assert.match(home, /\/cloud\/p\/daily-news\/\?date=2026-08-29/);
+  assert.match(home, /\/cloud\/p\/product-watch\/\?date=2026-08-28/);
   assert.match(home, /产品观察/);
   assert.match(home, /第二份日报的正式主标题/);
   assert.match(home, /正式待办/);
@@ -196,16 +215,24 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(home, /\/cloud\/assets\/m5\/m5-client\.js/);
   assert.match(home, /\/cloud\/assets\/themes\/newspaper-default\/1\.css/);
   assert.doesNotMatch(home, /assets\/cloud\.css|assets\/private-pages\.js/);
+  assert.doesNotMatch(home, /\/publications\/|private-newsroom\.png/);
 
-  const directory = renderPublicationsPage({
+  const singleNavigation = renderHomePage({
     basePath: "/cloud",
-    shell,
-    publications: [{ publication: shell.publication, latest: null }, ...additional],
+    shell: { ...shell, readablePublications: shell.readablePublications.slice(0, 1) },
+    daily: null,
   });
-  assert.match(directory, /我的日报/);
-  assert.match(directory, /首要日报/);
-  assert.match(directory, /第一份正式日报还没有到达/);
-  assert.doesNotMatch(directory, /<form|配置日报|上移|下移/);
+  const singleNav = singleNavigation.match(/<nav class="m51-primary-nav"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+  assert.match(singleNav, /href="\/cloud\/p\/daily-news\/">日报<\/a>/);
+  assert.doesNotMatch(singleNav, /<details/);
+
+  const emptyNavigation = renderHomePage({
+    basePath: "/cloud",
+    shell: { ...shell, readablePublications: [] },
+    daily: null,
+  });
+  const emptyNav = emptyNavigation.match(/<nav class="m51-primary-nav"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+  assert.doesNotMatch(emptyNav, />日报<|<details/);
 
   const issue = {
     schemaVersion: 2,
@@ -236,6 +263,8 @@ test("M5.1-B React reading renderers expose the fixed navigation, publication in
   assert.match(dailyHtml, /m51-story--span-4/);
   assert.doesNotMatch(dailyHtml, /style="--(?:module-span|row-capacity)/);
   const darkDailyHtml = renderDailyPage({ basePath: "/cloud", shell: { ...shell, theme: { id: "midnight-tech", revision: 1, colorScheme: "dark" } }, daily });
+  assert.match(darkDailyHtml, /<details class="m51-publication-switcher" data-current="true"><summary><span>AI 日报<\/span>/);
+  assert.match(darkDailyHtml, /href="\/cloud\/p\/daily-news\/\?date=2026-08-29" aria-current="page"/);
   assert.match(darkDailyHtml, /<html lang="zh-CN" data-theme="dark" data-color-scheme="dark">/);
   assert.match(darkDailyHtml, /<meta name="color-scheme" content="dark"\s*\/>/);
   assert.match(dailyHtml, /referrerPolicy="no-referrer"/);
@@ -490,6 +519,7 @@ test("M5.1 first-use React journey stays API-first and keeps one-time secrets is
     theme: { id: "newspaper-default", revision: 1, colorScheme: "light" },
     todoEnabled: false,
     todoHasFormalData: false,
+    readablePublications: [],
     nickname: "丁丁",
   };
   const onboarding = renderOnboardingPage({
@@ -547,11 +577,13 @@ test("M5.1 public page and sample Home use the editorial React shell", () => {
     publication: { publicationId: "daily-news", displayName: "DailyNews", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
     theme: { id: "newspaper-default", revision: 1 },
     todoEnabled: false,
+    todoHasFormalData: false,
+    readablePublications: [],
   };
   const homeHtml = renderHomePage({ basePath: "/cloud", shell, daily: null });
   assert.match(homeHtml, /示例日报/);
   assert.match(homeHtml, /系统内置 · 不代表今日/);
-  assert.match(homeHtml, /设置自动日报/);
+  assert.doesNotMatch(homeHtml, /设置自动日报|把自动日报真正用起来|href="\/cloud\/onboarding"/);
   assert.doesNotMatch(homeHtml, /下次更新时间|负责 Agent|调度健康|迟到|Candidate/);
   assert.match(homeHtml, /data-theme-id="newspaper-default"/);
 
@@ -565,7 +597,7 @@ test("M5.1 public page and sample Home use the editorial React shell", () => {
     }],
     todoProjection: { homeItems: [{ id: "todo-a1b2c3d4", title: "完成验收", dueDate: "2026-09-02" }] },
   });
-  assert.match(homeWithMore, /m51-home-stage.*m51-home-illustration[^>]*><img[^>]*><\/div><\/div><section class="m51-home-index"/s);
+  assert.doesNotMatch(homeWithMore, /m51-home-stage|m51-home-illustration|private-newsroom\.png/);
   assert.match(homeWithMore, /m51-home-index.*m51-home-todo/s);
 });
 
@@ -576,6 +608,8 @@ test("M5.1-C React settings shell exposes exactly five sections and keeps nickna
     publication: { publicationId: "daily-news", displayName: "日报名称", status: "active", isDefault: true, sortOrder: 0, spaceId: "space" },
     theme: { id: "newspaper-default", revision: 1 },
     todoEnabled: false,
+    todoHasFormalData: false,
+    readablePublications: [],
     nickname: "丁丁",
   };
   const account = renderAccountSettingsPage({
@@ -610,6 +644,7 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
     theme: { id: "newspaper-default", revision: 1, colorScheme: "light" },
     todoEnabled: false,
     todoHasFormalData: false,
+    readablePublications: [],
     nickname: "丁丁",
   };
   const themes = [
@@ -635,6 +670,10 @@ test("M5.1-C site and theme renderers preserve real forms while replacing placeh
   assert.match(sites, /三条与你有关的更新/);
   assert.doesNotMatch(sites, /<i><\/i><b><\/b><em><\/em><small><\/small>/);
   assert.doesNotMatch(sites, /assets\/cloud\.css|assets\/private-pages\.js/);
+
+  const submittedId = "kept-after-validation";
+  const form = renderPublicationFormPage({ basePath: "/cloud", shell, themes, csrfToken: "csrf-placeholder", mode: "new", publicationId: submittedId, name: "保留名称", error: "请检查输入。" });
+  assert.match(form, new RegExp(`name="publicationId" value="${submittedId}"`));
 
   const catalog = renderThemeCatalogPage({ basePath: "/cloud", shell, themes });
   assert.match(catalog, /经典报纸/);

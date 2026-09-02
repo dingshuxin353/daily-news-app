@@ -193,12 +193,13 @@ button:active:not(:disabled) {
   width: 100%;
   display: flex;
   gap: var(--m51-space-5);
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: visible;
   border-block-start: var(--m51-rule-width) solid var(--m51-rule-soft);
-  scrollbar-width: thin;
 }
 
-.m51-primary-nav a {
+.m51-primary-nav > a,
+.m51-publication-switcher > summary {
   min-height: 2.75rem;
   display: inline-flex;
   flex: none;
@@ -210,10 +211,62 @@ button:active:not(:disabled) {
   white-space: nowrap;
 }
 
-.m51-primary-nav a[aria-current="page"] {
+.m51-primary-nav > a[aria-current="page"],
+.m51-publication-switcher[data-current="true"] > summary {
   border-color: var(--m51-orange);
   color: var(--m51-ink);
   font-weight: 700;
+}
+
+.m51-publication-switcher {
+  position: relative;
+  flex: none;
+}
+
+.m51-publication-switcher > summary {
+  gap: var(--m51-space-1);
+  cursor: pointer;
+  list-style: none;
+}
+
+.m51-publication-switcher > summary::-webkit-details-marker {
+  display: none;
+}
+
+.m51-publication-switcher > summary span {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m51-publication-switcher[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.m51-publication-switcher ul {
+  position: absolute;
+  z-index: 10;
+  inset-block-start: calc(100% - 1px);
+  inset-inline-start: 0;
+  width: min(18rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: var(--m51-space-2);
+  border: var(--m51-rule-width) solid var(--m51-rule);
+  background: var(--m51-paper-raised);
+  list-style: none;
+}
+
+.m51-publication-switcher li a {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  padding-inline: var(--m51-space-3);
+  color: var(--m51-ink);
+  text-decoration: none;
+}
+
+.m51-publication-switcher li a:is(:hover, :focus-visible, [aria-current="page"]) {
+  background: var(--m51-paper-deep);
 }
 
 .m51-account {
@@ -1353,7 +1406,8 @@ body[data-page="login"] .m51-public-header p {
     border-block-start: 0;
   }
 
-  .m51-primary-nav a {
+  .m51-primary-nav > a,
+  .m51-publication-switcher > summary {
     min-height: auto;
   }
 
