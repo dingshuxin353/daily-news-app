@@ -93,26 +93,30 @@ function PublicationCard(input: {
   const theme = input.themes.find((item) => item.themeId === effectiveThemeId);
   if (!theme) throw new Error("effective browser theme is unavailable");
   const routeId = encodeURIComponent(publication.publicationId);
+  const status = publication.isPrimary ? "首要日报" : active ? null : "已停用";
   return <article className={active ? "m51-site-card" : "m51-site-card is-inactive"} id={`site-${routeId}`} tabIndex={-1}>
     <header>
-      <div><p className="m51-kicker">{publication.isPrimary ? "首要日报" : active ? "启用中" : "已停用"}</p><h3>{publication.name}</h3></div>
-      <code>{`/p/${publication.publicationId}/`}</code>
+      <div>{status ? <p className="m51-kicker">{status}</p> : null}<h3>{publication.name}</h3></div>
     </header>
-    <ThemePreview theme={theme} compact />
-    <p>{publication.theme.mode === "inherit" ? `跟随 Home · ${theme.name}` : `独立主题 · ${theme.name}`}</p>
-    <div className="m51-site-actions">
-      <Button className="m51-button" label="设置" variant="secondary" size="md" href={appPath(input.basePath, `/settings/sites/${routeId}`)} />
-      <a className="m51-text-link" href={appPath(input.basePath, `/p/${routeId}/`)}>查看 <IconExternalLink size={16} aria-hidden="true" /></a>
-      {active ? <>
-        <form method="post" action={appPath(input.basePath, `/settings/sites/${routeId}/move`)}>
-          <input type="hidden" name="_csrf" value={input.csrfToken} /><input type="hidden" name="direction" value="up" />
-          <button className="m51-icon-button" type="submit" aria-label={`上移 ${publication.name}`} disabled={input.index === 0}><IconArrowUp size={18} aria-hidden="true" /></button>
-        </form>
-        <form method="post" action={appPath(input.basePath, `/settings/sites/${routeId}/move`)}>
-          <input type="hidden" name="_csrf" value={input.csrfToken} /><input type="hidden" name="direction" value="down" />
-          <button className="m51-icon-button" type="submit" aria-label={`下移 ${publication.name}`} disabled={input.index === input.total - 1}><IconArrowDown size={18} aria-hidden="true" /></button>
-        </form>
-      </> : null}
+    <div className="m51-site-meta">
+      <code>{`/p/${publication.publicationId}/`}</code>
+      <p>{publication.theme.mode === "inherit" ? `跟随 Home · ${theme.name}` : `独立主题 · ${theme.name}`}</p>
+    </div>
+    <div className="m51-site-controls">
+      <div className="m51-site-actions" role="group" aria-label={`${publication.name} 站点操作`}>
+        <Button className="m51-button" label="设置" variant="secondary" size="md" href={appPath(input.basePath, `/settings/sites/${routeId}`)} />
+        <a className="m51-text-link" href={appPath(input.basePath, `/p/${routeId}/`)}>查看 <IconExternalLink size={16} aria-hidden="true" /></a>
+      </div>
+      {active ? <div className="m51-site-sort" role="group" aria-label={`${publication.name} 排序`}>
+          <form method="post" action={appPath(input.basePath, `/settings/sites/${routeId}/move`)}>
+            <input type="hidden" name="_csrf" value={input.csrfToken} /><input type="hidden" name="direction" value="up" />
+            <button className="m51-icon-button" type="submit" aria-label={`上移 ${publication.name}`} disabled={input.index === 0}><IconArrowUp size={18} aria-hidden="true" /></button>
+          </form>
+          <form method="post" action={appPath(input.basePath, `/settings/sites/${routeId}/move`)}>
+            <input type="hidden" name="_csrf" value={input.csrfToken} /><input type="hidden" name="direction" value="down" />
+            <button className="m51-icon-button" type="submit" aria-label={`下移 ${publication.name}`} disabled={input.index === input.total - 1}><IconArrowDown size={18} aria-hidden="true" /></button>
+          </form>
+        </div> : null}
     </div>
   </article>;
 }
@@ -148,15 +152,14 @@ export function SitesPage(input: {
       <p className="m51-kicker">站点已创建</p><h2 id="created-title">把下一步交给已有 Agent</h2>
       <div data-react-island="copy-instruction" data-copy-text={instruction}><CopyInstructionIsland text={instruction} /></div>
     </section> : null}
-    <section className="m51-settings-section m51-home-setting">
-      <div><p className="m51-kicker">固定入口</p><h2>{input.snapshot.home.name}</h2><code>/home</code></div>
-      <div className="m51-site-theme"><ThemePreview theme={homeTheme} compact /><p>{homeTheme.name}</p></div>
-      <div className="m51-site-actions"><Button className="m51-button" label="设置 Home" variant="secondary" size="md" href={appPath(input.basePath, "/settings/sites/home")} /><a className="m51-text-link" href={appPath(input.basePath, "/home")}>查看 <IconExternalLink size={16} aria-hidden="true" /></a></div>
+    <section className="m51-settings-section m51-site-card m51-home-setting">
+      <header><div><p className="m51-kicker">固定入口</p><h2>{input.snapshot.home.name}</h2></div></header>
+      <div className="m51-site-meta"><code>/home</code><p>{`Home 主题 · ${homeTheme.name}`}</p></div>
+      <div className="m51-site-controls"><div className="m51-site-actions" role="group" aria-label="Home 站点操作"><Button className="m51-button" label="设置 Home" variant="secondary" size="md" href={appPath(input.basePath, "/settings/sites/home")} /><a className="m51-text-link" href={appPath(input.basePath, "/home")}>查看 <IconExternalLink size={16} aria-hidden="true" /></a></div></div>
     </section>
     <section className="m51-settings-section">
-      <div className="m51-section-heading"><div><p className="m51-kicker">启用中</p><h2>日报列表</h2></div><span>{input.snapshot.publications.length} / {input.publicationLimit}</span></div>
+      <div className="m51-section-heading m51-site-list-heading"><div><p className="m51-kicker">启用中</p><h2>日报列表</h2></div><div className="m51-section-heading-actions"><span>{input.snapshot.publications.length} / {input.publicationLimit}</span>{atLimit ? <p className="m51-field-message">已达到日报数量上限；停用的日报也会计入。</p> : <Button className="m51-button" label="新建日报站点" variant="primary" size="lg" href={appPath(input.basePath, "/settings/sites/new")} icon={<IconPlus size={17} aria-hidden="true" />} />}</div></div>
       <div className="m51-site-list">{active.map((publication, index) => <PublicationCard key={publication.publicationId} basePath={input.basePath} publication={publication} csrfToken={input.csrfToken} index={index} total={active.length} themes={input.themes} homeThemeId={input.snapshot.home.themeId} />)}</div>
-      {atLimit ? <p className="m51-field-message">已达到日报数量上限；停用的日报也会计入。</p> : <Button className="m51-button" label="新建日报站点" variant="primary" size="lg" href={appPath(input.basePath, "/settings/sites/new")} icon={<IconPlus size={17} aria-hidden="true" />} />}
     </section>
     {inactive.length ? <section className="m51-settings-section">
       <p className="m51-kicker">保留内容</p><h2>已停用</h2><p className="m51-section-copy">停用项不能接收新写入，但已有日报仍可阅读。</p>

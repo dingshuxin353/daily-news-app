@@ -26,7 +26,7 @@
   --m51-type-section-title: clamp(1.45rem, 5vw, 2rem);
   --m51-type-page-title: clamp(2.25rem, 9vw, 4.75rem);
   --m51-type-brand-title: clamp(1.5rem, 2vw, 1.8rem);
-  --m51-type-display-title: clamp(3.125rem, 8vw, 6.5rem);
+  --m51-type-display-title: clamp(3.125rem, 6vw, 5.25rem);
 
   --m51-space-1: 0.25rem;
   --m51-space-2: 0.5rem;
