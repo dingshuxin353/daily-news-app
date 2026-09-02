@@ -158,12 +158,8 @@ export function HomePage(
   const [lead, ...digest] = modules;
   const leadItem = lead?.item ?? {};
   const href = input.daily
-    ? readingHref(
-      input.basePath,
-      input.shell.publication.publicationId,
-      input.daily.date,
-    )
-    : appPath(input.basePath, "/onboarding");
+    ? readingHref(input.basePath, input.shell.publication.publicationId, input.daily.date)
+    : null;
   const todoItems = input.todoProjection?.homeItems ?? [];
   return (
     <PageDocument
@@ -180,8 +176,7 @@ export function HomePage(
         data-theme-id={input.shell.theme.id}
         data-theme-revision={input.shell.theme.revision}
       >
-        <div className="m51-home-stage">
-          <div className="m51-home-grid">
+        <div className="m51-home-grid">
             <section className="m51-home-lead" aria-labelledby="home-title">
               <p className="m51-reading-meta">
                 {input.daily?.date ?? "系统内置 · 不代表今日"}
@@ -198,10 +193,7 @@ export function HomePage(
                 {leadItem.summary ?? leadItem.brief ??
                   "连接 Agent 后，这里会显示第一份个性化正式日报。"}
               </p>
-              <a className="m51-reading-link" href={href}>
-                {input.daily ? "阅读完整日报" : "设置自动日报"}
-                <IconArrowNarrowRight size={18} aria-hidden="true" />
-              </a>
+              {href ? <a className="m51-reading-link" href={href}>阅读完整日报<IconArrowNarrowRight size={18} aria-hidden="true" /></a> : null}
             </section>
             <section className="m51-home-digest" aria-labelledby="digest-title">
               <header>
@@ -211,7 +203,7 @@ export function HomePage(
                     {input.daily?.date ?? "系统示例"} · {modules.length} 条内容
                   </p>
                 </div>
-                <a href={href}>阅读完整日报</a>
+                {href ? <a href={href}>阅读完整日报</a> : null}
               </header>
               <ol>
                 {digest.map((module, index) => (
@@ -237,26 +229,9 @@ export function HomePage(
                       : "等待第一份正式日报"}
                   </p>
                 </div>
-                <a
-                  className="m51-reading-link"
-                  href={appPath(input.basePath, "/publications/")}
-                >
-                  查看我的日报<IconArrowNarrowRight
-                    size={17}
-                    aria-hidden="true"
-                  />
-                </a>
+                {href ? <a className="m51-reading-link" href={href}>打开首要日报<IconArrowNarrowRight size={17} aria-hidden="true" /></a> : null}
               </div>
             </section>
-          </div>
-          <div className="m51-home-illustration" aria-hidden="true">
-            <img
-              src={appPath(input.basePath, "/assets/private-newsroom.png")}
-              alt=""
-              width="1400"
-              height="466"
-            />
-          </div>
         </div>
         {input.publications.length > 0
           ? (
@@ -303,55 +278,6 @@ export function HomePage(
             </section>
           )
           : null}
-        {!input.daily
-          ? (
-            <a
-              className="m51-secondary-journey"
-              href={appPath(input.basePath, "/onboarding")}
-            >
-              把自动日报真正用起来<IconArrowNarrowRight
-                size={17}
-                aria-hidden="true"
-              />
-            </a>
-          )
-          : null}
-      </main>
-    </PageDocument>
-  );
-}
-
-export function PublicationsPage(
-  input: {
-    basePath: string;
-    shell: ReadingShell;
-    publications: PublicationReadingSummary[];
-  },
-) {
-  return (
-    <PageDocument
-      basePath={input.basePath}
-      title="我的日报"
-      page="publications"
-      shell={input.shell}
-      current="publications"
-      readingTheme
-    >
-      <main
-        className="m51-directory"
-        id="content"
-        data-theme-id={input.shell.theme.id}
-        data-theme-revision={input.shell.theme.revision}
-      >
-        <header>
-          <p className="m51-kicker">私人阅读目录</p>
-          <h1>我的日报</h1>
-          <p>按编辑顺序查看正在使用的日报。这里没有创建、排序或停用操作。</p>
-        </header>
-        <PublicationIndex
-          basePath={input.basePath}
-          summaries={input.publications}
-        />
       </main>
     </PageDocument>
   );
@@ -529,7 +455,7 @@ export function DailyPage(
         title={title}
         page="daily"
         shell={input.shell}
-        current="publications"
+        current="daily"
         readingTheme
       >
         <main className="m51-reading-empty" id="content">
@@ -546,7 +472,7 @@ export function DailyPage(
           <p>
             {input.requestedDate
               ? `日期 ${input.requestedDate} 没有正式内容，DailyNews 没有替你回退到其他日期。`
-              : "这份日报会在第一份正式内容到达后出现在阅读目录中。"}
+              : "这份日报会在第一份正式内容到达后出现在顶部切换器中。"}
           </p>
           <a
             className="m51-reading-link"
@@ -556,9 +482,9 @@ export function DailyPage(
                 input.shell.publication.publicationId,
                 latest,
               )
-              : appPath(input.basePath, "/publications/")}
+              : appPath(input.basePath, "/home")}
           >
-            {latest ? `阅读最近一期 · ${latest}` : "返回我的日报"}
+            {latest ? `阅读最近一期 · ${latest}` : "返回总览"}
             <IconArrowNarrowRight size={17} aria-hidden="true" />
           </a>
         </main>
@@ -573,7 +499,7 @@ export function DailyPage(
       title={title}
       page="daily"
       shell={input.shell}
-      current="publications"
+      current="daily"
       readingTheme
     >
       <main

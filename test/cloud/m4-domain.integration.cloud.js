@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { createFileThemeStorage } from "../../scripts/lib/storage/file-theme.js";
+import { compileIssue } from "../../scripts/lib/compiler.js";
 import { runMigrations } from "../../.cloud-dist/src/adapters/postgres/migrations.js";
 import { PostgresSiteManagementRepository } from "../../.cloud-dist/src/adapters/postgres/site-management.js";
 import { createPostgresThemeStorage } from "../../.cloud-dist/src/adapters/postgres/theme.js";
@@ -13,6 +14,7 @@ import { PostgresTenancyStore } from "../../.cloud-dist/src/adapters/postgres/te
 import { ProfileError, UserProfileService } from "../../.cloud-dist/src/modules/identity/profile-service.js";
 import { SiteManagementError, SiteManagementService } from "../../.cloud-dist/src/modules/site-management/service.js";
 import { SiteThemeCatalogService } from "../../.cloud-dist/src/modules/site-management/theme-catalog.js";
+import { PrivateReadingService } from "../../.cloud-dist/src/modules/private-reading/service.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationsDirectory = path.join(projectRoot, "db", "migrations");
@@ -72,6 +74,46 @@ async function insertCustomTheme(spaceId, themeId, revisions, currentRevision = 
      VALUES ($1, $2, $3, $4)`,
     [spaceId, themeId, `Theme ${themeId}`, currentRevision],
   );
+}
+
+async function insertFormalDaily(spaceId, publicationId, date, title) {
+  const issue = {
+    schemaVersion: 2,
+    date,
+    generatedAt: `${date}T08:00:00+08:00`,
+    coverage: { start: `${date}T00:00:00+08:00`, end: `${date}T08:00:00+08:00` },
+    revision: 1,
+    items: [{
+      id: `${publicationId}-item`,
+      title,
+      brief: "测试摘要",
+      summary: "用于验证正式日报切换器的数据来源。",
+      category: "测试",
+      editorial: { priority: "lead", selectionReason: "集成验收" },
+      sources: [{ name: "测试来源", url: "https://example.test/source" }],
+    }],
+  };
+  const compiled = compileIssue(issue).compiled;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO app.issues (space_id, publication_id, issue_date, revision, issue_payload)
+       VALUES ($1, $2, $3::date, 1, $4::jsonb)`,
+      [spaceId, publicationId, date, JSON.stringify(issue)],
+    );
+    await client.query(
+      `INSERT INTO app.compiled_editions (space_id, publication_id, issue_date, revision, compiled_payload)
+       VALUES ($1, $2, $3::date, 1, $4::jsonb)`,
+      [spaceId, publicationId, date, JSON.stringify(compiled)],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 beforeEach(resetAndMigrate);
@@ -157,6 +199,26 @@ test("Publication management derives one primary from active order and enforces 
     () => sites.setPublicationStatus(tenant, "site-7", "inactive"),
     (error) => error instanceof SiteManagementError && error.code === "SITE_LAST_ACTIVE",
   );
+});
+
+test("private shells derive the Daily switcher from active Publications with formal content in settings order", async () => {
+  const tenant = await createTenant("m52-reading-switcher-user");
+  await sites.createPublication(tenant, { publicationId: "empty-site", name: "Empty", theme: { mode: "inherit" } });
+  await sites.createPublication(tenant, { publicationId: "second-site", name: "Second", theme: { mode: "inherit" } });
+  await insertFormalDaily(tenant.spaceId, "daily-news", "2026-09-01", "Primary formal issue");
+  await insertFormalDaily(tenant.spaceId, "second-site", "2026-09-02", "Second formal issue");
+
+  const reading = new PrivateReadingService(pool, tenancy, systemThemes);
+  const shell = await reading.readShell(tenant);
+  assert.deepEqual(shell.readablePublications.map(({ publication }) => publication.publicationId), ["daily-news", "second-site"]);
+  assert.deepEqual(shell.readablePublications.map(({ latest }) => latest?.date), ["2026-09-01", "2026-09-02"]);
+  assert.deepEqual((await reading.readHome(tenant)).publications.map(({ publication }) => publication.publicationId), ["second-site"]);
+
+  await sites.setPublicationStatus(tenant, "second-site", "inactive");
+  assert.deepEqual((await reading.readShell(tenant)).readablePublications.map(({ publication }) => publication.publicationId), ["daily-news"]);
+  const archivedShell = await reading.readPublicationShell(tenant, "second-site");
+  assert.equal(archivedShell?.publication.status, "inactive");
+  assert.deepEqual(archivedShell?.readablePublications.map(({ publication }) => publication.publicationId), ["daily-news"]);
 });
 
 test("Publication create serializes conflicts and rolls every dependent row back on failure", async () => {

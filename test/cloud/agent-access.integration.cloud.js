@@ -212,6 +212,30 @@ test("new users reach onboarding without implicit Token creation and see only th
   assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.agent_credentials")).rows[0].count, 0);
 });
 
+test("new Publication form proposes a random available address once and preserves submitted input after validation", async () => {
+  const harness = createHarness();
+  const cookie = await signIn(harness, "new-publication@example.test");
+  const page = await getSettings(harness, "/settings/sites/new", cookie, "text/html");
+  assert.equal(page.response.status, 200);
+  const html = await page.response.text();
+  const csrfToken = html.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  const generatedId = html.match(/name="publicationId" value="(daily-[a-f0-9]{6})"/)?.[1];
+  assert.ok(csrfToken);
+  assert.ok(generatedId);
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.publications WHERE publication_id = $1", [generatedId])).rows[0].count, 0);
+
+  const submittedId = "keep-this-address";
+  const rejected = await post(harness.app, "/settings/sites/new", {
+    _csrf: csrfToken,
+    name: "",
+    publicationId: submittedId,
+    themeMode: "inherit",
+  }, { cookie });
+  assert.equal(rejected.status, 400);
+  assert.match(await rejected.text(), new RegExp(`name="publicationId" value="${submittedId}"`));
+  assert.equal((await controlPool.query("SELECT count(*)::integer AS count FROM app.publications WHERE publication_id = $1", [submittedId])).rows[0].count, 0);
+});
+
 test("explicit browser submission creates one active Token, returns plaintext once, and stores only its digest", async () => {
   const harness = createHarness();
   const cookie = await signIn(harness, "create-token@example.test");
@@ -307,6 +331,7 @@ test("Agent authorization is the only Token management page and all retired rout
   assert.doesNotMatch(advancedHtml, /<form[\s\S]*创建.*Token/);
 
   for (const pathname of [
+    "/publications/",
     "/.well-known/dailynews-agent-setup.json",
     "/agent-pairing/v1/claim",
     "/agent-pairing/v1/verify",

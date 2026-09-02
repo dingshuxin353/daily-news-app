@@ -1,7 +1,7 @@
 /* Hallmark · macrostructure: Ecosystem Index + Editorial Reading Flow (knobs: asymmetric lead/digest, numbered publication index, continuous compiled edition) · theme: Editorial Newsroom Studio · palette: runtime theme across the complete reading shell · contrast: pass (40–41) · nav: N3 masthead rail · footer: Ft1 statement · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) {
+body:is([data-page="home"], [data-page="daily"], [data-page="todo"]) {
   --m51-reading-bg: var(--color-background, var(--m51-paper));
   --m51-reading-ink: var(--color-text, var(--m51-ink));
   --m51-reading-muted: var(--color-muted, var(--m51-muted));
@@ -10,7 +10,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   background: var(--m51-reading-bg);
 }
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) [data-astryx-theme="neutral"] {
+body:is([data-page="home"], [data-page="daily"], [data-page="todo"]) [data-astryx-theme="neutral"] {
   --m51-paper: var(--m51-reading-bg);
   --m51-paper-deep: color-mix(in srgb, var(--m51-reading-bg) 88%, var(--m51-reading-ink));
   --m51-paper-raised: var(--m51-reading-bg);
@@ -37,7 +37,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 }
 
 .m51-home,
-.m51-directory,
 .m51-daily,
 .m51-todo,
 .m51-reading-empty {
@@ -46,21 +45,20 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   color: var(--m51-reading-ink);
 }
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) :is(.m51-product-header, .m51-footer) {
+body:is([data-page="home"], [data-page="daily"], [data-page="todo"]) :is(.m51-product-header, .m51-footer) {
   border-color: var(--m51-reading-rule);
   background: var(--m51-reading-bg);
 }
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-product-header {
+body:is([data-page="home"], [data-page="daily"], [data-page="todo"]) .m51-product-header {
   color: var(--m51-reading-ink);
 }
 
-body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [data-page="todo"]) .m51-footer {
+body:is([data-page="home"], [data-page="daily"], [data-page="todo"]) .m51-footer {
   color: var(--m51-reading-muted);
 }
 
 .m51-home .m51-kicker,
-.m51-directory .m51-kicker,
 .m51-daily .m51-kicker,
 .m51-todo .m51-kicker,
 .m51-reading-empty .m51-kicker {
@@ -69,8 +67,7 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home,
 .m51-daily,
-.m51-todo,
-.m51-directory {
+.m51-todo {
   background: var(--m51-reading-bg);
 }
 
@@ -102,12 +99,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 .m51-home {
   padding-block: var(--m51-space-8) var(--m51-space-12);
-}
-
-.m51-home-stage {
-  position: relative;
-  min-height: calc(100vh - 6.9375rem);
-  overflow: hidden;
 }
 
 .m51-home-grid {
@@ -256,18 +247,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
   font-size: var(--m51-type-meta);
 }
 
-.m51-home-illustration {
-  position: absolute;
-  inset-inline: 6% 5%;
-  inset-block-end: -1.25rem;
-  pointer-events: none;
-}
-
-.m51-home-illustration img {
-  width: 100%;
-  height: auto;
-}
-
 .m51-home-index,
 .m51-home-todo {
   margin-block-start: var(--m51-space-12);
@@ -316,35 +295,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 .m51-home-todo > ol span {
   color: var(--m51-reading-muted);
   font-size: var(--m51-type-meta);
-}
-
-.m51-secondary-journey {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--m51-space-2);
-  margin-block-start: var(--m51-space-10);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.m51-directory {
-  padding-block: var(--m51-space-10) var(--m51-space-16);
-}
-
-.m51-directory > header {
-  max-width: 58rem;
-  padding-block-end: var(--m51-space-8);
-  border-block-end: 2px solid var(--m51-reading-ink);
-}
-
-.m51-directory > header h1 {
-  margin-block-end: var(--m51-space-5);
-}
-
-.m51-directory > header > p:last-child {
-  max-width: 58ch;
-  margin: 0;
-  color: var(--m51-reading-muted);
 }
 
 .m51-daily {
@@ -666,7 +616,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
 @media (min-width: 51.25rem) {
   .m51-home,
-  .m51-directory,
   .m51-daily,
   .m51-todo,
   .m51-reading-empty {
@@ -677,11 +626,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
     grid-template-columns: minmax(20rem, 30rem) minmax(28rem, 38.75rem);
     gap: 2.625rem;
     margin-inline-start: 0.75rem;
-  }
-
-  .m51-home-lead,
-  .m51-home-digest {
-    padding-block-end: 12.8125rem;
   }
 
   .m51-home-lead h1 {
@@ -739,26 +683,6 @@ body:is([data-page="home"], [data-page="publications"], [data-page="daily"], [da
 
   .m51-home-primary {
     padding-inline-start: calc(2rem + var(--m51-space-4));
-  }
-
-  .m51-home-illustration {
-    position: static;
-    margin-inline: -1rem;
-    width: calc(100% + 2rem);
-    overflow: hidden;
-  }
-
-  .m51-home-stage {
-    min-height: 0;
-    overflow: visible;
-  }
-
-  .m51-home-illustration img {
-    width: 170%;
-    max-width: none;
-    height: 4.75rem;
-    object-fit: cover;
-    object-position: center bottom;
   }
 
   .m51-date-nav {

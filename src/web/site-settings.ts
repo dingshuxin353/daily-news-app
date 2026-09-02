@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { type Context, type Hono } from "hono";
 import type { IdentityService } from "../modules/identity/auth.js";
 import { ProfileError, type UserProfileService } from "../modules/identity/profile-service.js";
@@ -86,6 +87,14 @@ function publicationTheme(body: Record<string, unknown>): { mode: "inherit" } | 
   return { mode: "override", themeId: "" };
 }
 
+export function newPublicationId(existingIds: Iterable<string>): string {
+  const existing = new Set(existingIds);
+  let publicationId: string;
+  do publicationId = `daily-${randomBytes(3).toString("hex")}`;
+  while (existing.has(publicationId));
+  return publicationId;
+}
+
 export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettingsDependencies): void {
   const route = (pathname: string) => path(dependencies.basePath, pathname);
 
@@ -140,7 +149,7 @@ export function registerSiteSettingsRoutes(app: Hono, dependencies: SiteSettings
   });
 
   app.get(route("/settings/sites/new"), async (context) => {
-    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); if (data.snapshot.publications.length >= dependencies.publicationLimit) return context.html(renderPublicationLimitPage({ basePath: dependencies.basePath, shell: data.shell, publicationLimit: dependencies.publicationLimit }), 409); return context.html(renderPublicationFormPage({ basePath: dependencies.basePath, shell: data.shell, themes: data.themes, csrfToken: access.csrfToken, mode: "new" })); }
+    try { const access = await browserAccess(context); if (access instanceof Response) return access; const data = await baseData(access); if (data.snapshot.publications.length >= dependencies.publicationLimit) return context.html(renderPublicationLimitPage({ basePath: dependencies.basePath, shell: data.shell, publicationLimit: dependencies.publicationLimit }), 409); return context.html(renderPublicationFormPage({ basePath: dependencies.basePath, shell: data.shell, themes: data.themes, csrfToken: access.csrfToken, mode: "new", publicationId: newPublicationId(data.snapshot.publications.map(({ publicationId }) => publicationId)) })); }
     catch { return context.text("服务暂时不可用，请稍后重试。", 503); }
   });
 

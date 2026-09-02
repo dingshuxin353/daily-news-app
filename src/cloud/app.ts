@@ -21,7 +21,6 @@ import {
   renderLoginPage,
   renderNicknameOnboardingPage,
   renderOnboardingPage,
-  renderPublicationsPage,
   renderPublicPage,
   renderTodoPage,
 } from "../web/react/render.js";
@@ -112,7 +111,6 @@ function safeReturnTo(raw: string | undefined, basePath: string): { path: string
     ? url.pathname.slice(basePath.length) || "/"
     : url.pathname;
   if (localPath === "/home") return { path: `${basePath}/home`, label: "私人日报总览" };
-  if (localPath === "/publications/") return { path: `${basePath}/publications/`, label: "我的日报" };
   if (localPath === "/todo/") {
     if (url.hash && !/^#todo-[a-f0-9]{8}$/.test(url.hash)) return null;
     return { path: `${basePath}/todo/${url.hash}`, label: "个人待办" };
@@ -380,22 +378,6 @@ export function createCloudApp(dependencies: CloudAppDependencies): Hono {
           daily: reading.daily,
           publications: reading.publications,
           todoProjection: reading.todoProjection,
-        }));
-      } catch {
-        return context.text("服务暂时不可用，请稍后重试。", 503);
-      }
-    });
-
-    app.get(route("/publications/"), async (context) => {
-      try {
-        const access = await requirePrivateAccess(context);
-        if (access instanceof Response) return access;
-        if (!dependencies.privateReading) return context.text("服务暂时不可用，请稍后重试。", 503);
-        const reading = await dependencies.privateReading.readPublicationDirectory(access.tenant);
-        return context.html(renderPublicationsPage({
-          basePath: dependencies.basePath,
-          shell: reading.shell,
-          publications: reading.publications,
         }));
       } catch {
         return context.text("服务暂时不可用，请稍后重试。", 503);
