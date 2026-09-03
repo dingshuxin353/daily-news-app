@@ -181,6 +181,10 @@ curl --fail --silent --show-error --output /dev/null "$PROD_ORIGIN/login"
 
 对象存储供应商、目标、认证方式和官方上传 / 删除命令必须先写入私有部署记录。信息未确定时不得用本机目录、同服务器目录或测试 Bucket 冒充站外备份。
 
+生产机的备份入口固定为 `/usr/local/sbin/dailynews-backup`、`dailynews-backup.service` 和 `dailynews-backup.timer`。timer 每日执行一次并启用 `Persistent=true`；service 使用不可登录的 `dailynews_backup` 账户，systemd 从 Root-only 环境文件读取非公开参数，并通过 `LoadCredential` 只在任务运行期间提供 COSCLI 配置。脚本不使用 `/lhcos-data`；远端对象回下载并通过 SHA-256 后才上传同名 `.sha256` 成功标记，保留期只统计同时存在数据与成功标记的最近 7 组。
+
+手工验证使用 `systemctl start dailynews-backup.service`，结果从 unit 退出状态与 journald 读回。timer 失败接入腾讯云通知渠道前仍是生产开放阻断，不能把 unit 返回非零本身冒充告警送达。
+
 正式开放前，在临时隔离数据库执行一次恢复：
 
 1. 下载最新已验证备份并复核 SHA-256。
@@ -190,6 +194,8 @@ curl --fail --silent --show-error --output /dev/null "$PROD_ORIGIN/login"
 5. 取得恢复演练授权后删除临时数据库和本地备份文件。
 
 恢复失败会阻断开放；不能以 `pg_dump` 成功代替恢复证明。
+
+空生产库阶段允许先用最新备份完成一次隔离恢复，以验证 COS 下载、SHA-256、`pg_restore` 和清理链路；由于此时尚无 Migration 或核心表，该证据不替代正式开放前的 Migration 与核心表恢复核对。
 
 ## 8. 腾讯云基础告警
 
