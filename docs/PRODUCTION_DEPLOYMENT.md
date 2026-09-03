@@ -71,7 +71,7 @@ psql --version
 
 ## 4. 生产环境准备合同
 
-M6-B 获得授权后，按 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md) 的部署账户 / 服务账户分离、release 外稳定 Node.js 22 runtime、外置 `0600` 环境文件和回环监听方式准备机器。生产必须另外满足：
+M6-B 获得授权后，按 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md) 的部署账户 / 服务账户分离、release 外稳定 Node.js 22 runtime、不可变 release 和回环监听方式准备机器。生产环境文件使用唯一明确合同：`root:dailynews 0640`，由 Root 管理、服务组只读。生产必须另外满足：
 
 - 服务账户只能读取 Node.js runtime、当前 release 和环境文件；不能登录、构建或修改 release。
 - PostgreSQL 使用独立最小权限应用角色和独立备份角色；数据库与角色均为生产专用。
@@ -85,6 +85,9 @@ M6-B 获得授权后，按 [`TEST_DEPLOYMENT.md`](./TEST_DEPLOYMENT.md) 的部�
 不得输出整个环境。完成候选构建后，由服务账户执行下面的失败关闭校验，只输出固定结果：
 
 ```bash
+test "$(stat -c '%U:%G %a' "$PROD_ENV_FILE")" = "root:dailynews 640"
+runuser -u "$PROD_SERVICE_USER" -- test -r "$PROD_ENV_FILE"
+runuser -u "$PROD_SERVICE_USER" -- test ! -w "$PROD_ENV_FILE"
 runuser -u "$PROD_SERVICE_USER" -- env \
   PATH="$PROD_RUNTIME_PATH" \
   PROD_ENV_FILE="$PROD_ENV_FILE" \
